@@ -1,0 +1,8 @@
+pandas
+streamlit
+bibtexparser
+rispy
+openpyxl
+plotly
+groq
+python-dotenv

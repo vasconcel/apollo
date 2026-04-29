@@ -1,0 +1,82 @@
+{
+  "project_name": "My MLR Project",
+  "description": "Multivocal Literature Review project using AIMS pipeline",
+
+  "research_questions": [
+    "RQ1: What are the relevant studies on [TOPIC]?",
+    "RQ2: How do the studies address [TOPIC] in terms of methodology?",
+    "RQ3: What are the main findings and gaps?"
+  ],
+
+  "inclusion_criteria": {
+    "IC1": "Relevante: Artigo aborda Recruitment ou Selection em contexto de Software Engineering",
+    "IC2": "Empirical: Estudo empírico (survey, case study, experiment, etc.)",
+    "IC3": "Peer-reviewed: Publicação em venue revisado por pares",
+    "IC4": "Full text disponível: Texto completo disponível",
+    "IC5": "Contribuição método: Proposta de método/framework/tool para R&S em SE"
+  },
+
+  "exclusion_criteria": {
+    "EC1": "Idioma: O artigo não está em inglês",
+    "EC2": "Full text indisponível: Texto completo não disponível online",
+    "EC3": "Publicação curta: Artigo curto (menos de 4 páginas)",
+    "EC4": "Ano <2015: Publicação anterior a 2015",
+    "EC5": "Fora de escopo: Tema não relacionado a Recruitment & Selection em Software Engineering",
+    "EC6": "Duplicata: Artigo duplicado em outra base"
+  },
+
+  "quality_criteria": {
+    "WL": {
+      "QC1": "Journal indexed in WoS/Scopus",
+      "QC2": "Minimum 3 citations"
+    },
+    "GL": {
+      "QC1": "Published in recognized preprint server",
+      "QC2": "Author credentials verified"
+    }
+  },
+
+  "column_aliases": {
+    "Document Title": "title",
+    "Title": "title",
+    "Publication Year": "year",
+    "Year": "year",
+    "PY": "year",
+    "Abstract": "abstract",
+    "Abstract Note": "abstract",
+    "AB": "abstract",
+    "DOI": "doi",
+    "Digital Object Identifier": "doi",
+    "DI": "doi",
+    "Authors": "authors",
+    "Author": "authors",
+    "AU": "authors",
+    "Journal": "journal",
+    "Book Title": "journal",
+    "Conference": "journal",
+    "SO": "venue",
+    "Volume": "volume",
+    "Issue": "issue",
+    "Pages": "pages",
+    "Keywords": "keywords",
+    "Author Keywords": "keywords",
+    "URL": "url",
+    "Link": "url",
+    "TI": "title"
+  },
+
+  "source_columns": [
+    "title",
+    "year",
+    "abstract",
+    "doi",
+    "authors",
+    "journal",
+    "keywords",
+    "volume",
+    "issue",
+    "pages",
+    "url",
+    "source"
+  ]
+}

@@ -1,8 +1,8 @@
-pandas
-streamlit
 bibtexparser
 rispy
 openpyxl
+pandas
+streamlit
 plotly
 groq
 python-dotenv

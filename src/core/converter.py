@@ -1,146 +1,129 @@
 """
-AIMS Data Converter.
-Converts various file formats (BibTeX, RIS, Excel, WoS TSV) to standardized CSV.
+AIMS Data Converter - Professional Multi-format Support.
+Handles: BibTeX (.bib), RIS (.ris), Excel (.xlsx), and WoS Tab-delimited (.txt).
 """
 import os
 import pandas as pd
 import bibtexparser
+import rispy
 from pathlib import Path
+import logging
 
-try:
-    from rispy import loads as rispy_loads
-    RISPY_AVAILABLE = True
-except ImportError:
-    RISPY_AVAILABLE = False
+# Configuração de logging para auditoria de conversão
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-
-def convert_excel_to_csv(filepath: str) -> pd.DataFrame:
-    """Read Excel file and return DataFrame."""
+def convert_excel_to_df(filepath: str) -> pd.DataFrame:
+    """Lê Excel e retorna DataFrame."""
     try:
-        df = pd.read_excel(filepath)
-        return df
+        return pd.read_excel(filepath)
     except Exception as e:
-        print(f"Error reading Excel {filepath}: {e}")
+        logger.error(f"Failed to read Excel {filepath}: {e}")
         return pd.DataFrame()
 
-
-def convert_bibtex_to_csv(filepath: str) -> pd.DataFrame:
-    """Read BibTeX file and return DataFrame."""
+def convert_bibtex_to_df(filepath: str) -> pd.DataFrame:
+    """Converte BibTeX para DataFrame padronizado."""
     try:
         with open(filepath, 'r', encoding='utf-8') as bibfile:
-            bib_database = bibtexparser.load(bibfile)
-
-        entries = []
-        for entry in bib_database.entries:
-            normalized_entry = {
-                'title': entry.get('title', ''),
-                'year': entry.get('year', ''),
-                'abstract': entry.get('abstract', ''),
-                'doi': entry.get('doi', ''),
-                'authors': entry.get('author', ''),
-                'journal': entry.get('journal', entry.get('booktitle', '')),
-                'keywords': entry.get('keywords', ''),
-                'volume': entry.get('volume', ''),
-                'issue': entry.get('number', ''),
-                'pages': entry.get('pages', ''),
-                'url': entry.get('url', ''),
-                'ENTRYTYPE': entry.get('ENTRYTYPE', '')
-            }
-            entries.append(normalized_entry)
-
-        return pd.DataFrame(entries)
+            parser = bibtexparser.bparser.BibTexParser(common_strings=True)
+            bib_database = bibtexparser.load(bibfile, parser=parser)
+        
+        df = pd.DataFrame(bib_database.entries)
+        # Mapeamento comum de BibTeX para o padrão AIMS
+        mapping = {
+            'author': 'authors',
+            'journal': 'source_title',
+            'booktitle': 'source_title',
+        }
+        return df.rename(columns=mapping)
     except Exception as e:
-        print(f"Error reading BibTeX {filepath}: {e}")
+        logger.error(f"Failed to read BibTeX {filepath}: {e}")
         return pd.DataFrame()
 
-
-def convert_ris_to_csv(filepath: str) -> pd.DataFrame:
-    """Read RIS file and return DataFrame."""
+def convert_ris_to_df(filepath: str) -> pd.DataFrame:
+    """Converte RIS (Reference Manager) para DataFrame."""
     try:
-        if RISPY_AVAILABLE:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-            tags = rispy_loads(content)
-            return pd.DataFrame(tags)
-        else:
-            df = pd.read_csv(filepath, sep='\t')
-            return df
+        with open(filepath, 'r', encoding='utf-8') as f:
+            entries = rispy.load(f)
+        
+        df = pd.DataFrame(entries)
+        # Mapeamento comum de tags RIS (T1/TI = Title, AB = Abstract, etc)
+        mapping = {
+            'primary_title': 'title',
+            'authors': 'authors',
+            'publication_year': 'year',
+            'abstract': 'abstract',
+            'doi': 'doi',
+            'url': 'url'
+        }
+        return df.rename(columns=mapping)
     except Exception as e:
-        print(f"Error reading RIS {filepath}: {e}")
+        logger.error(f"Failed to read RIS {filepath}: {e}")
         return pd.DataFrame()
 
-
-def convert_wos_txt_to_csv(filepath: str) -> pd.DataFrame:
-    """Read Web of Science (.txt TSV) and return DataFrame."""
+def convert_wos_txt_to_df(filepath: str) -> pd.DataFrame:
+    """Converte exportação do Web of Science (Tab-delimited) para DataFrame."""
     try:
-        df = pd.read_csv(filepath, sep='\t', quoting=3, on_bad_lines='skip', encoding='utf-8-sig')
-        return df
+        # WoS usa tabulação e encoding específico às vezes
+        df = pd.read_csv(filepath, sep='\t', quoting=3, on_bad_lines='skip')
+        # WoS usa siglas (TI=Title, AB=Abstract, PY=Year, AU=Authors, DI=DOI)
+        mapping = {
+            'TI': 'title',
+            'AB': 'abstract',
+            'PY': 'year',
+            'AU': 'authors',
+            'DI': 'doi'
+        }
+        return df.rename(columns=mapping)
     except Exception as e:
-        print(f"Error reading WoS {filepath}: {e}")
+        logger.error(f"Failed to read WoS TXT {filepath}: {e}")
         return pd.DataFrame()
 
-
-def convert_file(filepath: str, output_dir: str = "data/processed/wl") -> bool:
-    """Convert a single file to CSV."""
-    ext = Path(filepath).suffix.lower()
-    filename = Path(filepath).stem
+def run_conversion(input_dir: str, output_dir: str):
+    """
+    Orquestrador de conversão. 
+    Lê qualquer arquivo suportado em input_dir e salva o CSV em output_dir.
+    """
+    if not os.path.exists(input_dir):
+        logger.warning(f"Input directory {input_dir} not found.")
+        return
 
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{filename}.csv")
+    
+    files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+    
+    for filename in files:
+        filepath = os.path.join(input_dir, filename)
+        ext = Path(filename).suffix.lower()
+        df = pd.DataFrame()
 
-    if ext == '.xlsx':
-        df = convert_excel_to_csv(filepath)
+        if ext == '.xlsx':
+            df = convert_excel_to_df(filepath)
+        elif ext == '.bib':
+            df = convert_bibtex_to_df(filepath)
+        elif ext == '.ris':
+            df = convert_ris_to_df(filepath)
+        elif ext == '.txt':
+            # Checa se é WoS ou apenas um CSV disfarçado
+            df = convert_wos_txt_to_df(filepath)
+        elif ext == '.csv':
+            # Se já for CSV, apenas lê para validar
+            try:
+                df = pd.read_csv(filepath, on_bad_lines='skip')
+            except:
+                continue
+        
         if not df.empty:
-            df.to_csv(output_path, index=False)
-            print(f"Converted: {filepath} -> {output_path}")
-            return True
-    elif ext == '.bib':
-        df = convert_bibtex_to_csv(filepath)
-        if not df.empty:
-            df.to_csv(output_path, index=False)
-            print(f"Converted: {filepath} -> {output_path}")
-            return True
-    elif ext == '.ris':
-        df = convert_ris_to_csv(filepath)
-        if not df.empty:
-            df.to_csv(output_path, index=False)
-            print(f"Converted: {filepath} -> {output_path}")
-            return True
-    elif ext == '.txt':
-        df = convert_wos_txt_to_csv(filepath)
-        if not df.empty:
-            df.to_csv(output_path, index=False)
-            print(f"Converted: {filepath} -> {output_path}")
-            return True
-    else:
-        print(f"Unsupported format: {ext}")
-
-    return False
-
-
-def run_conversion(input_dir: str = "data/raw/wl", output_dir: str = "data/processed/wl"):
-    """Scan input directory and convert all supported files."""
-    if not os.path.exists(input_dir):
-        print(f"Input directory {input_dir} does not exist. Creating...")
-        os.makedirs(input_dir, exist_ok=True)
-        return
-
-    files_to_convert = []
-    for root, dirs, files in os.walk(input_dir):
-        for file in files:
-            if file.endswith(('.xlsx', '.bib', '.ris', '.txt')):
-                filepath = os.path.join(root, file)
-                files_to_convert.append(filepath)
-
-    if not files_to_convert:
-        print(f"No convertible files (.xlsx, .bib, .ris, .txt) found in {input_dir}")
-        return
-
-    print(f"Found {len(files_to_convert)} files to convert")
-
-    for filepath in files_to_convert:
-        convert_file(filepath, output_dir)
-
+            # Salva o arquivo convertido com o mesmo nome, mas extensão .csv
+            output_filename = f"{Path(filename).stem}.csv"
+            output_path = os.path.join(output_dir, output_filename)
+            
+            # Usamos utf-8-sig para garantir que o Excel abra corretamente os acentos
+            df.to_csv(output_path, index=False, encoding='utf-8-sig')
+            logger.info(f"Successfully converted: {filename} -> {output_filename}")
+        else:
+            logger.warning(f"Skipped or failed to convert: {filename}")
 
 if __name__ == "__main__":
-    run_conversion()
+    # Teste manual
+    run_conversion("data/raw/wl", "data/processed/wl")

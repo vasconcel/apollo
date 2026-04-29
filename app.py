@@ -1,434 +1,442 @@
 import streamlit as st
+import pandas as pd
 import json
 import os
-import shutil
-import plotly.graph_objects as go
 import sqlite3
-from src.core import DatabaseManager, run_ingestion
+import plotly.graph_objects as go
+from datetime import datetime
+
+# Importações do Core
+from src.core import DatabaseManager, run_ingestion, run_conversion
 from src.core.ai_handler import get_ai_suggestion
 from src.core.snowballing import get_paper_references
 
+# Agente de Insights (Placeholder, caso ainda não implementado)
+try:
+    from src.core.insights_agent import ask_data_agent
+except ImportError:
+    def ask_data_agent(q, db=None): return "Agent module not found. Please implement insights_agent.py"
+
 # ==================== CONFIGURAÇÃO DA PÁGINA ====================
-st.set_page_config(page_title="AIMS - AI-Powered MLR", layout="wide")
+st.set_page_config(page_title="AIMS - AI-Powered MLR", layout="wide", initial_sidebar_state="expanded")
 
 def inject_custom_css():
-    """Injeta CSS customizado para um visual profissional SaaS (Inter & Slate/Indigo)."""
     st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
-        /* Fundo principal e Tipografia */
-        .stApp {
-            background-color: #F8FAFC;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
+        .stApp { background-color: #F8FAFC; font-family: 'Inter', sans-serif; }
         
-        /* Menu Lateral */
-        [data-testid="stSidebar"] > div:first-child {
-            background-color: #F8FAFC;
-            border-right: 1px solid #E2E8F0;
-        }
-        [data-testid="stSidebar"] * {
-            color: #334155 !important;
-        }
+        /* Sidebar Professional Look */
+        [data-testid="stSidebar"] { background-color: white !important; border-right: 1px solid #E2E8F0; }
         
-        /* Containers e Cards */
-        [data-testid="stContainer"] {
+        /* Card-like containers */
+        div[data-testid="stVerticalBlock"] > div > div[data-testid="stContainer"] {
             background-color: white;
             border: 1px solid #E2E8F0;
-            border-radius: 8px;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Abstract Box */
+        .abstract-box {
+            font-size: 1.05rem;
+            line-height: 1.7;
+            color: #334155;
+            background: white;
             padding: 1.5rem;
-            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            border: 1px solid #F1F5F9;
         }
-        
-        /* Cabeçalhos e Métricas */
-        [data-testid="stHeader"] {
-            background-color: transparent;
-        }
-        [data-testid="stMetricValue"] {
-            color: #4F46E5 !important;
-            font-weight: 700;
-        }
-        
-        /* Texto do Resumo (Abstract) */
-        .abstract-text {
-            line-height: 1.8;
-            color: #475569;
-            font-size: 0.95rem;
-            text-align: justify;
-        }
-        
-        /* Estilo dos Radio Buttons (Quality Assessment) */
-        .stRadio > div > div > label {
-            background-color: #F1F5F9;
-            border: 1px solid #CBD5E1;
-            border-radius: 6px;
-            padding: 0.5rem 1rem;
-            margin: 0.25rem;
-            cursor: pointer;
+
+        /* Buttons */
+        .stButton>button {
+            border-radius: 8px;
             transition: all 0.2s;
-            font-size: 0.875rem;
-        }
-        .stRadio > div > div > label:hover {
-            background-color: #E2E8F0;
-        }
-        .stRadio > div > div > label[data-selected="true"] {
-            background-color: #4F46E5;
-            color: white;
-            border-color: #4F46E5;
         }
         
-        /* Botões */
-        button {
-            border-radius: 8px !important;
-            font-weight: 500 !important;
-            font-family: 'Inter', sans-serif !important;
-        }
-        
-        /* Badges de Qualidade */
-        .quality-badge {
-            display: inline-block;
-            padding: 0.75rem 1.25rem;
-            border-radius: 6px;
+        /* Badge styling */
+        .badge {
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
             font-weight: 600;
-            margin-top: 1rem;
-            font-size: 0.9rem;
-            width: 100%;
-            text-align: center;
-        }
-        .quality-pass {
-            background-color: #EEF2FF;
-            color: #4338CA;
-            border: 1px solid #C7D2FE;
-        }
-        .quality-fail {
-            background-color: #F1F5F9;
-            color: #475569;
-            border: 1px solid #CBD5E1;
         }
     </style>
     """, unsafe_allow_html=True)
 
 inject_custom_css()
 
-# ==================== ESTADO DA SESSÃO E CONFIGURAÇÃO ====================
+# ==================== GESTÃO DE CONFIGURAÇÃO ====================
+CONFIG_PATH = "project_config.json"
+
+def load_settings():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    # Default alinhado ao protocolo (Garousi et al.)
+    return {
+        "project_name": "SE R&S Multivocal Literature Review",
+        "research_questions": ["RQ1: Distribution & Nature", "RQ2: Pipeline Conceptualization", "RQ3: Challenges & Frictions", "RQ4: Practices & Design Principles", "RQ5: WL/GL Divergence"],
+        "inclusion_criteria": {"IC1": "Relevant to SE R&S"},
+        "exclusion_criteria": {"EC1": "Not in English"},
+        "extraction_fields": ["Extracted Context", "Pipeline Stages Addressed (RQ2)", "Identified Challenges (RQ3)", "Practices (RQ4)", "WL/GL Divergence (RQ5)"],
+        "quality_criteria": {
+            "WL": ["WL-Q1: Clear context?", "WL-Q2: Valid methodology?", "WL-Q3: Data supported?", "WL-Q4: Limitations discussed?"],
+            "GL": ["GL-Q1: Author expertise?", "GL-Q2: Transparent source?", "GL-Q3: Operational artifacts?", "GL-Q4: Beyond marketing?"]
+        }
+    }
+
+settings = load_settings()
+
+# ==================== ESTADO DA SESSÃO ====================
 if "current_article_idx" not in st.session_state: st.session_state.current_article_idx = 0
-if "ingestion_running" not in st.session_state: st.session_state.ingestion_running = False
 if "ai_suggestion" not in st.session_state: st.session_state.ai_suggestion = None
-if "last_article_id" not in st.session_state: st.session_state.last_article_id = None
+if "chat_history" not in st.session_state: st.session_state.chat_history = []
 
-# Carregamento Dinâmico do Config (Garante Genericidade)
-config_path = "project_config.json"
-project_config = {}
-if os.path.exists(config_path):
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            project_config = json.load(f)
-    except Exception as e:
-        st.error(f"Erro ao ler config: {e}")
-
-# Valores Padrão em caso de ausência no JSON (Genéricos)
-EXTRACTION_FIELDS = project_config.get("extraction_fields", [
-    "Context / Objective",
-    "Methodology / Approach",
-    "Key Findings / Practices",
-    "Limitations / Frictions"
-])
-QUALITY_CRITERIA_WL = project_config.get("quality_criteria", {}).get("WL", [
-    "WL-Q1: Clear research context and objectives",
-    "WL-Q2: Appropriate methodology and analysis",
-    "WL-Q3: Sufficient data support and evidence",
-    "WL-Q4: Acknowledged limitations and constraints"
-])
-QUALITY_CRITERIA_GL = project_config.get("quality_criteria", {}).get("GL", [
-    "GL-Q1: Demonstrated expertise and credibility",
-    "GL-Q2: Transparent methodology and documentation",
-    "GL-Q3: Relevant artifacts and deliverables",
-    "GL-Q4: Balanced trade-offs and considerations"
-])
-
-
-# ==================== NAVEGAÇÃO ====================
-page = st.sidebar.radio(
-    "Navigation",
-    ["Dashboard", "Import & Ingestion", "Screening", "Evidence Synthesis", "Project Settings"],
-    index=0
-)
-
-# ==================== DASHBOARD TAB ====================
-if page == "Dashboard":
-    st.title("PRISMA Dashboard")
+# ==================== SIDEBAR NAVEGAÇÃO ====================
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2103/2103633.png", width=50)
+    st.title("AIMS Pipeline")
+    st.caption("v2.0 | Protocol-Aligned MLR")
     st.divider()
+    page = st.radio("MAIN MENU", [
+        "Dashboard", 
+        "Import Hub", 
+        "Screening", 
+        "Enrichment (Snowballing)", 
+        "Evidence Synthesis", 
+        "AI Insights (Beta)", 
+        "Settings"
+    ])
 
+# ==================== DASHBOARD ====================
+if page == "Dashboard":
+    st.title("📊 Project Insights")
     db = DatabaseManager()
     stats = db.get_stats()
-
+    
     if stats["total"] == 0:
-        st.warning("No data found. Please run the ingestion pipeline first.")
+        st.info("Start by importing your literature files in the Import Hub.")
     else:
-        with st.container(border=True):
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("Total Articles", stats["total"])
-            with col2: st.metric("White Literature (WL)", stats["wl_count"])
-            with col3: st.metric("Grey Literature (GL)", stats["gl_count"])
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Sources", stats["total"])
+        c2.metric("Academic (WL)", stats["wl_count"])
+        c3.metric("Practitioner (GL)", stats["gl_count"])
+        
+        # Consolida status processados
+        status_b = stats.get("status_breakdown", {})
+        processed = status_b.get("excluded", 0) + status_b.get("included_screening", 0) + status_b.get("excluded_qc", 0) + status_b.get("included_final", 0)
+        c4.metric("Processed", processed)
 
         st.divider()
-        st.subheader("PRISMA Flow Diagram")
+        col_left, col_right = st.columns([2, 1])
         
-        status_breakdown = stats.get("status_breakdown", {})
-        deduplicated = status_breakdown.get("deduplicated", stats["total"])
-        excluded = status_breakdown.get("excluded", 0)
-        included = max(deduplicated - excluded, 0)
-
-        # Cores customizadas baseadas na paleta Indigo/Emerald/Rose
-        fig = go.Figure(go.Sankey(
-            node=dict(
-                pad=15, thickness=20, line=dict(color="black", width=0.5),
-                label=["Input", "Deduplicated", "Included", "Excluded"],
-                color=["#4F46E5", "#4F46E5", "#10B981", "#EF4444"]
-            ),
-            link=dict(
-                source=[0, 1, 1],
-                target=[1, 2, 3],
-                value=[deduplicated, included, excluded],
-                color=["#C7D2FE", "#D1FAE5", "#FECACA"]
-            )
-        ))
-        fig.update_layout(font_size=12, margin=dict(t=20, b=20, l=20, r=20))
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# ==================== IMPORT & INGESTION TAB ====================
-elif page == "Import & Ingestion":
-    st.title("Import & Ingestion")
-    st.divider()
-
-    def count_csv_files(directory):
-        count = 0
-        if os.path.exists(directory):
-            for root, _, files in os.walk(directory):
-                count += sum(1 for f in files if f.endswith(".csv"))
-        return count
-
-    col1, col2 = st.columns(2)
-    with col1: st.metric("Raw CSV Files", count_csv_files("data/raw"))
-    with col2: st.metric("Processed CSV Files", count_csv_files("data/processed"))
-
-    st.divider()
-
-    if st.button("Run Ingestion Pipeline", type="primary"):
-        if not st.session_state.ingestion_running:
-            st.session_state.ingestion_running = True
-            template_path = "project_config_template.json"
-            
-            if not os.path.exists(config_path) and os.path.exists(template_path):
-                shutil.copy(template_path, config_path)
-                st.toast("Initialized project_config.json from template")
-            
-            with st.spinner("Running batch ingestion (Deduplication & DB Build)..."):
-                try:
-                    run_ingestion()
-                    st.success("Ingestion completed successfully!")
-                    st.session_state.current_article_idx = 0
-                except Exception as e:
-                    st.error(f"Ingestion failed: {str(e)}")
-                finally:
-                    st.session_state.ingestion_running = False
-
-
-# ==================== SCREENING TAB ====================
-elif page == "Screening":
-    st.title("Screening")
-    st.divider()
-
-    db = DatabaseManager()
-    imported_articles = db.get_articles_by_status("imported")
-
-    if len(imported_articles) == 0:
-        st.session_state.current_article_idx = 0
-        st.session_state.ai_suggestion = None
-        st.info("No articles to screen. All imported articles have been processed.")
-    else:
-        if st.session_state.current_article_idx >= len(imported_articles):
-            st.session_state.current_article_idx = max(0, len(imported_articles) - 1)
-        
-        idx = st.session_state.current_article_idx
-        current_article = imported_articles.iloc[idx]
-
-        if st.session_state.last_article_id != current_article["id"]:
-            st.session_state.ai_suggestion = None
-            st.session_state.last_article_id = current_article["id"]
-
-        with st.expander("View Eligibility Criteria", expanded=False):
-            st.subheader("Inclusion Criteria")
-            for cid, ctext in project_config.get("inclusion_criteria", {}).items():
-                st.markdown(f"**{cid}:** {ctext}")
-            st.subheader("Exclusion Criteria")
-            for cid, ctext in project_config.get("exclusion_criteria", {}).items():
-                st.markdown(f"**{cid}:** {ctext}")
-
-        # Layout Principal (Leitura vs Ferramentas)
-        col_left, col_right = st.columns([3, 1])
-
         with col_left:
-            with st.container(border=True):
-                st.markdown(f"### {current_article.get('title', 'No Title')}")
-                st.caption(f"**Authors:** {current_article.get('authors', 'N/A')} | **Year:** {current_article.get('year', 'N/A')} | **Type:** {current_article.get('literature_type', 'N/A')}")
-                st.divider()
-                st.markdown("**Abstract**")
-                abstract_text = current_article.get("abstract", "No abstract available.")
-                st.markdown(f'<div class="abstract-text">{abstract_text}</div>', unsafe_allow_html=True)
-
+            st.subheader("Process Flow (PRISMA)")
+            st.info("Sankey visualization reflects: Imported → Screened → QA Excluded → Final Synthesis")
+            # Para visualização real do PRISMA, você usará Plotly Sankey Graph aqui.
+            
         with col_right:
-            st.subheader("Tools")
-            
-            # AI Screening
-            if st.button("Ask AI Assistant", use_container_width=True):
-                with st.spinner("Analyzing..."):
-                    criteria_dict = {
-                        "inclusion_criteria": project_config.get("inclusion_criteria", {}),
-                        "exclusion_criteria": project_config.get("exclusion_criteria", {})
-                    }
-                    st.session_state.ai_suggestion = get_ai_suggestion(
-                        current_article.get("title", ""), 
-                        current_article.get("abstract", ""), 
-                        criteria_dict
-                    )
-            
-            # Snowballing
-            doi = current_article.get("doi", "")
-            if doi and str(doi).strip():
-                if st.button("Perform Snowballing", use_container_width=True):
-                    with st.spinner("Fetching references via API..."):
-                        references = get_paper_references(doi)
-                        if references:
-                            db.upsert_mesh(references)
-                            st.toast(f"Success: Added {len(references)} references via Snowballing.")
-                        else:
-                            st.warning("No references found or API timeout.")
-            else:
-                st.button("Perform Snowballing", disabled=True, use_container_width=True, help="DOI missing.")
+            st.subheader("Data Health")
+            with sqlite3.connect(db.db_path) as conn:
+                no_abs = conn.execute("SELECT COUNT(*) FROM articles WHERE abstract IS NULL OR abstract = ''").fetchone()[0]
+            coverage = ((stats['total']-no_abs)/stats['total']*100) if stats['total'] > 0 else 0
+            st.progress(coverage/100, text=f"Abstract Coverage: {coverage:.1f}%")
 
-            if st.session_state.ai_suggestion:
-                res = st.session_state.ai_suggestion
-                if "error" in res:
-                    st.error(f"AI Error: {res['error']}")
-                else:
-                    st.info(f"**Decision:** {res.get('decision', 'N/A').upper()}\n\n**Reason:** {res.get('reason', '')}")
-
-        st.divider()
-        st.subheader("Manual Decision")
+# ==================== IMPORT HUB ====================
+elif page == "Import Hub":
+    st.title("📥 Import Hub")
+    st.markdown("Upload your raw search results. The pipeline will automatically convert, clean, assign Source IDs and deduplicate.")
+    
+    with st.container(border=True):
+        uploaded_files = st.file_uploader(
+            "Drop .bib, .ris, .csv, .xlsx or .txt files", 
+            type=['bib', 'ris', 'csv', 'xlsx', 'txt'],
+            accept_multiple_files=True
+        )
         
-        dec_col1, dec_col2, dec_col3 = st.columns(3)
-        with dec_col1:
-            if st.button("✅ Include", use_container_width=True, type="primary"):
-                db.update_article_status(current_article["id"], "included_screening")
-                st.session_state.current_article_idx = min(idx + 1, len(imported_articles) - 1)
-                st.rerun()
-        with dec_col2:
-            if st.button("❌ Exclude", use_container_width=True):
-                db.update_article_status(current_article["id"], "excluded")
-                st.session_state.current_article_idx = min(idx + 1, len(imported_articles) - 1)
-                st.rerun()
-        with dec_col3:
-            if st.button("⏭️ Skip", use_container_width=True):
-                st.session_state.current_article_idx = min(idx + 1, len(imported_articles) - 1)
-                st.rerun()
+        lit_type = st.radio("Literature Type", ["White Literature (WL)", "Grey Literature (GL)"], horizontal=True)
+        source_prefix = "wl" if "White" in lit_type else "gl"
+        
+        st.divider()
+
+        if st.button("🚀 Process & Ingest", type="primary", use_container_width=True):
+            if not uploaded_files:
+                st.warning("Please upload at least one file first.")
+            else:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-        st.caption(f"Article {idx + 1} of {len(imported_articles)}")
+                try:
+                    with st.spinner("Executing Pipeline..."):
+                        status_text.text("Step 1/3: Saving uploaded files...")
+                        raw_path = f"data/raw/{source_prefix}"
+                        os.makedirs(raw_path, exist_ok=True)
+                        
+                        for f in uploaded_files:
+                            with open(os.path.join(raw_path, f.name), "wb") as save_f:
+                                save_f.write(f.getbuffer())
+                        progress_bar.progress(33)
 
+                        status_text.text("Step 2/3: Converting formats to standard CSV...")
+                        processed_path = f"data/processed/{source_prefix}"
+                        run_conversion(raw_path, processed_path)
+                        progress_bar.progress(66)
 
-# ==================== EVIDENCE SYNTHESIS TAB ====================
-elif page == "Evidence Synthesis":
-    st.title("Evidence Synthesis")
-    st.divider()
+                        status_text.text("Step 3/3: Deduplicating and writing to Database...")
+                        run_ingestion() 
+                        
+                        progress_bar.progress(100)
+                        status_text.text("Ingestion completed successfully!")
+                        st.success(f"Done! Processed {len(uploaded_files)} files.")
+                        st.balloons()
+                        
+                except Exception as e:
+                    st.error(f"An error occurred during ingestion: {str(e)}")
 
+# ==================== SCREENING ====================
+elif page == "Screening":
+    st.title("🔍 Literature Screening")
     db = DatabaseManager()
-    included_articles = db.get_articles_by_status("included_screening")
-
-    if len(included_articles) == 0:
-        st.info("No articles available for evidence synthesis. Please complete the screening process.")
+    articles = db.get_articles_by_status("imported")
+    
+    if len(articles) == 0:
+        st.success("All articles have been screened!")
     else:
-        st.subheader(f"Included Articles ({len(included_articles)})")
+        if st.session_state.current_article_idx >= len(articles):
+            st.session_state.current_article_idx = 0
+            
+        art = articles.iloc[st.session_state.current_article_idx]
+        # Pega o Source ID gerado no banco (Ex: WL-001)
+        source_id = art.get('source_id', f"ID: {art['id']}")
         
-        # Seleção de artigo
-        article_options = [f"{row['title'][:70]}..." if len(row["title"]) > 70 else row["title"] for _, row in included_articles.iterrows()]
-        selected_idx = st.selectbox("Select Article to Synthesize", range(len(article_options)), format_func=lambda i: article_options[i])
-        selected_article = included_articles.iloc[selected_idx]
-
-        st.markdown(f"### {selected_article['title']}")
-        st.caption(f"**Type:** {selected_article.get('literature_type', 'N/A')} | **Source:** {selected_article.get('source', 'N/A')}")
-        st.divider()
-
-        with st.form("evidence_form"):
-            # 1. Campos de Extração Dinâmicos
-            st.subheader("Data Extraction")
-            extraction_data = {}
-            for field in EXTRACTION_FIELDS:
-                extraction_data[field] = st.text_area(field, height=80, key=f"ext_{field}")
-
-            # 2. Avaliação de Qualidade Dinâmica (Dual-Rubric)
+        col_main, col_utility = st.columns([0.68, 0.32])
+        
+        with col_main:
+            st.markdown(f"### [{source_id}] {art['title']}")
+            st.caption(f"Authors: {art['authors']} | Year: {art['year']} | Type: {art['literature_type']}")
             st.divider()
-            st.subheader("Quality Assessment")
+            st.markdown("#### Abstract")
+            st.markdown(f"<div class='abstract-box'>{art['abstract']}</div>", unsafe_allow_html=True)
             
-            lit_type = selected_article.get("literature_type", "WL")
-            if lit_type not in ["WL", "GL"]:
-                lit_type = "WL"  # Fallback caso seja PENDING ou incorreto
+        with col_utility:
+            st.subheader("🛠️ Decisions")
+            with st.container(border=True):
+                c1, c2, c3 = st.columns(3)
+                if c1.button("✅ Include", use_container_width=True, type="primary"):
+                    db.update_article_status(art['id'], "included_screening")
+                    st.session_state.current_article_idx += 1
+                    st.session_state.ai_suggestion = None
+                    st.rerun()
+                if c2.button("❌ Exclude", use_container_width=True):
+                    db.update_article_status(art['id'], "excluded")
+                    st.session_state.current_article_idx += 1
+                    st.session_state.ai_suggestion = None
+                    st.rerun()
+                if c3.button("⏭️ Skip", use_container_width=True):
+                    st.session_state.current_article_idx += 1
+                    st.session_state.ai_suggestion = None
+                    st.rerun()
 
-            criteria_list = QUALITY_CRITERIA_WL if lit_type == "WL" else QUALITY_CRITERIA_GL
-            st.write(f"**Applying {lit_type} Quality Criteria Framework**")
+            st.divider()
             
-            score_map = {"Yes (1.0)": 1.0, "Partially (0.5)": 0.5, "No (0)": 0.0}
-            total_score = 0.0
+            if st.button("✨ Ask AI Verdict", use_container_width=True):
+                with st.spinner("Analyzing against GQM criteria..."):
+                    st.session_state.ai_suggestion = get_ai_suggestion(art['title'], art['abstract'], settings)
             
-            for idx, criterion in enumerate(criteria_list):
-                ans = st.radio(criterion, ["Yes (1.0)", "Partially (0.5)", "No (0)"], key=f"qa_{idx}", horizontal=True)
-                total_score += score_map[ans]
-
-            # Indicador Visual de Pass/Fail
-            if total_score >= 2.0:
-                score_display = f'<div class="quality-badge quality-pass">✓ Verified Evidence (Score: {total_score:.1f} / 4.0)</div>'
-            else:
-                score_display = f'<div class="quality-badge quality-fail">✗ Low Quality / Exclude (Score: {total_score:.1f} / 4.0)</div>'
-            
-            st.markdown(score_display, unsafe_allow_html=True)
-            st.write("") # Spacing
-
-            submitted = st.form_submit_button("Save Evidence & Finalize", type="primary")
-            if submitted:
-                article_id = selected_article["id"]
-                
-                # Salva os dados independentemente de passar ou falhar
-                with sqlite3.connect(db.db_path) as conn:
-                    conn.execute(
-                        "UPDATE articles SET ic_results = ?, quality_score = ? WHERE id = ?",
-                        (json.dumps(extraction_data), total_score, article_id)
-                    )
-                    conn.commit()
-                
-                # Atualiza o status baseado na nota
-                if total_score >= 2.0:
-                    db.update_article_status(article_id, "included_final")
-                    st.success("Evidence saved successfully! Moved to Included Final.")
+            if st.session_state.ai_suggestion:
+                sug = st.session_state.ai_suggestion
+                if "error" in sug.get("decision", ""):
+                    st.error(f"AI Error: {sug.get('reasons', ['Unknown error'])[0]}")
                 else:
-                    db.update_article_status(article_id, "excluded", exclusion_reason="Failed Quality Assessment")
-                    st.warning("Article excluded due to low quality score.")
-                
-                st.rerun()
+                    color = "#10B981" if sug['decision'].lower() == "include" else "#EF4444"
+                    st.markdown(f"""
+                    <div style="background: white; border: 1px solid #E2E8F0; border-radius: 8px; padding: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <strong style="color:{color}; font-size: 1.1rem;">Verdict: {sug['decision'].upper()}</strong>
+                            <span style="background: #F1F5F9; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem;">Confidence: {sug.get('confidence', 0)}%</span>
+                        </div>
+                        <hr style="margin: 10px 0;">
+                        <ul style="padding-left: 20px; font-size: 0.85rem; color: #475569;">
+                            {"".join([f"<li>{r}</li>" for f in sug.get('reasons', [])])}
+                        </ul>
+                        <div style="margin-top: 10px;">
+                            {" ".join([f"<span class='badge' style='background:#EEF2FF; color:#4338CA; margin-right:4px;'>{c}</span>" for c in sug.get('matched_criteria', [])])}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.caption(f"Progress: {st.session_state.current_article_idx + 1} / {len(articles)}")
 
-
-# ==================== PROJECT SETTINGS TAB ====================
-elif page == "Project Settings":
-    st.title("Project Configuration")
-    st.divider()
-
-    if not os.path.exists(config_path):
-        st.warning("`project_config.json` not found in root directory.")
-        if st.button("Initialize Default Config"):
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(project_config, f, indent=4)
-            st.success("Configuration created successfully!")
-            st.rerun()
+# ==================== ENRICHMENT (SNOWBALLING) ====================
+elif page == "Enrichment (Snowballing)":
+    st.title("🕸️ Protocol Enrichment (Snowballing)")
+    st.markdown("Per methodology: Backward and forward snowballing is applied **only** to included White Literature (WL) studies.")
+    
+    db = DatabaseManager()
+    included_wl = db.get_articles_by_status("included_screening")
+    included_wl = included_wl[included_wl['literature_type'] == 'WL']
+    
+    if len(included_wl) == 0:
+        st.info("No White Literature marked as 'Included' in Screening yet.")
     else:
-        st.write("Current active configuration driving the system behavior (read-only view):")
-        st.json(project_config)
+        st.dataframe(included_wl[['source_id', 'title', 'doi', 'year']], use_container_width=True)
+        
+        display_options = [f"[{row.get('source_id', row['id'])}] {row['title']}" for _, row in included_wl.iterrows()]
+        selected_option = st.selectbox("Select Study to apply Snowballing:", display_options)
+        
+        # Pega a linha selecionada baseada no selectbox
+        idx = display_options.index(selected_option)
+        target_art = included_wl.iloc[idx]
+        
+        if st.button("🚀 Execute Snowballing", type="primary", disabled=not target_art['doi']):
+            with st.spinner("Querying Semantic Scholar Graph for References/Citations..."):
+                refs = get_paper_references(target_art['doi'])
+                if refs:
+                    db.upsert_mesh(refs) # Insere como PENDING e imported
+                    st.success(f"Found {len(refs)} new references! Sent to the Import Hub/Screening queue.")
+                    st.balloons()
+                else:
+                    st.warning("No references found or invalid DOI.")
+
+# ==================== EVIDENCE SYNTHESIS ====================
+elif page == "Evidence Synthesis":
+    st.title("🧪 Evidence Synthesis & Quality Assessment")
+    st.markdown("Apply the dual-rubric QA protocol and extract data mapped to your RQs.")
+    
+    db = DatabaseManager()
+    included = db.get_articles_by_status("included_screening")
+    
+    if len(included) == 0:
+        st.warning("No articles in the queue for extraction.")
+    else:
+        display_options = [f"[{row.get('source_id', row['id'])}] {row['title']}" for _, row in included.iterrows()]
+        selected_option = st.selectbox("Select Study for Extraction & QA", display_options)
+        
+        idx = display_options.index(selected_option)
+        art = included.iloc[idx]
+        
+        st.divider()
+        st.subheader(f"Dual-Rubric Quality Assessment ({art['literature_type']})")
+        st.caption("Studies scoring below 2.0 will be blocked from extraction per protocol.")
+        
+        q_list = settings["quality_criteria"]["WL"] if art["literature_type"] == "WL" else settings["quality_criteria"]["GL"]
+        
+        scores = []
+        for q in q_list:
+            res = st.radio(q, ["Yes (1.0)", "Partially (0.5)", "No (0.0)"], horizontal=True, key=f"qa_{art['id']}_{q}")
+            scores.append(float(res.split("(")[1].split(")")[0]))
+        
+        total_score = sum(scores)
+        
+        c1, c2 = st.columns([1, 3])
+        c1.metric("Total Quality Score", f"{total_score} / 4.0")
+        
+        with c2:
+            if total_score < 2.0:
+                st.error("🚨 Threshold Not Met: Study scored below 2.0 and must be excluded.")
+                if st.button("Exclude Study (Failed QA)", type="primary"):
+                    db.update_article_status(art['id'], "excluded_qc", f"Failed QA Score: {total_score}")
+                    with sqlite3.connect(db.db_path) as conn:
+                        conn.execute("UPDATE articles SET quality_score = ? WHERE id = ?", (total_score, art['id']))
+                    st.rerun()
+            else:
+                st.success("✅ Threshold Met: Study is eligible for extraction.")
+        
+        # Só exibe o form de extração se a nota for >= 2.0
+        if total_score >= 2.0:
+            st.divider()
+            with st.form("extraction_form"):
+                st.subheader("Data Extraction (GQM Aligned)")
+                ext_data = {}
+                for field in settings["extraction_fields"]:
+                    ext_data[field] = st.text_area(field, height=100)
+                
+                if st.form_submit_button("💾 Save Extraction & Mark as Final", type="primary"):
+                    with sqlite3.connect(db.db_path) as conn:
+                        conn.execute("UPDATE articles SET status = 'included_final', quality_score = ?, extraction_data = ? WHERE id = ?", 
+                                     (total_score, json.dumps(ext_data), art['id']))
+                    st.success("Evidence finalized successfully!")
+                    st.rerun()
+
+# ==================== AI INSIGHTS ====================
+elif page == "AI Insights (Beta)":
+    st.title("🤖 AI Research Agent")
+    st.markdown("Ask questions about your **included** dataset. The agent interprets the synthesized data.")
+    
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            
+    if prompt := st.chat_input("Ex: What are the main challenges reported by Grey Literature?"):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing database..."):
+                response = ask_data_agent(prompt)
+                st.markdown(response)
+                st.session_state.chat_history.append({"role": "assistant", "content": response})
+
+# ==================== SETTINGS ====================
+elif page == "Settings":
+    st.title("⚙️ Project Configuration")
+    st.markdown("Protocol Definitions (GQM, Elegibility & QA Criteria).")
+    
+    with st.container(border=True):
+        st.subheader("Project Identity")
+        project_name = st.text_input("Project Name", value=settings.get("project_name", ""))
+        project_desc = st.text_area("Description", value=settings.get("description", ""))
+
+    st.divider()
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("✅ Inclusion Criteria")
+        raw_ic = settings.get("inclusion_criteria", {})
+        ic_data = [{"ID": k, "Description": v} for k, v in raw_ic.items()]
+        edited_ic = st.data_editor(ic_data, num_rows="dynamic", use_container_width=True, key="ic_edit")
+        
+    with col2:
+        st.subheader("❌ Exclusion Criteria")
+        raw_ec = settings.get("exclusion_criteria", {})
+        ec_data = [{"ID": k, "Description": v} for k, v in raw_ec.items()]
+        edited_ec = st.data_editor(ec_data, num_rows="dynamic", use_container_width=True, key="ec_edit")
+
+    st.divider()
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        st.subheader("🔬 Research Questions (RQs)")
+        raw_rq = settings.get("research_questions", [])
+        rq_data = [{"RQ": q} for q in raw_rq]
+        edited_rq = st.data_editor(rq_data, num_rows="dynamic", use_container_width=True, key="rq_edit")
+        
+    with col4:
+        st.subheader("📋 Extraction Fields")
+        raw_ext = settings.get("extraction_fields", [])
+        ext_data = [{"Field": f} for f in raw_ext]
+        edited_ext = st.data_editor(ext_data, num_rows="dynamic", use_container_width=True, key="ext_edit")
+
+    st.divider()
+    if st.button("💾 Save Settings", type="primary", use_container_width=True):
+        new_settings = {
+            "project_name": project_name,
+            "description": project_desc,
+            "inclusion_criteria": {item["ID"]: item["Description"] for item in edited_ic if item.get("ID")},
+            "exclusion_criteria": {item["ID"]: item["Description"] for item in edited_ec if item.get("ID")},
+            "research_questions": [item["RQ"] for item in edited_rq if item.get("RQ")],
+            "extraction_fields": [item["Field"] for item in edited_ext if item.get("Field")],
+            "quality_criteria": settings.get("quality_criteria"),
+            "column_aliases": settings.get("column_aliases", {}),
+            "source_columns": settings.get("source_columns", ["title", "year", "abstract", "doi", "authors"])
+        }
+        
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(new_settings, f, indent=4, ensure_ascii=False)
+            
+        st.success("Configuration updated per protocol!")
+        st.balloons()
+        st.rerun()

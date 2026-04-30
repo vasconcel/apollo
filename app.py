@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
-import os
 import sqlite3
 
-# Core atualizado
+# Core
 from src.core.database import Database
-from src.core.analytics import load_decisions_dataframe, prepare_kappa, find_conflicts
+from src.core.analytics import load_decisions_dataframe, prepare_kappa
+from src.core.consensus import ConsensusEngine
+from src.core.quality import QualityEngine
 
-# Mantidos do seu sistema
+# Extras
 from src.core.ai_handler import get_ai_suggestion
 from src.core.config_manager import load_config
 
@@ -30,6 +31,8 @@ settings = {
 }
 
 db = Database()
+consensus_engine = ConsensusEngine(db.db_path)
+quality_engine = QualityEngine()
 
 if "reviewer_id" not in st.session_state:
     st.session_state.reviewer_id = "Reviewer_1"
@@ -57,7 +60,7 @@ with st.sidebar:
         "Screening",
         "Consensus & Kappa",
         "Export / Import",
-        "Synthesis"
+        "Synthesis (QC)"
     ])
 
 # ==================== DASHBOARD ====================
@@ -105,7 +108,6 @@ elif page == "Screening":
             db.save_decision(art_id, st.session_state.reviewer_id, "uncertain")
             st.rerun()
 
-        # AI Assist
         if st.button("✨ AI Suggestion", key=f"ai_{art_id}"):
             with st.spinner("Analyzing..."):
                 st.session_state.ai_suggestion = get_ai_suggestion(
@@ -122,10 +124,11 @@ elif page == "Screening":
 
 # ==================== CONSENSUS ====================
 elif page == "Consensus & Kappa":
-    st.title("🤝 Consensus & Kappa")
+    st.title("🤝 Consensus & Agreement")
 
+    # ---------- KAPPA ----------
     df = load_decisions_dataframe(db.db_path)
-    kappa, pivot = prepare_kappa(df)
+    kappa, _ = prepare_kappa(df)
 
     if kappa is not None:
         st.metric("Cohen's Kappa", round(kappa, 3))
@@ -134,14 +137,37 @@ elif page == "Consensus & Kappa":
 
     st.divider()
 
+    # ---------- AUTO CONSENSUS ----------
+    if st.button("⚙️ Auto-resolve consensus"):
+        n = consensus_engine.auto_resolve_consensus(db)
+        st.success(f"{n} articles auto-resolved")
+
+    st.divider()
+
+    # ---------- CONFLICTS ----------
     st.subheader("🚩 Conflicts")
 
-    conflicts = find_conflicts(db.db_path)
+    conflicts = consensus_engine.detect_conflicts()
 
     if conflicts.empty:
         st.success("No conflicts 🎉")
     else:
-        st.dataframe(conflicts)
+        st.dataframe(conflicts, use_container_width=True)
+
+        with st.form("resolve_conflict"):
+            art_id = st.number_input("Article ID", step=1)
+            decision = st.radio("Final Decision", ["include", "exclude"])
+            notes = st.text_area("Resolution Notes")
+
+            if st.form_submit_button("Resolve Conflict"):
+                db.save_final_decision(
+                    art_id,
+                    decision,
+                    st.session_state.reviewer_id,
+                    notes
+                )
+                st.success("Conflict resolved")
+                st.rerun()
 
 # ==================== EXPORT / IMPORT ====================
 elif page == "Export / Import":
@@ -165,39 +191,62 @@ elif page == "Export / Import":
         db.import_decisions_csv("temp.csv")
         st.success("Imported successfully")
 
-# ==================== SYNTHESIS ====================
-elif page == "Synthesis":
+# ==================== SYNTHESIS (QC) ====================
+elif page == "Synthesis (QC)":
     st.title("🧪 Quality Assessment")
 
     conn = sqlite3.connect(db.db_path)
-    df = pd.read_sql_query("SELECT * FROM articles", conn)
+
+    # Apenas artigos com decisão final = include
+    df = pd.read_sql_query("""
+        SELECT a.*
+        FROM articles a
+        JOIN final_decisions f ON a.id = f.article_id
+        WHERE f.final_decision = 'include'
+    """, conn)
+
     conn.close()
 
     if df.empty:
-        st.info("No articles available")
+        st.info("No articles ready for QC")
     else:
         selected = st.selectbox("Select article", df["title"])
-
         art = df[df["title"] == selected].iloc[0]
 
         with st.form("qa_form"):
-            st.subheader("Quality Criteria")
+            st.subheader(f"Quality Criteria ({art['literature_type']})")
 
-            q_list = settings["quality_criteria"]["WL"]
+            scores = {}
 
-            scores = []
+            if art["literature_type"] == "WL":
+                q_list = settings["quality_criteria"]["WL"]
+            else:
+                q_list = settings["quality_criteria"]["GL"]
+
             for q in q_list:
-                res = st.radio(q, ["1", "0.5", "0"])
-                scores.append(float(res))
+                val = st.radio(q, [1.0, 0.5, 0.0], horizontal=True)
+                scores[q] = val
 
-            total = sum(scores)
-            st.metric("Score", total)
+            result = quality_engine.evaluate(scores)
 
-            if st.form_submit_button("Apply"):
-                if total < 2.0:
-                    st.error("Excluded (<2.0)")
+            st.metric("Score", result["total_score"])
+            st.metric("Decision", result["decision"])
+
+            if st.form_submit_button("Save QC"):
+                db.save_quality_assessment(
+                    art["id"],
+                    st.session_state.reviewer_id,
+                    scores,
+                    result["total_score"],
+                    result["decision"]
+                )
+
+                if result["decision"] == "exclude":
+                    st.error("Article EXCLUDED (QC < 2.0)")
                 else:
-                    st.success("Included")
+                    st.success("Article PASSED QC")
+
+                st.rerun()
 
 # ==================== SETTINGS ====================
 elif page == "Settings":

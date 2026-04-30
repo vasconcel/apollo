@@ -8,7 +8,7 @@ import glob
 import re
 import pandas as pd
 from .config_manager import load_config
-from .database import DatabaseManager
+from .database import Database
 
 def normalize_columns(df: pd.DataFrame, column_aliases: dict) -> pd.DataFrame:
     """Normaliza nomes de colunas usando os aliases do config."""
@@ -157,7 +157,7 @@ def run_ingestion(config_path: str = "project_config.json", db_path: str = "data
     column_aliases = config.column_aliases
     source_columns = config.source_columns
 
-    db = DatabaseManager(db_path)
+    db = Database(db_path)
 
     # Busca em processed (onde o converter.py salvou os arquivos limpos)
     base_dir = "data/processed"

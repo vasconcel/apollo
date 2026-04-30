@@ -11,7 +11,7 @@ from src.core.consensus import ConsensusEngine
 from src.core.quality import QualityEngine
 
 # Extras
-from src.core.ai_handler import get_ai_suggestion
+from src.core.ai_handler import get_ai_suggestion, generate_theme_synthesis
 from src.core.config_manager import load_config
 
 
@@ -1284,7 +1284,108 @@ def render_synthesis():
                 if selected_theme[3]:
                     st.caption(f"RQ: {selected_theme[3]} | Description: {selected_theme[3]}")
             
-            # Get codes linked to this theme
+            # ==================== AI INSIGHT GENERATOR ====================
+            st.divider()
+            st.subheader("🤖 AI Insight Generator")
+            
+            # Initialize session state for AI synthesis
+            ai_key = f"ai_synthesis_{selected_theme_id}"
+            if ai_key not in st.session_state:
+                st.session_state[ai_key] = None
+            
+            # Button to generate AI synthesis
+            col_ai_btn, col_ai_status = st.columns([1, 2])
+            with col_ai_btn:
+                generate_btn = st.button(
+                    "🤖 Generate AI Synthesis",
+                    use_container_width=True,
+                    key=f"ai_gen_{selected_theme_id}"
+                )
+            
+            if generate_btn:
+                # Fetch all fragments linked to this theme
+                wl_fragments = []
+                gl_fragments = []
+                
+                theme_codes = db.get_codes_for_theme(selected_theme_id)
+                for code in theme_codes:
+                    code_id = code[0]
+                    code_fragments = db.get_fragments_for_code(code_id)
+                    
+                    for frag in code_fragments:
+                        frag_id, art_id, rq, text = frag[0], frag[1], frag[2], frag[3]
+                        
+                        # Get article literature type
+                        conn = sqlite3.connect(db.db_path)
+                        art = pd.read_sql_query(f"SELECT literature_type FROM articles WHERE id = {art_id}", conn).iloc[0]
+                        conn.close()
+                        
+                        if art['literature_type'] == "WL":
+                            wl_fragments.append(text)
+                        else:
+                            gl_fragments.append(text)
+                
+                # Generate synthesis
+                with st.spinner("Synthesizing evidence from WL and GL sources..."):
+                    synthesis_result = generate_theme_synthesis(
+                        selected_theme[2],  # theme label
+                        wl_fragments,
+                        gl_fragments
+                    )
+                    
+                    if synthesis_result.get("error"):
+                        st.error(f"Synthesis failed: {synthesis_result['error']}")
+                    else:
+                        st.session_state[ai_key] = synthesis_result
+                        st.rerun()
+            
+            # Display existing synthesis or new result
+            if st.session_state.get(ai_key):
+                synthesis_data = st.session_state[ai_key]
+                if synthesis_data and synthesis_data.get("synthesis"):
+                    with col_ai_status:
+                        st.caption(f"✅ Generated - WL: {synthesis_data['wl_count']} fragments | GL: {synthesis_data['gl_count']} fragments")
+                    
+                    st.divider()
+                    st.markdown("### 📝 AI Synthesis Report")
+                    
+                    # Display synthesis in a styled container
+                    st.markdown(f"""
+                    <div style="
+                        background: #f8fafc; padding: 20px; border-radius: 10px;
+                        border: 1px solid #e2e8f0; font-family: system-ui;
+                    ">
+                    {synthesis_data['synthesis'].replace('**', '<strong>').replace('**', '</strong>')}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Also display as regular markdown
+                    st.markdown(synthesis_data['synthesis'])
+                    
+                    # Export/Copy controls
+                    st.divider()
+                    col_exp, col_copy = st.columns(2)
+                    
+                    with col_exp:
+                        # Simple text download
+                        synthesis_text = synthesis_data['synthesis']
+                        st.download_button(
+                            "📥 Export as Text",
+                            data=synthesis_text,
+                            file_name=f"{selected_theme[1]}_synthesis.txt",
+                            mime="text/plain",
+                            use_container_width=True
+                        )
+                    
+                    with col_copy:
+                        if st.button("📋 Copy to Clipboard", use_container_width=True):
+                            # Note: Streamlit doesn't have native clipboard, show instruction
+                            st.info("Use Ctrl+C to copy the text above")
+                
+            elif not generate_btn:
+                st.info("Click 'Generate AI Synthesis' to create a comparative WL/GL report for this theme.")
+            
+            # ==================== HIERARCHICAL TREE ====================
             theme_codes = db.get_codes_for_theme(selected_theme_id)
             
             if not theme_codes:
@@ -1392,6 +1493,224 @@ def render_synthesis():
                     st.info("No fragments")
 
 
+# ==================== PAGE: EXPORT & AUDIT ====================
+def render_export_audit():
+    st.header("📦 Export & Audit")
+    st.caption("Quality control, audit trails, and publication-ready exports")
+    
+    # Initialize session state for exports
+    if "export_data" not in st.session_state:
+        st.session_state.export_data = {}
+    
+    # ==================== SECTION 1: AUDIT DASHBOARD ====================
+    st.subheader("🔍 Audit Dashboard")
+    st.caption("Validate data integrity before export")
+    
+    # Get PRISMA stats
+    prisma = get_prisma_stats()
+    
+    # Validate traceability
+    integrity = db.validate_traceability_integrity()
+    
+    # Get additional audit metrics
+    conn = sqlite3.connect(db.db_path)
+    
+    # Articles with no fragments
+    articles_with_fragments = pd.read_sql_query("""
+        SELECT DISTINCT article_id FROM fragments
+    """, conn)
+    articles_with_fragments_ids = set(articles_with_fragments["article_id"].tolist()) if not articles_with_fragments.empty else set()
+    
+    # Included articles (passed screening)
+    included_articles = pd.read_sql_query("""
+        SELECT a.id, a.title FROM articles a
+        JOIN final_decisions f ON a.id = f.article_id
+        WHERE f.final_decision = 'include'
+    """, conn)
+    
+    # Articles with zero extraction
+    zero_extraction = []
+    if not included_articles.empty:
+        for _, row in included_articles.iterrows():
+            if row['id'] not in articles_with_fragments_ids:
+                zero_extraction.append({"id": row['id'], "title": row['title']})
+    
+    conn.close()
+    
+    # Display audit alerts
+    has_issues = False
+    
+    # Orphaned Fragments (no codes)
+    if integrity["fragments_without_codes"]:
+        has_issues = True
+        st.error(f"🚨 **Orphaned Fragments**: {len(integrity['fragments_without_codes'])} fragments have no codes assigned")
+        with st.expander("View Orphaned Fragments"):
+            for frag in integrity["fragments_without_codes"][:10]:
+                st.caption(f"- ID {frag['fragment_id']}: {frag['fragment_text'][:80]}... (RQ: {frag['rq_code']})")
+            if len(integrity["fragments_without_codes"]) > 10:
+                st.caption(f"... and {len(integrity['fragments_without_codes']) - 10} more")
+    
+    # Orphaned Codes (no themes)
+    if integrity["codes_without_fragments"]:
+        st.warning(f"⚠️ **Orphaned Codes**: {len(integrity['codes_without_fragments'])} codes have no fragments linked")
+        with st.expander("View Orphaned Codes"):
+            for code in integrity["codes_without_fragments"][:10]:
+                st.caption(f"- {code['code_label']} (RQ: {code['rq_code']})")
+    
+    # Orphaned Themes (no codes)
+    if integrity["themes_without_codes"]:
+        st.warning(f"⚠️ **Orphaned Themes**: {len(integrity['themes_without_codes'])} themes have no codes linked")
+        with st.expander("View Orphaned Themes"):
+            for theme in integrity["themes_without_codes"][:10]:
+                st.caption(f"- {theme['theme_code']}: {theme['theme_label']} (RQ: {theme['rq_code']})")
+    
+    # Coverage Gap (included articles with no fragments)
+    if zero_extraction:
+        has_issues = True
+        st.warning(f"⚠️ **Coverage Gap**: {len(zero_extraction)} included articles have no fragments extracted")
+        with st.expander("View Articles Needing Extraction"):
+            for art in zero_extraction[:10]:
+                st.caption(f"- {art['title'][:60]}...")
+            if len(zero_extraction) > 10:
+                st.caption(f"... and {len(zero_extraction) - 10} more")
+    
+    # All clear
+    if not has_issues:
+        st.success("✅ **Audit Passed**: No data integrity issues detected. Your research is ready for export!")
+    
+    st.divider()
+    
+    # ==================== SECTION 2: PUBLICATION SUMMARY ====================
+    st.subheader("📝 Publication Summary")
+    st.caption("Copy-pasteable summary for your paper")
+    
+    # Calculate summary statistics
+    total_articles = prisma["total_imported"]
+    wl_count = len(pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'WL'", conn if 'conn' in locals() else sqlite3.connect(db.db_path)).iloc[0])
+    gl_count = len(pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'GL'", conn if 'conn' in locals() else sqlite3.connect(db.db_path)).iloc[0])
+    
+    conn = sqlite3.connect(db.db_path)
+    wl_count = pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'WL'", conn).iloc[0]['c']
+    gl_count = pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'GL'", conn).iloc[0]['c']
+    final_included = prisma["final_included"]
+    
+    # Count themes and codes
+    themes_count = pd.read_sql_query("SELECT COUNT(*) as c FROM themes", conn).iloc[0]['c']
+    codes_count = pd.read_sql_query("SELECT COUNT(*) as c FROM codes", conn).iloc[0]['c']
+    fragments_count = pd.read_sql_query("SELECT COUNT(*) as c FROM fragments", conn).iloc[0]['c']
+    conn.close()
+    
+    # Generate summary text
+    summary_text = f"""This study analyzed {total_articles} articles ({wl_count} White Literature, {gl_count} Grey Literature). After systematic screening and quality assessment, {final_included} articles were included for analysis. The thematic synthesis process resulted in {themes_count} themes and {codes_count} unique codes, supported by {fragments_count} evidence fragments extracted from the primary sources."""
+    
+    st.text_area("Study Summary (for paper)", value=summary_text, height=100)
+    
+    col_copy1, col_copy2 = st.columns([1, 4])
+    with col_copy1:
+        st.caption("📋 Copy the text above")
+    
+    st.divider()
+    
+    # ==================== SECTION 3: EXPORT PACKAGE ====================
+    st.subheader("🚀 Publication-Ready Export")
+    st.caption("Generate and download the complete research package")
+    
+    # Export button
+    col_exp, col_status = st.columns([1, 2])
+    
+    with col_exp:
+        generate_export = st.button(
+            "📦 Generate Full Research Package",
+            use_container_width=True,
+            type="primary"
+        )
+    
+    if generate_export:
+        with st.spinner("Generating export files..."):
+            try:
+                # Create export directory
+                import os
+                export_dir = "research_export"
+                os.makedirs(export_dir, exist_ok=True)
+                
+                # Export all artifacts
+                export_results = db.export_all_research_artifacts(export_dir)
+                
+                st.session_state.export_data = {
+                    "success": True,
+                    "results": export_results,
+                    "path": export_dir
+                }
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Export failed: {str(e)}")
+    
+    # Display export results
+    if st.session_state.get("export_data", {}).get("success"):
+        export_results = st.session_state["export_data"]["results"]
+        export_path = st.session_state["export_data"]["path"]
+        
+        with col_status:
+            st.success(f"✅ Export complete! Generated {sum(export_results.values())} files")
+        
+        st.divider()
+        
+        st.markdown("### 📥 Download Export Files")
+        
+        # Read and provide download buttons for each file
+        import os
+        export_files = {
+            "traceability_matrix.csv": "Full traceability: Theme → Code → Fragment → Source",
+            "fragments_with_sources.csv": "All evidence fragments with source metadata",
+            "codes.csv": "Codebook with RQ associations",
+            "themes.csv": "Theme definitions and RQ mappings"
+        }
+        
+        for filename, description in export_files.items():
+            filepath = os.path.join(export_path, filename)
+            if os.path.exists(filepath):
+                with open(filepath, 'r', encoding='utf-8-sig') as f:
+                    file_content = f.read()
+                
+                col_dl, col_desc = st.columns([1, 2])
+                with col_dl:
+                    st.download_button(
+                        f"📥 {filename}",
+                        data=file_content,
+                        file_name=filename,
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                with col_desc:
+                    st.caption(description)
+        
+        st.divider()
+        
+        # Quick stats for the export
+        st.markdown("### 📊 Export Statistics")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Themes", export_results.get("themes", 0))
+        with c2:
+            st.metric("Codes", export_results.get("codes", 0))
+        with c3:
+            st.metric("Fragments", export_results.get("fragments_with_sources", 0))
+        with c4:
+            st.metric("Matrix Rows", export_results.get("traceability_matrix", 0))
+    
+    else:
+        with col_status:
+            st.info("Click 'Generate Full Research Package' to create export files")
+    
+    st.divider()
+    
+    # ==================== SECTION 4: DATABASE INFO ====================
+    with st.expander("🗄️ Database Information"):
+        st.markdown(f"**Database Path:** `{db.db_path}`")
+        st.markdown(f"**Database Size:** {os.path.getsize(db.db_path) / 1024:.1f} KB" if os.path.exists(db.db_path) else "N/A")
+
+
 # ==================== SIDEBAR ====================
 with st.sidebar:
     st.title("🔬 AIMS")
@@ -1414,7 +1733,8 @@ with st.sidebar:
         "Consensus",
         "Quality Assessment",
         "Extraction",
-        "Synthesis"
+        "Synthesis",
+        "Export & Audit"
     ], label_visibility="collapsed")
     
     st.divider()
@@ -1444,3 +1764,5 @@ elif page == "Extraction":
     render_extraction()
 elif page == "Synthesis":
     render_synthesis()
+elif page == "Export & Audit":
+    render_export_audit()

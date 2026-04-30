@@ -109,6 +109,120 @@ def get_stats():
     }
 
 
+def get_prisma_stats():
+    """Calculate PRISMA Flow Diagram statistics from database."""
+    conn = sqlite3.connect(db.db_path)
+    
+    # Total imported records
+    total_imported = pd.read_sql_query("SELECT COUNT(*) as count FROM articles", conn).iloc[0]['count']
+    
+    # Screened records (unique articles with at least one decision)
+    screened = pd.read_sql_query("""
+        SELECT COUNT(DISTINCT article_id) as count FROM screening_decisions
+    """, conn).iloc[0]['count']
+    
+    # Exclusion reasons breakdown
+    excluded_by_ec = pd.read_sql_query("""
+        SELECT exclusion_reason, COUNT(*) as count 
+        FROM screening_decisions 
+        WHERE decision = 'exclude' AND exclusion_reason IS NOT NULL
+        GROUP BY exclusion_reason
+        ORDER BY count DESC
+    """, conn)
+    
+    # Included in screening (by any reviewer)
+    included_screening = pd.read_sql_query("""
+        SELECT COUNT(DISTINCT article_id) as count 
+        FROM screening_decisions 
+        WHERE decision = 'include'
+    """, conn).iloc[0]['count']
+    
+    # Final included (consensus resolved)
+    final_included = pd.read_sql_query("""
+        SELECT COUNT(*) as count 
+        FROM final_decisions 
+        WHERE final_decision = 'include'
+    """, conn).iloc[0]['count']
+    
+    # Final excluded (consensus resolved)
+    final_excluded = pd.read_sql_query("""
+        SELECT COUNT(*) as count 
+        FROM final_decisions 
+        WHERE final_decision = 'exclude'
+    """, conn).iloc[0]['count']
+    
+    # QA assessments
+    qa_passed = pd.read_sql_query("""
+        SELECT COUNT(*) as count 
+        FROM quality_assessments 
+        WHERE decision = 'include'
+    """, conn).iloc[0]['count']
+    
+    qa_failed = pd.read_sql_query("""
+        SELECT COUNT(*) as count 
+        FROM quality_assessments 
+        WHERE decision = 'exclude'
+    """, conn).iloc[0]['count']
+    
+    # Pending screening
+    pending_screening = total_imported - screened
+    
+    # Articles in QA queue (passed final decision as include, not yet assessed)
+    qa_pending = pd.read_sql_query("""
+        SELECT COUNT(*) as count 
+        FROM final_decisions f
+        WHERE f.final_decision = 'include'
+        AND NOT EXISTS (
+            SELECT 1 FROM quality_assessments q WHERE q.article_id = f.article_id
+        )
+    """, conn).iloc[0]['count']
+    
+    conn.close()
+    
+    return {
+        "total_imported": total_imported,
+        "screened": screened,
+        "pending_screening": pending_screening,
+        "included_screening": included_screening,
+        "excluded_screening": screened - included_screening,
+        "final_included": final_included,
+        "final_excluded": final_excluded,
+        "qa_passed": qa_passed,
+        "qa_failed": qa_failed,
+        "qa_pending": qa_pending,
+        "excluded_by_ec": excluded_by_ec
+    }
+
+
+def get_exclusion_reasons_summary():
+    """Get detailed exclusion reasons for analytics."""
+    exclusion_criteria = settings.get("exclusion_criteria", {})
+    conn = sqlite3.connect(db.db_path)
+    
+    reasons_df = pd.read_sql_query("""
+        SELECT exclusion_reason, COUNT(*) as count 
+        FROM screening_decisions 
+        WHERE decision = 'exclude' AND exclusion_reason IS NOT NULL
+        GROUP BY exclusion_reason
+        ORDER BY count DESC
+    """, conn)
+    
+    conn.close()
+    
+    result = []
+    for _, row in reasons_df.iterrows():
+        ec_code = row['exclusion_reason']
+        count = row['count']
+        description = exclusion_criteria.get(ec_code, "Unknown criterion")
+        result.append({
+            "code": ec_code,
+            "description": description,
+            "count": count
+        })
+    
+    return result
+
+
 def render_status_badge(status):
     """Render a status badge."""
     status_lower = str(status).lower()
@@ -130,85 +244,252 @@ def render_metric_card(label, value, delta=None, help_text=None):
 # ==================== PAGE: OVERVIEW ====================
 def render_overview():
     st.header("📊 Overview")
-    st.caption("Real-time pipeline statistics and progress tracking")
+    st.caption("Real-time pipeline statistics and PRISMA flow tracking")
     
-    stats = get_stats()
-    decisions = stats["decisions"]
-    final = stats["final"]
-    qa = stats["qa"]
+    # Get PRISMA statistics
+    prisma = get_prisma_stats()
+    has_data = prisma["total_imported"] > 0
     
-    # Key metrics row
-    c1, c2, c3, c4, c5 = st.columns(5)
+    # ===== KEY METRICS ROW =====
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
-        st.metric("Total Articles", stats["total_articles"])
+        st.metric("Total Imported", prisma["total_imported"])
     with c2:
-        screened = len(decisions["article_id"].unique()) if not decisions.empty else 0
-        st.metric("Screened", screened)
+        st.metric("Screened", prisma["screened"])
     with c3:
-        included = len(final[final["final_decision"] == "include"]) if not final.empty else 0
-        st.metric("Included", included)
+        st.metric("Pending", prisma["pending_screening"])
     with c4:
-        excluded_final = len(final[final["final_decision"] == "exclude"]) if not final.empty else 0
-        st.metric("Excluded (Final)", excluded_final)
+        st.metric("Included (Screening)", prisma["included_screening"])
     with c5:
-        pending = stats["total_articles"] - screened
-        st.metric("Pending", pending)
+        st.metric("Final Included", prisma["final_included"])
+    with c6:
+        st.metric("QA Pending", prisma["qa_pending"])
     
     st.divider()
     
-    # Charts row
-    col_left, col_right = st.columns(2)
+    # ===== PRISMA FLOW DIAGRAM =====
+    st.subheader("📊 PRISMA Flow Diagram")
     
-    with col_left:
-        st.subheader("Screening Progress")
-        if not decisions.empty:
-            # Decision distribution
-            decision_counts = decisions["decision"].value_counts()
-            fig_pie = px.pie(
-                values=decision_counts.values,
-                names=decision_counts.index,
-                title="Decision Distribution",
-                color_discrete_sequence=px.colors.qualitative.Set2
-            )
-            fig_pie.update_layout(showlegend=True, height=300)
-            st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("No screening decisions yet")
+    if not has_data:
+        st.info("No articles imported yet. Import data to see the PRISMA flow.")
+    else:
+        # Create PRISMA flow using styled containers
+        with st.container():
+            # Stage 1: Identification
+            col_id = st.columns([1])
+            with col_id[0]:
+                st.markdown("""
+                <div style="
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white; padding: 20px; border-radius: 10px;
+                    text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                ">
+                    <h3 style="margin:0; color: white;">📥 Identification</h3>
+                    <p style="font-size: 24px; font-weight: bold; margin: 10px 0;">{}</p>
+                    <small>Records identified from databases</small>
+                </div>
+                """.format(prisma["total_imported"]), unsafe_allow_html=True)
+            
+            st.markdown("##### ↓")
+            
+            # Stage 2: Screening (with expandable details)
+            with st.expander("🔍 **Screening Phase** (click to expand)", expanded=True):
+                c_screen = st.columns([1, 1, 1])
+                
+                with c_screen[0]:
+                    st.markdown("""
+                    <div style="
+                        background: #fef3c7; padding: 15px; border-radius: 8px;
+                        border-left: 4px solid #f59e0b; text-align: center;
+                    ">
+                        <h4 style="margin:0;">🕐 Pending</h4>
+                        <p style="font-size: 20px; font-weight: bold; color: #92400e;">{}</p>
+                    </div>
+                    """.format(prisma["pending_screening"]), unsafe_allow_html=True)
+                
+                with c_screen[1]:
+                    st.markdown("""
+                    <div style="
+                        background: #d1fae5; padding: 15px; border-radius: 8px;
+                        border-left: 4px solid #10b981; text-align: center;
+                    ">
+                        <h4 style="margin:0;">✅ Screened</h4>
+                        <p style="font-size: 20px; font-weight: bold; color: #065f46;">{}</p>
+                    </div>
+                    """.format(prisma["screened"]), unsafe_allow_html=True)
+                
+                with c_screen[2]:
+                    excluded_count = prisma["excluded_screening"]
+                    st.markdown("""
+                    <div style="
+                        background: #fee2e2; padding: 15px; border-radius: 8px;
+                        border-left: 4px solid #ef4444; text-align: center;
+                    ">
+                        <h4 style="margin:0;">❌ Excluded</h4>
+                        <p style="font-size: 20px; font-weight: bold; color: #991b1b;">{}</p>
+                    </div>
+                    """.format(excluded_count), unsafe_allow_html=True)
+                
+                # Show exclusion reasons breakdown
+                if prisma["excluded_by_ec"] is not None and not prisma["excluded_by_ec"].empty:
+                    st.markdown("**Exclusion Reasons Breakdown:**")
+                    ec_data = []
+                    for _, row in prisma["excluded_by_ec"].iterrows():
+                        ec_data.append({
+                            "Criterion": row['exclusion_reason'],
+                            "Count": row['count']
+                        })
+                    if ec_data:
+                        ec_df = pd.DataFrame(ec_data)
+                        st.dataframe(ec_df, hide_index=True, use_container_width=True)
+            
+            st.markdown("##### ↓")
+            
+            # Stage 3: Eligibility (QA)
+            with st.expander("🧪 **Eligibility / Quality Assessment**", expanded=True):
+                if prisma["final_included"] > 0 or prisma["qa_pending"] > 0:
+                    c_qa = st.columns([1, 1, 1, 1])
+                    
+                    with c_qa[0]:
+                        st.markdown("""
+                        <div style="
+                            background: #e0f2fe; padding: 15px; border-radius: 8px;
+                            border-left: 4px solid #0ea5e9; text-align: center;
+                        ">
+                            <h4 style="margin:0;">📋 For QA</h4>
+                            <p style="font-size: 20px; font-weight: bold; color: #075985;">{}</p>
+                        </div>
+                        """.format(prisma["final_included"] + prisma["qa_pending"]), unsafe_allow_html=True)
+                    
+                    with c_qa[1]:
+                        st.markdown("""
+                        <div style="
+                            background: #d1fae5; padding: 15px; border-radius: 8px;
+                            border-left: 4px solid #10b981; text-align: center;
+                        ">
+                            <h4 style="margin:0;">✅ QA Passed</h4>
+                            <p style="font-size: 20px; font-weight: bold; color: #065f46;">{}</p>
+                        </div>
+                        """.format(prisma["qa_passed"]), unsafe_allow_html=True)
+                    
+                    with c_qa[2]:
+                        st.markdown("""
+                        <div style="
+                            background: #fee2e2; padding: 15px; border-radius: 8px;
+                            border-left: 4px solid #ef4444; text-align: center;
+                        ">
+                            <h4 style="margin:0;">❌ QA Failed</h4>
+                            <p style="font-size: 20px; font-weight: bold; color: #991b1b;">{}</p>
+                        </div>
+                        """.format(prisma["qa_failed"]), unsafe_allow_html=True)
+                    
+                    with c_qa[3]:
+                        st.markdown("""
+                        <div style="
+                            background: #fef3c7; padding: 15px; border-radius: 8px;
+                            border-left: 4px solid #f59e0b; text-align: center;
+                        ">
+                            <h4 style="margin:0;">⏳ QA Pending</h4>
+                            <p style="font-size: 20px; font-weight: bold; color: #92400e;">{}</p>
+                        </div>
+                        """.format(prisma["qa_pending"]), unsafe_allow_html=True)
+                else:
+                    st.info("No articles have passed to Quality Assessment yet.")
+            
+            st.markdown("##### ↓")
+            
+            # Stage 4: Included in Synthesis
+            with st.expander("🧩 **Included in Synthesis**", expanded=False):
+                st.markdown("""
+                <div style="
+                    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+                    color: white; padding: 20px; border-radius: 10px;
+                    text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                ">
+                    <h3 style="margin:0; color: white;">📚 Final Synthesis Set</h3>
+                    <p style="font-size: 36px; font-weight: bold; margin: 10px 0;">{}</p>
+                    <small>Articles ready for thematic synthesis</small>
+                </div>
+                """.format(prisma["final_included"]), unsafe_allow_html=True)
     
-    with col_right:
-        st.subheader("Literature Type Distribution")
-        conn = sqlite3.connect(db.db_path)
-        articles = pd.read_sql_query("SELECT literature_type FROM articles", conn)
-        conn.close()
+    st.divider()
+    
+    # ===== EXCLUSION REASONS ANALYTICS =====
+    if has_data and not prisma["excluded_by_ec"].empty:
+        st.subheader("🚫 Exclusion Reasons Analysis")
         
-        if not articles.empty:
-            lit_dist = articles["literature_type"].value_counts()
-            fig_bar = px.bar(
-                x=lit_dist.index,
-                y=lit_dist.values,
-                title="White vs Grey Literature",
-                labels={"x": "Type", "y": "Count"},
-                color=lit_dist.values,
-                color_continuous_scale="Blues"
+        exclusion_reasons = get_exclusion_reasons_summary()
+        
+        if exclusion_reasons:
+            # Create horizontal bar chart
+            exclusion_criteria = settings.get("exclusion_criteria", {})
+            
+            fig_excl = px.bar(
+                pd.DataFrame(exclusion_reasons),
+                y="code",
+                x="count",
+                orientation='h',
+                title="Distribution of Exclusion Criteria",
+                labels={"code": "Criterion", "count": "Number of Articles Excluded"},
+                color="count",
+                color_continuous_scale="Reds"
             )
-            fig_bar.update_layout(height=300, showlegend=False)
-            st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.info("No articles imported")
+            fig_excl.update_layout(
+                showlegend=False,
+                height=max(300, len(exclusion_reasons) * 60),
+                yaxis={"categoryorder": "total"},
+                margin={"l": 150}
+            )
+            st.plotly_chart(fig_excl, use_container_width=True)
+            
+            # Detailed table with descriptions
+            with st.expander("📋 Detailed Exclusion Reasons Table"):
+                excl_df = pd.DataFrame(exclusion_reasons)
+                excl_df["% of Total"] = (excl_df["count"] / prisma["screened"] * 100).round(1)
+                st.dataframe(excl_df.rename(columns={
+                    "code": "Criterion",
+                    "description": "Description",
+                    "count": "Count",
+                    "% of Total": "% of Screened"
+                }), hide_index=True, use_container_width=True)
     
     st.divider()
     
-    # Research Questions overview
-    st.subheader("Research Questions")
+    # ===== LITERATURE TYPE DISTRIBUTION =====
+    st.subheader("📚 Literature Type Distribution")
+    
+    conn = sqlite3.connect(db.db_path)
+    articles = pd.read_sql_query("SELECT literature_type FROM articles", conn)
+    conn.close()
+    
+    if not articles.empty:
+        lit_dist = articles["literature_type"].value_counts()
+        fig_lit = px.bar(
+            x=lit_dist.index,
+            y=lit_dist.values,
+            title="White Literature (WL) vs Grey Literature (GL)",
+            labels={"x": "Literature Type", "y": "Count"},
+            color=lit_dist.index,
+            color_discrete_map={"WL": "#2563eb", "GL": "#64748b"}
+        )
+        fig_lit.update_layout(height=300, showlegend=False)
+        st.plotly_chart(fig_lit, use_container_width=True)
+    else:
+        st.info("No articles imported")
+    
+    st.divider()
+    
+    # ===== RESEARCH QUESTIONS =====
+    st.subheader("❓ Research Questions")
     rqs = settings["research_questions"]
     for i, rq in enumerate(rqs, 1):
         st.markdown(f"**RQ{i}:** {rq}")
     
     st.divider()
     
-    # Quick actions
-    st.subheader("Quick Actions")
-    c1, c2, c3 = st.columns(3)
+    # ===== QUICK ACTIONS =====
+    st.subheader("⚡ Quick Actions")
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         if st.button("📥 Import Data", use_container_width=True):
             st.info("Use the Data Exchange section to import CSV files")
@@ -218,6 +499,9 @@ def render_overview():
     with c3:
         if st.button("📊 Generate Report", use_container_width=True):
             st.info("Report generation coming soon")
+    with c4:
+        if st.button("🗑️ Export Decisions", use_container_width=True):
+            st.info("Export functionality coming soon")
 
 
 # ==================== PAGE: SCREENING ====================
@@ -291,57 +575,136 @@ def render_screening():
     
     st.divider()
     
-    # Action buttons
-    st.subheader("Decision")
+    # ========== ELIGIBILITY CRITERIA FUNNEL ==========
+    st.subheader("🎯 Decision: Eligibility Criteria Funnel")
     
-    c1, c2, c3, c4 = st.columns(4)
+    # Load criteria from settings
+    exclusion_criteria = settings.get("exclusion_criteria", {})
+    inclusion_criteria = settings.get("inclusion_criteria", {})
     
-    with c1:
-        if st.button("✅ Include", key=f"inc_{art_id}", use_container_width=True):
-            db.save_decision(art_id, st.session_state.reviewer_id, "include")
-            st.session_state.ai_suggestion = None
-            if st.session_state.current_article_idx < len(pending_articles) - 1:
-                st.session_state.current_article_idx += 1
-            else:
-                st.session_state.current_article_idx = 0
-            st.rerun()
-    
-    with c2:
-        if st.button("❌ Exclude", key=f"exc_{art_id}", use_container_width=True):
-            db.save_decision(art_id, st.session_state.reviewer_id, "exclude")
-            st.session_state.ai_suggestion = None
-            if st.session_state.current_article_idx < len(pending_articles) - 1:
-                st.session_state.current_article_idx += 1
-            else:
-                st.session_state.current_article_idx = 0
-            st.rerun()
-    
-    with c3:
-        if st.button("⚠️ Uncertain", key=f"unc_{art_id}", use_container_width=True):
-            db.save_decision(art_id, st.session_state.reviewer_id, "uncertain")
-            st.session_state.ai_suggestion = None
-            if st.session_state.current_article_idx < len(pending_articles) - 1:
-                st.session_state.current_article_idx += 1
-            else:
-                st.session_state.current_article_idx = 0
-            st.rerun()
-    
-    with c4:
-        if st.button("🤖 AI Analyze", key=f"ai_{art_id}", use_container_width=True, type="secondary"):
+    # Create a form for formal screening decision
+    with st.form(key=f"screening_form_{art_id}", clear_on_submit=False):
+        # Decision type selector
+        decision_type = st.radio(
+            "Select Decision Type",
+            options=["include", "exclude", "uncertain"],
+            format_func=lambda x: {
+                "include": "✅ Include",
+                "exclude": "❌ Exclude", 
+                "uncertain": "⚠️ Uncertain"
+            }.get(x, x),
+            horizontal=True,
+            help="Select the type of screening decision"
+        )
+        
+        st.divider()
+        
+        # CRITERIA INPUTS BASED ON DECISION TYPE
+        selected_exclusion_reason = None
+        selected_inclusion_criteria = {}
+        
+        if decision_type == "exclude":
+            # MANDATORY: Select at least one Exclusion Criterion
+            st.markdown("**Exclusion Criterion (Required)**")
+            st.caption("Select the criterion that justifies exclusion:")
+            
+            selected_ec = st.selectbox(
+                "Exclusion Criterion",
+                options=[""] + list(exclusion_criteria.keys()),
+                format_func=lambda x: x if not x else f"{x}: {exclusion_criteria[x]}"
+            )
+            
+            if not selected_ec:
+                st.error("⚠️ You must select at least one Exclusion Criterion to exclude an article.")
+            
+            selected_exclusion_reason = selected_ec
+            
+        elif decision_type == "include":
+            # OPTIONAL: Check which Inclusion Criteria were met
+            st.markdown("**Inclusion Criteria (Optional)**")
+            st.caption("Check the criteria this article meets:")
+            
+            selected_inclusion_criteria = {}
+            for ic_code, ic_desc in inclusion_criteria.items():
+                selected_inclusion_criteria[ic_code] = st.checkbox(
+                    f"{ic_code}: {ic_desc}",
+                    value=False,
+                    key=f"ic_{art_id}_{ic_code}"
+                )
+        
+        # AI Analyze button (positioned within form)
+        col_ai_left, col_ai_right = st.columns([1, 3])
+        with col_ai_left:
+            ai_analyze = st.form_submit_button(
+                "🤖 AI Analyze",
+                type="secondary",
+                use_container_width=True
+            )
+        
+        if ai_analyze:
             with st.spinner("Analyzing with AI..."):
                 st.session_state.ai_suggestion = get_ai_suggestion(title, abstract or "", settings)
+            st.rerun()
+        
+        st.divider()
+        
+        # SUBMIT DECISION
+        col_submit_left, col_submit_right = st.columns([1, 3])
+        with col_submit_left:
+            submit_decision = st.form_submit_button(
+                "💾 Submit Decision",
+                type="primary",
+                use_container_width=True
+            )
+    
+    # Handle form submission (outside form for proper state management)
+    if 'submit_screening' not in st.session_state:
+        st.session_state.submit_screening = None
+    
+    # Process decision submission via a separate handler
+    if submit_decision:
+        # Validate exclusion criterion is selected for exclude decisions
+        if decision_type == "exclude" and not selected_exclusion_reason:
+            st.error("❌ Exclusion requires selecting at least one Exclusion Criterion.")
+        else:
+            # Build criteria dict for include decisions
+            criteria_dict = None
+            if decision_type == "include":
+                criteria_dict = {k: v for k, v in selected_inclusion_criteria.items() if v}
+            
+            # Save decision with criteria
+            db.save_decision(
+                art_id, 
+                st.session_state.reviewer_id, 
+                decision_type,
+                exclusion_reason=selected_exclusion_reason,
+                criteria=criteria_dict
+            )
+            
+            st.session_state.ai_suggestion = None
+            st.session_state.submit_screening = art_id
+            
+            # Navigate to next article
+            if st.session_state.current_article_idx < len(pending_articles) - 1:
+                st.session_state.current_article_idx += 1
+            else:
+                st.session_state.current_article_idx = 0
+            
+            st.success(f"Decision recorded: **{decision_type.upper()}**" + 
+                     (f" (EC: {selected_exclusion_reason})" if selected_exclusion_reason else ""))
             st.rerun()
     
     # Navigation
     st.divider()
+    st.subheader("📑 Article Navigation")
     nav_c1, nav_c2, nav_c3 = st.columns([1, 2, 1])
     with nav_c1:
-        if st.button("◀️ Previous", disabled=st.session_state.current_article_idx == 0):
+        if st.button("◀️ Previous", disabled=st.session_state.current_article_idx == 0, use_container_width=True):
             st.session_state.current_article_idx = max(0, st.session_state.current_article_idx - 1)
             st.session_state.ai_suggestion = None
             st.rerun()
     with nav_c3:
-        if st.button("Next ▶️", disabled=st.session_state.current_article_idx >= len(pending_articles) - 1):
+        if st.button("Next ▶️", disabled=st.session_state.current_article_idx >= len(pending_articles) - 1, use_container_width=True):
             st.session_state.current_article_idx += 1
             st.session_state.ai_suggestion = None
             st.rerun()
@@ -654,114 +1017,379 @@ def render_extraction():
 
 # ==================== PAGE: SYNTHESIS ====================
 def render_synthesis():
-    st.header("🧩 Synthesis & Traceability")
-    st.caption("Explore themes, codes, and evidence traceability")
+    st.header("🧩 Thematic Synthesis Workspace")
+    st.caption("Interactive qualitative analysis: Open Coding → Thematic Organization → Traceability")
     
-    tab1, tab2, tab3 = st.tabs(["🔍 Traceability Explorer", "🎨 Theme Explorer", "📊 Synthesis Summary"])
+    # Session state for managing selections
+    if "selected_rq" not in st.session_state:
+        st.session_state.selected_rq = "RQ1"
     
+    tab1, tab2, tab3 = st.tabs(["1. 🔬 Open Coding", "2. 🎨 Thematic Organization", "3. 🔗 Traceability Matrix"])
+    
+    # ==================== TAB 1: OPEN CODING ====================
     with tab1:
-        st.subheader("Traceability: RQ → Fragments → Sources")
+        st.subheader("Open Coding: Link Fragments to Codes")
         
-        # RQ selector
-        rq_code = st.selectbox("Select Research Question", ["RQ1", "RQ2", "RQ3", "RQ4", "RQ5"])
+        # RQ Selector
+        rq_codes = ["RQ1", "RQ2", "RQ3", "RQ4", "RQ5"]
+        selected_rq = st.selectbox("Select Research Question", rq_codes, index=rq_codes.index(st.session_state.selected_rq), key="rq_selector")
+        st.session_state.selected_rq = selected_rq
         
-        # Get fragments for this RQ
-        fragments = db.get_fragments_by_rq(rq_code)
+        # Get fragments for selected RQ
+        fragments = db.get_fragments_by_rq(selected_rq)
         
         if not fragments:
-            st.info(f"No fragments extracted for {rq_code} yet")
+            st.info(f"No fragments extracted for {selected_rq} yet. Go to Extraction to add fragments.")
         else:
-            st.caption(f"Found {len(fragments)} fragments")
-            
-            # Group by source
+            # Create fragment dataframe with codes
+            frag_data = []
             for frag in fragments:
                 frag_id, art_id, rq, text, category, reviewer, page, created, art_title, lit_type = frag
+                codes = db.get_codes_for_fragment(frag_id)
+                code_labels = ", ".join([c[1] for c in codes]) if codes else "—"
+                frag_data.append({
+                    "ID": frag_id,
+                    "Article": art_title[:50] + "..." if len(art_title) > 50 else art_title,
+                    "Type": lit_type,
+                    "Fragment": text[:100] + "..." if len(text) > 100 else text,
+                    "Codes": code_labels
+                })
+            
+            frag_df = pd.DataFrame(frag_data)
+            st.dataframe(frag_df, use_container_width=True, hide_index=True, height=300)
+            
+            st.divider()
+            
+            # Fragment selection and coding interface
+            st.markdown("### 🔗 Link Fragment to Code")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Select fragment to code
+                frag_options = {f"ID {f[0]}: {f[3][:60]}...": f[0] for f in fragments}
+                selected_frag_key = st.selectbox("Select Fragment", list(frag_options.keys()))
+                selected_frag_id = frag_options[selected_frag_key]
                 
-                with st.expander(f"📄 {art_title[:60]}... ({lit_type})"):
-                    st.markdown(f"**RQ:** {rq}")
-                    st.markdown(f"**Category:** {category or 'N/A'}")
-                    st.markdown(f"**Fragment:** {text}")
-                    st.caption(f"Page: {page or 'N/A'} | Extracted by: {reviewer}")
+                # Show selected fragment details
+                selected_frag = next((f for f in fragments if f[0] == selected_frag_id), None)
+                if selected_frag:
+                    with st.expander("Fragment Details"):
+                        st.write(selected_frag[3])
+                        st.caption(f"Source: {selected_frag[8]} ({selected_frag[9]})")
+                
+                # Existing codes for this fragment
+                existing_codes = db.get_codes_for_fragment(selected_frag_id)
+                if existing_codes:
+                    st.markdown("**Already coded with:**")
+                    for code in existing_codes:
+                        st.caption(f"- {code[1]}")
+            
+            with col2:
+                # Get existing codes for this RQ
+                existing_codes_rq = db.get_codes_by_rq(selected_rq)
+                
+                if existing_codes_rq:
+                    code_options = {c[1]: c[0] for c in existing_codes_rq}
+                    
+                    # Option to use existing code or create new
+                    code_choice = st.radio("Code Action", ["Use Existing Code", "Create New Code"])
+                    
+                    if code_choice == "Use Existing Code":
+                        selected_code_label = st.selectbox("Select Existing Code", list(code_options.keys()))
+                        selected_code_id = code_options[selected_code_label]
+                        code_desc = next((c[2] for c in existing_codes_rq if c[1] == selected_code_label), "")
+                        
+                        if code_desc:
+                            st.caption(f"Description: {code_desc}")
+                        
+                        if st.button("🔗 Link to Fragment", use_container_width=True):
+                            try:
+                                db.link_fragment_code(selected_frag_id, selected_code_id, st.session_state.reviewer_id)
+                                st.success(f"Linked fragment to code: {selected_code_label}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Link failed: {e}")
+                    
+                    else:  # Create new code
+                        new_code_label = st.text_input("New Code Label", placeholder="e.g., 'Remote Hiring Challenge'")
+                        new_code_desc = st.text_area("Code Description (optional)", placeholder="Brief description of what this code represents")
+                        
+                        if st.button("➕ Create & Link", use_container_width=True):
+                            if not new_code_label.strip():
+                                st.error("Code label is required")
+                            else:
+                                try:
+                                    new_code_id = db.create_code(
+                                        new_code_label.strip(),
+                                        selected_rq,
+                                        st.session_state.reviewer_id,
+                                        new_code_desc if new_code_desc.strip() else None
+                                    )
+                                    db.link_fragment_code(selected_frag_id, new_code_id, st.session_state.reviewer_id)
+                                    st.success(f"Created and linked code: {new_code_label}")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed: {e}")
+                else:
+                    st.info(f"No codes exist for {selected_rq} yet. Create one!")
+                    new_code_label = st.text_input("New Code Label", placeholder="e.g., 'Remote Hiring Challenge'")
+                    new_code_desc = st.text_area("Code Description (optional)", placeholder="Brief description")
+                    
+                    if st.button("➕ Create Code", use_container_width=True):
+                        if not new_code_label.strip():
+                            st.error("Code label is required")
+                        else:
+                            try:
+                                new_code_id = db.create_code(
+                                    new_code_label.strip(),
+                                    selected_rq,
+                                    st.session_state.reviewer_id,
+                                    new_code_desc if new_code_desc.strip() else None
+                                )
+                                db.link_fragment_code(selected_frag_id, new_code_id, st.session_state.reviewer_id)
+                                st.success(f"Created code and linked to fragment!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
     
+    # ==================== TAB 2: THEMATIC ORGANIZATION ====================
     with tab2:
-        st.subheader("Theme Explorer: Theme → Codes → Fragments → Sources")
+        st.subheader("Thematic Organization: Manage Codes & Themes")
+        
+        col_theme, col_codes = st.columns([1, 1])
+        
+        # Theme management section
+        with col_theme:
+            st.markdown("#### 🎨 Theme Management")
+            
+            # Create new theme
+            with st.expander("➕ Create New Theme", expanded=False):
+                with st.form("create_theme_form"):
+                    new_theme_code = st.text_input("Theme Code", placeholder="e.g., THEME-1")
+                    new_theme_label = st.text_input("Theme Label", placeholder="e.g., Hiring Challenges")
+                    new_theme_rq = st.selectbox("Research Question", rq_codes)
+                    new_theme_desc = st.text_area("Description (optional)")
+                    
+                    if st.form_submit_button("Create Theme"):
+                        if not new_theme_code.strip() or not new_theme_label.strip():
+                            st.error("Theme code and label are required")
+                        else:
+                            try:
+                                theme_id = db.create_theme(
+                                    new_theme_code.strip().upper(),
+                                    new_theme_label.strip(),
+                                    new_theme_rq,
+                                    new_theme_desc.strip() if new_theme_desc.strip() else None
+                                )
+                                st.success(f"Theme created: {new_theme_label}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+            
+            # List existing themes by RQ
+            st.markdown("**Existing Themes:**")
+            for rq in rq_codes:
+                themes = db.get_themes_by_rq(rq)
+                if themes:
+                    with st.expander(f"{rq} Themes ({len(themes)})"):
+                        for t in themes:
+                            st.markdown(f"**{t[1]}:** {t[2]}")
+                            if t[3]:
+                                st.caption(t[3])
+        
+        # Code-Theme linking section
+        with col_codes:
+            st.markdown("#### 🔗 Link Codes to Themes")
+            
+            # Get all codes
+            all_codes = []
+            for rq in rq_codes:
+                codes = db.get_codes_by_rq(rq)
+                all_codes.extend(codes)
+            
+            if not all_codes:
+                st.info("No codes created yet. Go to Open Coding tab to create codes.")
+            else:
+                # Select code
+                code_options = {f"{c[1]} ({c[3]})": c[0] for c in all_codes}
+                selected_code_key = st.selectbox("Select Code", list(code_options.keys()))
+                selected_code_id = code_options[selected_code_key]
+                
+                # Get themes for the code's RQ
+                code_rq = next((c[3] for c in all_codes if c[0] == selected_code_id), None)
+                code_label = next((c[1] for c in all_codes if c[0] == selected_code_id), "")
+                
+                if code_rq:
+                    themes_rq = db.get_themes_by_rq(code_rq)
+                    
+                    if not themes_rq:
+                        st.warning(f"No themes exist for {code_rq}. Create a theme first.")
+                    else:
+                        theme_options = {f"{t[1]}: {t[2]}": t[0] for t in themes_rq}
+                        
+                        # Check which themes this code is already linked to
+                        linked_themes = db.get_themes_for_code(selected_code_id)
+                        linked_theme_ids = [t[0] for t in linked_themes]
+                        
+                        st.markdown(f"**Code:** {code_label}")
+                        st.caption(f"RQ: {code_rq}")
+                        
+                        if linked_themes:
+                            st.markdown("**Currently linked to:**")
+                            for lt in linked_themes:
+                                st.caption(f"- {lt[1]}: {lt[2]}")
+                        
+                        st.markdown("**Link to Theme:**")
+                        selected_theme_label = st.selectbox("Select Theme", list(theme_options.keys()))
+                        selected_theme_id = theme_options[selected_theme_label]
+                        
+                        if selected_theme_id in linked_theme_ids:
+                            st.info("This code is already linked to this theme")
+                        else:
+                            if st.button("🔗 Link Code to Theme", use_container_width=True):
+                                try:
+                                    db.link_code_theme(selected_code_id, selected_theme_id, st.session_state.reviewer_id)
+                                    st.success("Code linked to theme!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Link failed: {e}")
+    
+    # ==================== TAB 3: TRACEABILITY MATRIX ====================
+    with tab3:
+        st.subheader("Traceability Matrix: Theme → Codes → Fragments → Sources")
         
         # Get all themes
         all_themes = []
-        for rq in ["RQ1", "RQ2", "RQ3", "RQ4", "RQ5"]:
+        for rq in rq_codes:
             themes = db.get_themes_by_rq(rq)
             all_themes.extend(themes)
         
         if not all_themes:
-            st.info("No themes created yet. Create themes in the Extraction section.")
+            st.warning("No themes created yet. Go to Thematic Organization to create themes.")
         else:
-            theme_options = {f"{t[1]}: {t[2]}": t[0] for t in all_themes}
-            selected_theme_label = st.selectbox("Select Theme", list(theme_options.keys()))
+            # Theme selector
+            theme_options = {f"{t[1]}: {t[2]} ({t[3]})": t[0] for t in all_themes}
+            selected_theme_label = st.selectbox("Select Theme to Explore", list(theme_options.keys()))
             selected_theme_id = theme_options[selected_theme_label]
             
-            # Get fragments for this theme
-            theme_fragments = db.get_theme_fragments_with_sources(selected_theme_id)
+            # Get theme details
+            selected_theme = next((t for t in all_themes if t[0] == selected_theme_id), None)
             
-            if not theme_fragments:
-                st.info("No fragments linked to this theme")
+            st.divider()
+            
+            # Theme header
+            if selected_theme:
+                st.markdown(f"### 📂 Theme: {selected_theme[1]} - {selected_theme[2]}")
+                if selected_theme[3]:
+                    st.caption(f"RQ: {selected_theme[3]} | Description: {selected_theme[3]}")
+            
+            # Get codes linked to this theme
+            theme_codes = db.get_codes_for_theme(selected_theme_id)
+            
+            if not theme_codes:
+                st.info("No codes linked to this theme yet.")
             else:
-                st.caption(f"Found {len(theme_fragments)} fragments")
+                st.markdown(f"**Codes in this Theme:** ({len(theme_codes)})")
                 
-                # WL vs GL comparison
+                # WL vs GL distribution for the theme
                 comparison = db.compare_theme_by_literature_type(selected_theme_id)
                 
                 if comparison:
-                    st.subheader("WL vs GL Distribution")
+                    st.markdown("#### 📊 Literature Distribution")
                     comp_data = [{"Type": c[0], "Fragments": c[1], "Sources": c[2]} for c in comparison]
-                    fig = px.bar(comp_data, x="Type", y="Fragments", title="Fragment Distribution by Literature Type", color="Type", color_discrete_sequence=["#2563eb", "#64748b"])
+                    fig = px.bar(
+                        comp_data, x="Type", y="Fragments", 
+                        title="Fragment Distribution by Literature Type",
+                        color="Type", color_discrete_sequence=["#2563eb", "#64748b"]
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                 
-                st.divider()
+                st.markdown("#### 🌳 Hierarchical Tree")
                 
-                # Display fragments
-                for tf in theme_fragments:
-                    text, rq, source_id, source_title, lit_type, theme_code, theme_label = tf
-                    with st.container():
-                        st.markdown(f"**Source:** {source_title[:50]}... ({lit_type})")
-                        st.write(f"_{text}_")
-                        st.caption(f"RQ: {rq} | Theme: {theme_code}")
-                        st.divider()
-    
-    with tab3:
-        st.subheader("Synthesis Summary")
-        
-        # Get all stats
-        conn = sqlite3.connect(db.db_path)
-        
-        # Fragments by RQ
-        fragments_df = pd.read_sql_query("SELECT rq_code, COUNT(*) as count FROM fragments GROUP BY rq_code", conn)
-        
-        # Literature type distribution
-        lit_dist = pd.read_sql_query("""
-            SELECT a.literature_type, COUNT(DISTINCT f.id) as fragment_count
-            FROM fragments f
-            JOIN articles a ON f.article_id = a.id
-            GROUP BY a.literature_type
-        """, conn)
-        
-        conn.close()
-        
-        # Display
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            if not fragments_df.empty:
-                fig = px.bar(fragments_df, x="rq_code", y="count", title="Fragments by Research Question", color="rq_code", color_discrete_sequence=px.colors.qualitative.Set2)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No fragments extracted")
-        
-        with c2:
-            if not lit_dist.empty:
-                fig = px.pie(lit_dist, values="fragment_count", names="literature_type", title="Fragment Distribution by Literature Type", color_discrete_sequence=["#2563eb", "#64748b"])
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No fragments extracted")
+                # Display: Theme -> Codes -> Fragments -> Sources
+                for code in theme_codes:
+                    code_id, code_label, code_desc, code_rq = code[0], code[1], code[2], code[3]
+                    
+                    with st.expander(f"📌 **{code_label}** ({code_rq})"):
+                        if code_desc:
+                            st.caption(f"Description: {code_desc}")
+                        
+                        # Get fragments for this code
+                        code_fragments = db.get_fragments_for_code(code_id)
+                        
+                        if not code_fragments:
+                            st.info("No fragments linked to this code")
+                        else:
+                            st.markdown(f"**Fragments ({len(code_fragments)}):**")
+                            
+                            for frag in code_fragments:
+                                frag_id, art_id, rq, text, category, reviewer, page, created = frag[0], frag[1], frag[2], frag[3], frag[4], frag[5], frag[6], frag[7]
+                                
+                                # Get article title
+                                conn = sqlite3.connect(db.db_path)
+                                art = pd.read_sql_query(f"SELECT title, literature_type FROM articles WHERE id = {art_id}", conn).iloc[0]
+                                conn.close()
+                                
+                                with st.container():
+                                    st.markdown(f"📄 **{art['title'][:60]}...** ({art['literature_type']})")
+                                    st.write(f"_{text}_")
+                                    st.caption(f"RQ: {rq} | Extracted by: {reviewer}")
+                                    st.divider()
+            
+            # Synthesis Summary
+            st.divider()
+            st.markdown("#### 📊 Synthesis Summary")
+            
+            # Get all stats
+            conn = sqlite3.connect(db.db_path)
+            
+            # Fragments by RQ
+            fragments_by_rq = pd.read_sql_query("""
+                SELECT rq_code, COUNT(*) as count 
+                FROM fragments 
+                GROUP BY rq_code
+            """, conn)
+            
+            # Literature type distribution
+            lit_dist = pd.read_sql_query("""
+                SELECT a.literature_type, COUNT(DISTINCT f.id) as fragment_count
+                FROM fragments f
+                JOIN articles a ON f.article_id = a.id
+                GROUP BY a.literature_type
+            """, conn)
+            
+            # Codes per RQ
+            codes_per_rq = pd.read_sql_query("""
+                SELECT rq_code, COUNT(*) as count 
+                FROM codes 
+                GROUP BY rq_code
+            """, conn)
+            
+            conn.close()
+            
+            c1, c2, c3 = st.columns(3)
+            
+            with c1:
+                if not fragments_by_rq.empty:
+                    fig = px.bar(fragments_by_rq, x="rq_code", y="count", title="Fragments by RQ", color="rq_code", color_discrete_sequence=px.colors.qualitative.Set2)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No fragments")
+            
+            with c2:
+                if not codes_per_rq.empty:
+                    fig = px.bar(codes_per_rq, x="rq_code", y="count", title="Codes by RQ", color="rq_code", color_discrete_sequence=px.colors.qualitative.Pastel)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No codes")
+            
+            with c3:
+                if not lit_dist.empty:
+                    fig = px.pie(lit_dist, values="fragment_count", names="literature_type", title="Fragment Distribution", color_discrete_sequence=["#2563eb", "#64748b"])
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No fragments")
 
 
 # ==================== SIDEBAR ====================

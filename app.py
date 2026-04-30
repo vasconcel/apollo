@@ -4,6 +4,7 @@ import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,6 +18,8 @@ from src.core.quality import QualityEngine
 # Extras
 from src.core.ai_handler import get_ai_suggestion, generate_theme_synthesis
 from src.core.config_manager import load_config
+from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_excel_to_df
+from src.core.snowballing import get_paper_references
 
 
 # ==================== CONFIG ====================
@@ -560,12 +563,142 @@ def render_screening():
         st.info("No articles available. Please import your literature data to begin screening.")
         st.markdown("""
         **Getting Started:**
-        1. Prepare your literature in CSV format (title, abstract, source_id, literature_type)
-        2. Use the Quick Action below to import data
+        1. Prepare your literature in CSV, BibTeX, RIS, or Excel format
+        2. Upload files below to import
         """)
         
-        with st.expander("Quick Import"):
-            st.warning("Data import functionality coming soon. Currently, use direct database ingestion.")
+        # ========== DATA INGESTION HUB ==========
+        with st.expander("Data Ingestion Hub", expanded=True):
+            st.subheader("Upload Literature Files")
+            
+            col_src, col_file = st.columns([1, 2])
+            with col_src:
+                lit_type = st.radio("Literature Source Type", ["White Literature (WL)", "Grey Literature (GL)"], horizontal=True)
+            with col_file:
+                uploaded_files = st.file_uploader(
+                    "Upload files (.bib, .ris, .csv, .xlsx)",
+                    type=["bib", "ris", "csv", "xlsx"],
+                    accept_multiple_files=True
+                )
+            
+            if uploaded_files:
+                st.caption(f"📎 {len(uploaded_files)} file(s) selected")
+                
+                all_dfs = []
+                for uploaded in uploaded_files:
+                    st.info(f"Processing: {uploaded.name}")
+                    
+                    # Save to temp file
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
+                        tmp.write(uploaded.getvalue())
+                        tmp_path = tmp.name
+                    
+                    # Convert based on extension
+                    suffix = Path(uploaded.name).suffix.lower()
+                    try:
+                        if suffix == ".bib":
+                            df = convert_bibtex_to_df(tmp_path)
+                        elif suffix == ".ris":
+                            df = convert_ris_to_df(tmp_path)
+                        elif suffix == ".xlsx":
+                            df = convert_excel_to_df(tmp_path)
+                        elif suffix == ".csv":
+                            df = pd.read_csv(tmp_path)
+                        else:
+                            df = pd.DataFrame()
+                        
+                        if not df.empty:
+                            df["literature_type"] = "WL" if "White" in lit_type else "GL"
+                            all_dfs.append(df)
+                            st.success(f"✓ Converted: {len(df)} records")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                
+                # Merge and preview
+                if all_dfs:
+                    combined = pd.concat(all_dfs, ignore_index=True)
+                    
+                    st.divider()
+                    st.subheader("Preview (first 5 rows)")
+                    st.dataframe(combined.head(5), use_container_width=True)
+                    
+                    # Ingest button
+                    if st.button("Import to Screening Queue", type="primary"):
+                        with st.spinner("Ingesting..."):
+                            try:
+                                initial_count = db.count_articles()
+                                
+                                for _, row in combined.iterrows():
+                                    db.add_article({
+                                        "title": str(row.get("title", "")),
+                                        "authors": str(row.get("authors", "")),
+                                        "year": row.get("year"),
+                                        "abstract": str(row.get("abstract", "")),
+                                        "doi": str(row.get("doi", "")),
+                                        "url": str(row.get("url", "")),
+                                        "source": str(row.get("source", "") or row.get("source_title", "")),
+                                        "literature_type": row.get("literature_type", "WL")
+                                    })
+                                
+                                final_count = db.count_articles()
+                                imported = final_count - initial_count
+                                
+                                st.success(f"✅ {imported} records added to screening queue!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Ingestion failed: {e}")
+                
+                # ========== SNOWBALLING ENRICHMENT ==========
+                st.divider()
+                with st.expander("Snowballing (Reference Tracking)"):
+                    st.caption("Find related articles via reference lists")
+                    
+                    # Get included articles via direct query
+                    conn = sqlite3.connect(db.db_path)
+                    included = pd.read_sql_query("""
+                        SELECT a.id, a.title, a.authors, a.doi, a.year
+                        FROM articles a
+                        INNER JOIN final_decisions fd ON a.id = fd.article_id
+                        WHERE fd.final_decision = 'include'
+                        ORDER BY a.year DESC
+                        LIMIT 50
+                    """, conn)
+                    conn.close()
+                    
+                    if not included.empty:
+                        inc_options = [f"{row['title'][:60]}..." if len(str(row['title'])) > 60 else str(row['title']) for _, row in included.iterrows()]
+                        inc_dict = {f"{row['title'][:60]}..." if len(str(row['title'])) > 60 else str(row['title']): row["id"] for _, row in included.iterrows()}
+                        
+                        selected = st.selectbox("Select Included Article", inc_options)
+                        if st.button("Find References", disabled=not selected):
+                            with st.spinner("Searching..."):
+                                try:
+                                    art_id = inc_dict[selected]
+                                    article = db.get_article_by_id(art_id)
+                                    doi = article.get("doi", "") if article else ""
+                                    
+                                    if doi:
+                                        refs = get_paper_references(doi)
+                                        st.success(f"Found {len(refs)} references")
+                                        
+                                        if refs and st.button("Add References to Queue"):
+                                            for ref in refs:
+                                                db.add_article({
+                                                    "title": ref.get("title", ""),
+                                                    "authors": ref.get("authors", ""),
+                                                    "year": ref.get("year"),
+                                                    "doi": ref.get("doi", ""),
+                                                    "literature_type": "WL"
+                                                })
+                                            st.success("References added!")
+                                            st.rerun()
+                                    else:
+                                        st.warning("No DOI available for this article")
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+                    else:
+                        st.info("No included articles yet")
         
         return
     

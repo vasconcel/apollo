@@ -353,6 +353,42 @@ class Database:
     def count_articles(self):
         with self.connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+    
+    def add_article(self, article_data: dict) -> int:
+        with self.connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO articles (title, authors, year, abstract, doi, url, source, literature_type, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported')
+            """, (
+                article_data.get("title", ""),
+                article_data.get("authors", ""),
+                article_data.get("year"),
+                article_data.get("abstract", ""),
+                article_data.get("doi", ""),
+                article_data.get("url", ""),
+                article_data.get("source", ""),
+                article_data.get("literature_type", "WL")
+            ))
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_articles_included(self, limit: int = 100):
+        with self.connect() as conn:
+            return pd.read_sql_query(f"""
+            SELECT id, title, authors, doi, year 
+            FROM articles a
+            INNER JOIN final_decisions fd ON a.id = fd.article_id
+            WHERE fd.final_decision = 'include'
+            ORDER BY a.year DESC
+            LIMIT {limit}
+            """, conn)
+    
+    def get_article_by_id(self, article_id: int):
+        with self.connect() as conn:
+            return pd.read_sql_query("""
+            SELECT * FROM articles WHERE id = ?
+            """, conn, params=(article_id,)).iloc[0].to_dict() if article_id else None
 
     def count_screened(self):
         with self.connect() as conn:

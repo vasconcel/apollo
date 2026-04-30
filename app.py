@@ -3,6 +3,10 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Core
 from src.core.database import Database, DatabaseError
@@ -17,24 +21,57 @@ from src.core.config_manager import load_config
 
 # ==================== CONFIG ====================
 st.set_page_config(
-    page_title="AIMS - AI-Powered MLR Pipeline",
+    page_title="AIMS - Research Synthesis Platform",
     layout="wide",
     initial_sidebar_state="expanded",
     page_icon="🔬"
 )
 
+# Professional Minimalist CSS - Theme Compatible
+st.markdown("""
+<style>
+    /* Minimalist Research Theme - Works in both Dark and Light modes */
+    :root {
+        --radius: 8px;
+    }
+    
+    /* Clean container styling with border (theme-aware) */
+    .stContainer {
+        border-radius: var(--radius);
+    }
+    
+    /* Metrics have nice borders */
+    div[data-testid="stMetric"] {
+        border: 1px solid rgba(128,128,128,0.2);
+        border-radius: var(--radius);
+    }
+    
+    /* Clean headers */
+    h1, h2, h3 {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        font-weight: 600;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        border-radius: var(--radius);
+        font-weight: 500;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Custom CSS for modern look
 st.markdown("""
 <style>
     .block-container {padding-top: 2rem; padding-bottom: 2rem;}
-    .stMetric {background: #f0f2f6; padding: 1rem; border-radius: 0.5rem;}
-    .metric-card {background: #ffffff; border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);}
-    .section-header {font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem; color: #1f2937;}
+    .stMetric {padding: 1rem; border-radius: 0.5rem;}
+    .metric-card {border: 1px solid rgba(128,128,128,0.2); padding: 1rem; border-radius: 0.5rem;}
+    .section-header {font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem;}
     .badge {padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.875rem; font-weight: 500;}
-    .badge-include {background: #d1fae5; color: #065f46;}
-    .badge-exclude {background: #fee2e2; color: #991b1b;}
-    .badge-pending {background: #fef3c7; color: #92400e;}
-    .badge-uncertain {background: #e0e7ff; color: #3730a3;}
+    .badge-include {background: rgba(16, 185, 129, 0.15); color: inherit;}
+    .badge-exclude {background: rgba(239, 68, 68, 0.15); color: inherit;}
+    .badge-pending {background: rgba(245, 158, 11, 0.15); color: inherit;}
+    .badge-uncertain {background: rgba(99, 102, 241, 0.15); color: inherit;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -67,6 +104,8 @@ quality_engine = get_quality_engine()
 config_mgr = get_config()
 
 settings = {
+    "project_name": config_mgr.get("project_name", "My Research Project"),
+    "project_description": config_mgr.get("project_description"),
     "research_questions": config_mgr.get("research_questions"),
     "inclusion_criteria": config_mgr.get("inclusion_criteria"),
     "exclusion_criteria": config_mgr.get("exclusion_criteria"),
@@ -243,7 +282,8 @@ def render_metric_card(label, value, delta=None, help_text=None):
 
 # ==================== PAGE: OVERVIEW ====================
 def render_overview():
-    st.header("📊 Overview")
+    proj_name = settings.get("project_name", "Research Project")
+    st.header(f"📊 {proj_name}")
     st.caption("Real-time pipeline statistics and PRISMA flow tracking")
     
     # Get PRISMA statistics
@@ -480,45 +520,61 @@ def render_overview():
     st.divider()
     
     # ===== RESEARCH QUESTIONS =====
-    st.subheader("❓ Research Questions")
-    rqs = settings["research_questions"]
+    st.subheader("Research Questions")
+    rqs = settings.get("research_questions", [])
+    has_placeholder = any("[TOPIC]" in rq or rq.startswith("[") for rq in rqs)
+    
+    if has_placeholder:
+        st.warning("Project configuration not yet customized. Edit project_config.json.")
+    
     for i, rq in enumerate(rqs, 1):
-        st.markdown(f"**RQ{i}:** {rq}")
+        rq_stripped = rq.strip()
+        if rq_stripped.upper().startswith("RQ"):
+            st.markdown(f"**{rq_stripped}**")
+        else:
+            st.markdown(f"**RQ{i}:** {rq}")
     
     st.divider()
     
     # ===== QUICK ACTIONS =====
-    st.subheader("⚡ Quick Actions")
-    c1, c2, c3, c4 = st.columns(4)
+    st.subheader("Quick Actions")
+    c1, c2 = st.columns(2)
     with c1:
-        if st.button("📥 Import Data", use_container_width=True):
-            st.info("Use the Data Exchange section to import CSV files")
-    with c2:
-        if st.button("🔄 Refresh Stats", use_container_width=True):
+        if st.button("Refresh Statistics", use_container_width=True):
             st.rerun()
-    with c3:
-        if st.button("📊 Generate Report", use_container_width=True):
-            st.info("Report generation coming soon")
-    with c4:
-        if st.button("🗑️ Export Decisions", use_container_width=True):
-            st.info("Export functionality coming soon")
+    with c2:
+        st.info("Import data via the database module")
 
 
 # ==================== PAGE: SCREENING ====================
 def render_screening():
-    st.header("🔍 Screening")
-    st.caption(f"Reviewer: **{st.session_state.reviewer_id}** | Blind review mode enabled")
+    st.header("Screening")
+    st.caption(f"Reviewer: **{st.session_state.reviewer_id}**")
     
     stats = get_stats()
     decisions = stats["decisions"]
+    total_articles = stats["total_articles"]
+    
+    # Empty state - No data imported
+    if total_articles == 0:
+        st.info("No articles available. Please import your literature data to begin screening.")
+        st.markdown("""
+        **Getting Started:**
+        1. Prepare your literature in CSV format (title, abstract, source_id, literature_type)
+        2. Use the Quick Action below to import data
+        """)
+        
+        with st.expander("Quick Import"):
+            st.warning("Data import functionality coming soon. Currently, use direct database ingestion.")
+        
+        return
     
     # Progress bar
-    total = stats["total_articles"]
     screened_count = len(decisions["article_id"].unique()) if not decisions.empty else 0
-    progress = screened_count / total if total > 0 else 0
+    progress = screened_count / total_articles if total_articles > 0 else 0
     
     st.progress(progress)
-    st.caption(f"Progress: {screened_count}/{total} articles screened ({int(progress*100)}%)")
+    st.caption(f"Progress: {screened_count}/{total_articles} articles screened ({int(progress*100)}%)")
     
     st.divider()
     
@@ -526,7 +582,7 @@ def render_screening():
     pending_articles = db.get_pending_articles(st.session_state.reviewer_id)
     
     if not pending_articles:
-        st.success("✅ All articles have been reviewed!")
+        st.success("All articles have been reviewed!")
         
         # Show summary
         c1, c2 = st.columns(2)
@@ -539,7 +595,7 @@ def render_screening():
         return
     
     # Current article navigation
-    st.subheader("📄 Current Article")
+    st.subheader("Current Article")
     
     if st.session_state.current_article_idx >= len(pending_articles):
         st.session_state.current_article_idx = 0
@@ -715,14 +771,20 @@ def render_screening():
 
 # ==================== PAGE: CONSENSUS ====================
 def render_consensus():
-    st.header("🤝 Reliability & Resolution Workspace")
-    st.caption("Inter-reviewer agreement, conflict resolution, and consensus finalization")
+    st.header("Reliability & Resolution")
+    st.caption("Inter-reviewer agreement and conflict resolution")
     
     stats = get_stats()
     decisions = stats["decisions"]
+    total_articles = stats["total_articles"]
+    
+    # Empty state check
+    if total_articles == 0:
+        st.info("No articles available. Please import literature data first.")
+        return
     
     # ==================== SECTION 1: INTER-REVIEWER AGREEMENT ====================
-    st.subheader("📊 Inter-Reviewer Agreement (Cohen's Kappa)")
+    st.subheader("Inter-Reviewer Agreement (Cohen's Kappa)")
     
     if not decisions.empty and len(decisions["reviewer_id"].unique()) >= 2:
         kappa, pivot = prepare_kappa(decisions)
@@ -1630,15 +1692,18 @@ def render_synthesis():
 
 # ==================== PAGE: EXPORT & AUDIT ====================
 def render_export_audit():
-    st.header("📦 Export & Audit")
+    st.header("Reporting & Export")
     st.caption("Quality control, audit trails, and publication-ready exports")
+    
+    # Ensure db is available
+    db = get_database()
     
     # Initialize session state for exports
     if "export_data" not in st.session_state:
         st.session_state.export_data = {}
     
     # ==================== SECTION 1: AUDIT DASHBOARD ====================
-    st.subheader("🔍 Audit Dashboard")
+    st.subheader("Audit Dashboard")
     st.caption("Validate data integrity before export")
     
     # Get PRISMA stats
@@ -1716,38 +1781,30 @@ def render_export_audit():
     st.divider()
     
     # ==================== SECTION 2: PUBLICATION SUMMARY ====================
-    st.subheader("📝 Publication Summary")
+    st.subheader("Publication Summary")
     st.caption("Copy-pasteable summary for your paper")
     
-    # Calculate summary statistics
-    total_articles = prisma["total_imported"]
-    wl_count = len(pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'WL'", conn if 'conn' in locals() else sqlite3.connect(db.db_path)).iloc[0])
-    gl_count = len(pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'GL'", conn if 'conn' in locals() else sqlite3.connect(db.db_path)).iloc[0])
-    
-    conn = sqlite3.connect(db.db_path)
-    wl_count = pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'WL'", conn).iloc[0]['c']
-    gl_count = pd.read_sql_query("SELECT COUNT(*) as c FROM articles WHERE literature_type = 'GL'", conn).iloc[0]['c']
-    final_included = prisma["final_included"]
-    
-    # Count themes and codes
-    themes_count = pd.read_sql_query("SELECT COUNT(*) as c FROM themes", conn).iloc[0]['c']
-    codes_count = pd.read_sql_query("SELECT COUNT(*) as c FROM codes", conn).iloc[0]['c']
-    fragments_count = pd.read_sql_query("SELECT COUNT(*) as c FROM fragments", conn).iloc[0]['c']
-    conn.close()
+    # Calculate summary statistics with FRESH connection
+    with sqlite3.connect(db.db_path) as conn:
+        total_articles = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+        wl_count = conn.execute("SELECT COUNT(*) FROM articles WHERE literature_type = 'WL'").fetchone()[0]
+        gl_count = conn.execute("SELECT COUNT(*) FROM articles WHERE literature_type = 'GL'").fetchone()[0]
+        final_included = conn.execute("SELECT COUNT(*) FROM final_decisions WHERE final_decision = 'include'").fetchone()[0]
+        themes_count = conn.execute("SELECT COUNT(*) FROM themes").fetchone()[0]
+        codes_count = conn.execute("SELECT COUNT(*) FROM codes").fetchone()[0]
+        fragments_count = conn.execute("SELECT COUNT(*) FROM fragments").fetchone()[0]
     
     # Generate summary text
     summary_text = f"""This study analyzed {total_articles} articles ({wl_count} White Literature, {gl_count} Grey Literature). After systematic screening and quality assessment, {final_included} articles were included for analysis. The thematic synthesis process resulted in {themes_count} themes and {codes_count} unique codes, supported by {fragments_count} evidence fragments extracted from the primary sources."""
     
     st.text_area("Study Summary (for paper)", value=summary_text, height=100)
     
-    col_copy1, col_copy2 = st.columns([1, 4])
-    with col_copy1:
-        st.caption("📋 Copy the text above")
+    st.caption("Copy the text above for use in your manuscript")
     
     st.divider()
     
     # ==================== SECTION 3: EXPORT PACKAGE ====================
-    st.subheader("🚀 Publication-Ready Export")
+    st.subheader("Publication-Ready Export")
     st.caption("Generate and download the complete research package")
     
     # Export button
@@ -1764,7 +1821,6 @@ def render_export_audit():
         with st.spinner("Generating export files..."):
             try:
                 # Create export directory
-                import os
                 export_dir = "research_export"
                 os.makedirs(export_dir, exist_ok=True)
                 
@@ -1794,7 +1850,6 @@ def render_export_audit():
         st.markdown("### 📥 Download Export Files")
         
         # Read and provide download buttons for each file
-        import os
         export_files = {
             "traceability_matrix.csv": "Full traceability: Theme → Code → Fragment → Source",
             "fragments_with_sources.csv": "All evidence fragments with source metadata",
@@ -1833,49 +1888,167 @@ def render_export_audit():
             st.metric("Fragments", export_results.get("fragments_with_sources", 0))
         with c4:
             st.metric("Matrix Rows", export_results.get("traceability_matrix", 0))
-    
+        
+        # ZIP download option
+        import zipfile
+        zip_path = f"{export_path}_package.zip"
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename in export_files.keys():
+                filepath = os.path.join(export_path, filename)
+                if os.path.exists(filepath):
+                    zipf.write(filepath, filename)
+        
+        with open(zip_path, 'rb') as f:
+            zip_data = f.read()
+        
+        st.divider()
+        col_zip, col_spacer = st.columns([1, 1])
+        with col_zip:
+            st.download_button(
+                "📦 Download Full Replication Package (.zip)",
+                data=zip_data,
+                file_name="aims_research_package.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
     else:
         with col_status:
             st.info("Click 'Generate Full Research Package' to create export files")
     
     st.divider()
     
-    # ==================== SECTION 4: DATABASE INFO ====================
-    with st.expander("🗄️ Database Information"):
+    # ==================== SECTION 4: SYSTEM HEALTH ====================
+    st.subheader("💻 System Health")
+    
+    # Check database
+    db_healthy = os.path.exists(db.db_path)
+    db_size = os.path.getsize(db.db_path) / 1024 if db_healthy else 0
+    
+    # Check Groq API (from env or streamlit secrets)
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GROQ_API_KEY", "")
+        except:
+            pass
+    api_healthy = bool(api_key)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if db_healthy:
+            st.success(f"✅ Database Connected ({db_size:.1f} KB)")
+        else:
+            st.error("❌ Database Not Found")
+    with c2:
+        if api_healthy:
+            st.success("✅ Groq API Ready")
+        else:
+            st.warning("⚠️ Groq API Not Configured")
+    
+    st.caption("Configure GROQ_API_KEY environment variable for AI features")
+    
+    st.divider()
+    
+    # ==================== SECTION 5: DATABASE INFO ====================
+    with st.expander("Database Information"):
         st.markdown(f"**Database Path:** `{db.db_path}`")
         st.markdown(f"**Database Size:** {os.path.getsize(db.db_path) / 1024:.1f} KB" if os.path.exists(db.db_path) else "N/A")
+    
+    st.divider()
+    
+    # ==================== SECTION 6: DANGER ZONE ====================
+    st.subheader("Danger Zone")
+    st.warning("These actions cannot be undone. Use with caution.")
+    
+    if st.button("Reset/Nuke Database", type="primary", use_container_width=True):
+        confirm = st.checkbox("I understand this will delete ALL data. Confirm:")
+        
+        if confirm:
+            try:
+                # Close and delete database
+                db_path = db.db_path
+                del db
+                
+                if os.path.exists(db_path):
+                    os.remove(db_path)
+                    st.success("Database reset complete. Refresh the page to reinitialize.")
+                else:
+                    st.error("Database file not found")
+            except Exception as e:
+                st.error(f"Reset failed: {e}")
 
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
-    st.title("🔬 AIMS")
-    st.caption("AI-Powered MLR Pipeline")
+    st.title("AIMS")
+    st.caption("Research Synthesis Platform")
     
     st.divider()
     
     # Reviewer session
-    st.subheader("👤 Reviewer Session")
+    st.subheader("Reviewer Session")
     st.session_state.reviewer_id = st.text_input("Reviewer ID", value=st.session_state.reviewer_id)
     st.caption("Blind review mode")
     
     st.divider()
     
-    # Navigation
-    st.subheader("📋 Navigation")
+    # Navigation - Academic labels
+    st.subheader("Navigation")
     page = st.radio("Go to", [
-        "Overview",
-        "Screening",
-        "Consensus",
-        "Quality Assessment",
-        "Extraction",
-        "Synthesis",
-        "Export & Audit"
+        "Dashboard",
+        "Eligibility Screening",
+        "Agreement & Consensus",
+        "Quality Appraisal",
+        "Data Extraction",
+        "Thematic Synthesis",
+        "Reporting & Export"
     ], label_visibility="collapsed")
     
     st.divider()
     
+    # PROJECT CONFIGURATION HUB
+    with st.expander("Project Configuration", expanded=False):
+        config_mgr = load_config()
+        
+        st.subheader("Project Identity")
+        proj_name = st.text_input("Project Name", value=config_mgr.get("project_name", "My Research Project"), key="cfg_name")
+        proj_desc = st.text_area("Description", value=config_mgr.get("project_description", ""), key="cfg_desc")
+        
+        st.subheader("Research Questions")
+        rqs_current = config_mgr.get("research_questions", [])
+        rqs_edit = [{"RQ": rq} for rq in rqs_current]
+        
+        rqs_editor = st.data_editor(rqs_edit, num_rows="dynamic", key="cfg_rqs", use_container_width=True)
+        rqs_list = [row["RQ"] for row in rqs_editor if row.get("RQ", "").strip()]
+        
+        st.subheader("API Configuration")
+        api_key_input = st.text_input("Groq API Key", type="password", help="Optional: For AI-assisted features", key="cfg_api")
+        
+        if st.button("Save Configuration", key="save_config_btn"):
+            new_config = {
+                "project_name": proj_name,
+                "project_description": proj_desc,
+                "research_questions": rqs_list,
+                "literature_types": config_mgr.get("literature_types", ["White Literature", "Grey Literature"]),
+                "literature_types_abbrev": config_mgr.get("literature_types_abbrev", ["WL", "GL"]),
+                "exclude_irrelevant": config_mgr.get("exclude_irrelevant", True),
+                "min_qa_score": config_mgr.get("min_qa_score", 0.5)
+            }
+            if api_key_input:
+                new_config["api_key"] = api_key_input
+            
+            import json
+            with open("project_config.json", "w", encoding="utf-8") as f:
+                json.dump(new_config, f, indent=2)
+            
+            st.success("Configuration saved!")
+            st.rerun()
+    
+    st.divider()
+    
     # Quick stats in sidebar
-    st.subheader("📊 Quick Stats")
+    st.subheader("Quick Stats")
     stats = get_stats()
     st.metric("Articles", stats["total_articles"])
     st.metric("Screened", len(stats["decisions"]["article_id"].unique()) if not stats["decisions"].empty else 0)
@@ -1883,21 +2056,21 @@ with st.sidebar:
     # Conflicts warning
     conflicts = consensus_engine.detect_conflicts()
     if not conflicts.empty:
-        st.warning(f"⚠️ {len(conflicts)} conflicts")
+        st.warning(f"{len(conflicts)} conflicts")
 
 
 # ==================== MAIN ====================
-if page == "Overview":
+if page == "Dashboard":
     render_overview()
-elif page == "Screening":
+elif page == "Eligibility Screening":
     render_screening()
-elif page == "Consensus":
+elif page == "Agreement & Consensus":
     render_consensus()
-elif page == "Quality Assessment":
+elif page == "Quality Appraisal":
     render_quality()
-elif page == "Extraction":
+elif page == "Data Extraction":
     render_extraction()
-elif page == "Synthesis":
+elif page == "Thematic Synthesis":
     render_synthesis()
-elif page == "Export & Audit":
+elif page == "Reporting & Export":
     render_export_audit()

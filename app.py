@@ -715,13 +715,15 @@ def render_screening():
 
 # ==================== PAGE: CONSENSUS ====================
 def render_consensus():
-    st.header("🤝 Consensus & Agreement")
-    st.caption("Inter-reviewer agreement and conflict resolution")
+    st.header("🤝 Reliability & Resolution Workspace")
+    st.caption("Inter-reviewer agreement, conflict resolution, and consensus finalization")
     
     stats = get_stats()
     decisions = stats["decisions"]
     
-    # Kappa calculation
+    # ==================== SECTION 1: INTER-REVIEWER AGREEMENT ====================
+    st.subheader("📊 Inter-Reviewer Agreement (Cohen's Kappa)")
+    
     if not decisions.empty and len(decisions["reviewer_id"].unique()) >= 2:
         kappa, pivot = prepare_kappa(decisions)
         
@@ -739,70 +741,203 @@ def render_consensus():
         with c3:
             st.metric("Decisions Recorded", len(decisions))
         
-        # Kappa interpretation
+        # Kappa interpretation with detailed guidance
         if kappa is not None:
             if kappa < 0.2:
-                st.warning("⚠️ Poor agreement - consider additional reviewer training")
+                st.error("⚠️ **Poor agreement** - Reviewers largely disagree. Recommend additional reviewer training and protocol clarification.")
             elif kappa < 0.4:
-                st.info("ℹ️ Fair agreement - some conflicts expected")
+                st.warning("⚠️ **Fair agreement** - Some conflicts expected. Close monitoring recommended.")
             elif kappa < 0.6:
-                st.success("✓ Moderate agreement")
+                st.success("✓ **Moderate agreement** - Acceptable for systematic reviews.")
             elif kappa < 0.8:
-                st.success("✓ Good agreement")
+                st.success("✓ ✓ **Good agreement** - High reliability.")
             else:
-                st.success("✓ Excellent agreement")
+                st.success("✓ ✓ ✓ **Excellent agreement** - Near-perfect consensus.")
+            
+            # Formal interpretation table
+            with st.expander("📖 Kappa Interpretation Guide"):
+                st.markdown("""
+                | Kappa Value | Interpretation | Recommendation |
+                |-----------|----------------|--------------|
+                | < 0.20 | Poor | Additional training, protocol clarification |
+                | 0.21-0.40 | Fair | Acceptable, monitor conflicts |
+                | 0.41-0.60 | Moderate | Standard for systematic reviews |
+                | 0.61-0.80 | Good | High reliability |
+                | > 0.80 | Excellent | Near-perfect consensus |
+                """)
     else:
         st.warning("Not enough data for kappa calculation. Need at least 2 reviewers with overlapping articles.")
     
     st.divider()
     
-    # Conflicts detection
-    st.subheader("🚩 Conflicts")
+    # ==================== SECTION 2: CONFLICT RESOLUTION ====================
+    st.subheader("🚩 Conflict Resolution")
     
+    # Get conflicts with detailed information
     conflicts = consensus_engine.detect_conflicts()
+    
+    # Count resolved vs unresolved
+    conn = sqlite3.connect(db.db_path)
+    resolved = pd.read_sql_query("SELECT article_id FROM final_decisions", conn)
+    resolved_ids = set(resolved["article_id"].tolist()) if not resolved.empty else set()
+    conn.close()
+    
+    total_conflicts = len(conflicts)
+    unresolved_count = sum(1 for cid in conflicts["article_id"] if cid not in resolved_ids)
+    
+    if total_conflicts > 0:
+        # Progress bar
+        progress = (total_conflicts - unresolved_count) / total_conflicts if total_conflicts > 0 else 0
+        st.progress(progress)
+        st.caption(f"Conflict Resolution Progress: {total_conflicts - unresolved_count} of {total_conflicts} resolved ({int(progress*100)}%)")
     
     if conflicts.empty:
         st.success("✅ No conflicts detected - all reviewers agree!")
     else:
-        st.error(f"Found {len(conflicts)} articles with conflicting decisions")
+        st.error(f"Found {total_conflicts} articles with conflicting decisions that need human mediation")
         
-        # Display conflicts
+        # Fetch detailed information for each conflict article
+        conn = sqlite3.connect(db.db_path)
+        
         for _, conflict in conflicts.iterrows():
-            with st.expander(f"Article ID: {conflict['article_id']} - {conflict['title'][:50]}..."):
-                decisions_str = conflict['decisions'].split(',')
-                for d in decisions_str:
-                    reviewer, decision = d.split(':')
-                    st.write(f"  **{reviewer}**: {decision}")
+            article_id = conflict["article_id"]
+            
+            # Get article details
+            article = pd.read_sql_query(f"SELECT id, title, abstract, literature_type FROM articles WHERE id = {article_id}", conn).iloc[0]
+            
+            # Get all decisions for this article
+            article_decisions = pd.read_sql_query(f"""
+                SELECT reviewer_id, decision, exclusion_reason, criteria_snapshot 
+                FROM screening_decisions 
+                WHERE article_id = {article_id}
+            """, conn)
+            
+            is_resolved = article_id in resolved_ids
+            
+            with st.expander(f"{'✅' if is_resolved else '🚩'} Article ID {article_id}: {article['title'][:60]}... ({'RESOLVED' if is_resolved else 'UNRESOLVED'})"):
+                # Show article metadata
+                st.markdown(f"**📄 Title:** {article['title']}")
+                st.caption(f"**Type:** {article['literature_type']}")
                 
-                # Resolution form
-                with st.form(f"resolve_{conflict['article_id']}"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        final_decision = st.radio("Final Decision", ["include", "exclude"], key=f"fd_{conflict['article_id']}")
-                    with c2:
-                        notes = st.text_input("Resolution Notes", key=f"notes_{conflict['article_id']}")
+                # Show abstract
+                if article['abstract']:
+                    with st.expander("📝 Abstract"):
+                        st.write(article['abstract'][:500] + "..." if len(str(article['abstract'])) > 500 else article['abstract'])
+                
+                # Side-by-side reviewer decisions
+                st.markdown("**👥 Reviewer Decisions:**")
+                
+                cols = st.columns(len(article_decisions))
+                for i, (_, row) in enumerate(article_decisions.iterrows()):
+                    with cols[i]:
+                        decision_emoji = "✅" if row['decision'] == 'include' else "❌" if row['decision'] == 'exclude' else "⚠️"
+                        st.markdown(f"**{row['reviewer_id']}**: {decision_emoji} {row['decision'].upper()}")
+                        
+                        # Show criteria/reasons
+                        if row['decision'] == 'exclude' and row['exclusion_reason']:
+                            st.caption(f"Exclusion Reason: {row['exclusion_reason']}")
+                        elif row['decision'] == 'include' and row['criteria_snapshot']:
+                            st.caption(f"Included Criteria: {row['criteria_snapshot'][:50]}...")
+                
+                st.divider()
+                
+                # Resolution form (only if not yet resolved)
+                if not is_resolved:
+                    st.markdown("**📋 Final Resolution Form**")
                     
-                    if st.form_submit_button("Resolve Conflict"):
-                        db.save_final_decision(
-                            conflict['article_id'],
-                            final_decision,
-                            st.session_state.reviewer_id,
-                            notes
-                        )
-                        st.success("Conflict resolved!")
-                        st.rerun()
+                    with st.form(f"resolve_{article_id}"):
+                        c1, c2 = st.columns([1, 2])
+                        with c1:
+                            final_decision = st.radio(
+                                "Final Decision", 
+                                ["include", "exclude"],
+                                horizontal=True,
+                                key=f"fd_{article_id}"
+                            )
+                        with c2:
+                            resolution_notes = st.text_input(
+                                "Resolution Notes (Required)", 
+                                placeholder="Explain rationale for final decision...",
+                                key=f"notes_{article_id}"
+                            )
+                        
+                        col_submit, col_spacer = st.columns([1, 2])
+                        with col_submit:
+                            submit_resolved = st.form_submit_button(
+                                "✅ Resolve Conflict",
+                                type="primary",
+                                use_container_width=True
+                            )
+                        
+                        if submit_resolved:
+                            if not resolution_notes.strip():
+                                st.error("Resolution notes are required before finalizing")
+                            else:
+                                db.save_final_decision(
+                                    article_id,
+                                    final_decision,
+                                    st.session_state.reviewer_id,
+                                    resolution_notes
+                                )
+                                st.success("Conflict resolved! Final decision saved.")
+                                st.rerun()
+                else:
+                    # Show existing resolution
+                    conn2 = sqlite3.connect(db.db_path)
+                    resolution = pd.read_sql_query(f"SELECT * FROM final_decisions WHERE article_id = {article_id}", conn2).iloc[0]
+                    conn2.close()
+                    
+                    st.markdown("**✅ Resolved Decision:**")
+                    decision_emoji = "✅" if resolution['final_decision'] == 'include' else "❌"
+                    st.markdown(f"**Final Decision:** {decision_emoji} {resolution['final_decision'].upper()}")
+                    st.markdown(f"**Resolved By:** {resolution['resolved_by']}")
+                    st.markdown(f"**Notes:** {resolution['resolution_notes']}")
+        
+        # Close connection
+        conn.close()
     
     st.divider()
     
-    # Auto-resolve section
-    st.subheader("⚙️ Auto-Resolution")
+    # ==================== SECTION 3: AUTO-CONSENSUS ====================
+    st.subheader("⚙️ Auto-Consensus")
+    st.caption("Automatically finalize unanimous decisions to save time")
     
-    if st.button("Auto-Resolve Consensus (Same Decisions)"):
-        count = consensus_engine.auto_resolve_consensus(db)
-        st.success(f"Auto-resolved {count} articles")
-        st.rerun()
+    conn = sqlite3.connect(db.db_path)
     
-    st.caption("This will automatically finalize decisions for articles where all reviewers have the same decision.")
+    # Find unanimous decisions
+    unanimous = pd.read_sql_query("""
+        SELECT article_id, GROUP_CONCAT(decision) as decisions
+        FROM screening_decisions
+        GROUP BY article_id
+        HAVING COUNT(DISTINCT decision) = 1
+    """, conn)
+    
+    # Already finalized
+    already_final = pd.read_sql_query("SELECT article_id FROM final_decisions", conn)
+    already_final_ids = set(already_final["article_id"].tolist()) if not already_final.empty else set()
+    
+    # Count candidates for auto-resolution
+    candidates = [x for x in unanimous["article_id"] if x not in already_final_ids]
+    candidate_count = len(candidates)
+    
+    conn.close()
+    
+    col_auto, col_info = st.columns([1, 2])
+    
+    with col_auto:
+        if st.button("✅ Auto-finalize Unanimous Decisions", use_container_width=True, disabled=candidate_count == 0):
+            with st.spinner("Finalizing unanimous decisions..."):
+                count = consensus_engine.auto_resolve_consensus(db)
+            st.success(f"Auto-resolved {count} articles with unanimous agreement!")
+            st.rerun()
+    
+    with col_info:
+        if candidate_count > 0:
+            st.info(f"Ready to auto-finalize: {candidate_count} articles where all reviewers agreed")
+        else:
+            st.success("All unanimous decisions already finalized")
+    
+    st.caption("This automatically moves articles where ALL reviewers gave the SAME decision to the final decisions table.")
 
 
 # ==================== PAGE: QUALITY ASSESSMENT ====================

@@ -1834,15 +1834,20 @@ def render_synthesis():
                     for frag in code_fragments:
                         frag_id, art_id, rq, text = frag[0], frag[1], frag[2], frag[3]
                         
-                        # Get article literature type
+                        # Get article literature type and metadata
                         conn = sqlite3.connect(db.db_path)
-                        art = pd.read_sql_query(f"SELECT literature_type FROM articles WHERE id = {art_id}", conn).iloc[0]
+                        art = pd.read_sql_query(f"SELECT literature_type, authors, year FROM articles WHERE id = {art_id}", conn).iloc[0]
                         conn.close()
                         
+                        # Format with Author/Year for citation traceability
+                        authors = art.get('authors', 'Unknown')
+                        year = art.get('year', 'n.d.')
+                        fragment_with_meta = f"[{authors}, {year}]: {text}"
+                        
                         if art['literature_type'] == "WL":
-                            wl_fragments.append(text)
+                            wl_fragments.append(fragment_with_meta)
                         else:
-                            gl_fragments.append(text)
+                            gl_fragments.append(fragment_with_meta)
                 
                 # Generate synthesis
                 with st.spinner("Synthesizing evidence from WL and GL sources..."):
@@ -1946,13 +1951,19 @@ def render_synthesis():
                             for frag in code_fragments:
                                 frag_id, art_id, rq, text, category, reviewer, page, created = frag[0], frag[1], frag[2], frag[3], frag[4], frag[5], frag[6], frag[7]
                                 
-                                # Get article title
+                                # Get article metadata
                                 conn = sqlite3.connect(db.db_path)
-                                art = pd.read_sql_query(f"SELECT title, literature_type FROM articles WHERE id = {art_id}", conn).iloc[0]
+                                art = pd.read_sql_query(f"SELECT title, authors, year, literature_type FROM articles WHERE id = {art_id}", conn).iloc[0]
                                 conn.close()
+                                
+                                # Format citation metadata
+                                authors = art.get('authors', 'Unknown')
+                                year = art.get('year', 'n.d.')
+                                citation = f"[{authors}, {year}]" if year else f"[{authors}]"
                                 
                                 with st.container():
                                     st.markdown(f"📄 **{art['title'][:60]}...** ({art['literature_type']})")
+                                    st.caption(citation)
                                     st.write(f"_{text}_")
                                     st.caption(f"RQ: {rq} | Extracted by: {reviewer}")
                                     st.divider()

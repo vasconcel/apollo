@@ -799,6 +799,9 @@ class Database:
                     f.fragment_text,
                     a.id as source_id,
                     a.title as source_title,
+                    a.authors as source_authors,
+                    a.year as source_year,
+                    a.doi as source_doi,
                     a.literature_type
                 FROM fragments f
                 JOIN fragment_codes fc ON f.id = fc.fragment_id
@@ -834,6 +837,9 @@ class Database:
                     f.page_or_section,
                     a.id as source_id,
                     a.title as source_title,
+                    a.authors as source_authors,
+                    a.year as source_year,
+                    a.doi as source_doi,
                     a.literature_type,
                     f.reviewer_id as extracted_by,
                     f.created_at as extracted_at

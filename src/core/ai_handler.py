@@ -140,8 +140,8 @@ def generate_theme_synthesis(theme_label: str, wl_fragments: list, gl_fragments:
     
     Args:
         theme_label: The name/label of the theme being synthesized
-        wl_fragments: List of White Literature (academic) fragments
-        gl_fragments: List of Grey Literature (practitioner) fragments
+        wl_fragments: List of tuples (text, authors, year) for White Literature (academic) fragments
+        gl_fragments: List of tuples (text, authors, year) for Grey Literature (practitioner) fragments
         
     Returns:
         Dict with synthesis text and metadata
@@ -156,16 +156,20 @@ def generate_theme_synthesis(theme_label: str, wl_fragments: list, gl_fragments:
 
     client = Groq(api_key=api_key)
     
-    # Format fragments for the prompt
+    # Format fragments for the prompt (fragments are preformatted as "[Author, Year]: text")
     wl_text = "\n".join([f"- [{i+1}] {f}" for i, f in enumerate(wl_fragments)]) if wl_fragments else "No academic fragments available."
     gl_text = "\n".join([f"- [{i+1}] {f}" for i, f in enumerate(gl_fragments)]) if gl_fragments else "No practitioner fragments available."
     
-    # Prompt Engineering for Theme Synthesis
+    # Prompt Engineering for Theme Synthesis with Citation Tracking
     system_prompt = f"""
 You are a Senior Research Assistant specialized in Multivocal Literature Reviews (MLR) in Software Engineering.
 Your task is to synthesize evidence fragments into a coherent research findings report.
 
 ### THEME: {theme_label}
+
+### DATA FORMAT:
+Each fragment is prefixed with its source metadata in [Author, Year] format.
+Example: "[Smith et al., 2023]: Finding about hiring pipelines..."
 
 ### INSTRUCTIONS:
 Analyze the extracted evidence fragments below and synthesize them into a professional research report.
@@ -179,7 +183,7 @@ A summary (3-5 sentences) of what the evidence collectively says about this them
 
 **WL vs GL Divergence**: 
 Identify where academia and industry perspectives agree, disagree, or reveal a theory-practice gap.
-Use specific fragment references to support your analysis.
+Use specific fragment references to support your analysis (e.g., "Smith et al. (2023) found...").
 
 **Actionable Practices**: 
 List 3-5 concrete mechanisms, design principles, or practices found in the evidence.
@@ -187,6 +191,10 @@ Be specific and actionable for practitioners.
 
 **Research Gaps**: 
 What is missing from the current evidence base? What questions remain unanswered?
+
+### CITATION TRACKING:
+When referring to specific findings, cite using the Author/Year markers provided in the fragments to maintain traceability.
+Example citations: "(Author, Year)" or "[Author, Year]"
 
 ### IMPORTANT:
 - Base all findings on the provided fragments

@@ -133,15 +133,16 @@ def get_ai_suggestion(title: str, abstract: str, settings: Dict[str, Any], max_r
     }
 
 
-def generate_theme_synthesis(theme_label: str, wl_fragments: list, gl_fragments: list) -> Dict[str, Any]:
+def generate_theme_synthesis(theme_label: str, wl_fragments: list, gl_fragments: list, max_fragments_per_side: int = 30) -> Dict[str, Any]:
     """
     Generates an AI-powered synthesis for a theme by comparing White Literature (WL)
     and Grey Literature (GL) fragments.
     
     Args:
         theme_label: The name/label of the theme being synthesized
-        wl_fragments: List of tuples (text, authors, year) for White Literature (academic) fragments
-        gl_fragments: List of tuples (text, authors, year) for Grey Literature (practitioner) fragments
+        wl_fragments: List of strings preformatted as "[Author, Year]: Fragment text"
+        gl_fragments: List of strings preformatted as "[Author, Year]: Fragment text"
+        max_fragments_per_side: Maximum fragments per side to prevent context overflow (default: 30)
         
     Returns:
         Dict with synthesis text and metadata
@@ -156,9 +157,23 @@ def generate_theme_synthesis(theme_label: str, wl_fragments: list, gl_fragments:
 
     client = Groq(api_key=api_key)
     
+    # Context Window Protection: Truncate to prevent overflow
+    # Llama3-70b has ~8K context, limit to prevent hitting token limit
+    wl_fragments_truncated = wl_fragments[:max_fragments_per_side]
+    gl_fragments_truncated = gl_fragments[:max_fragments_per_side]
+    
+    truncation_warning = None
+    if len(wl_fragments) > max_fragments_per_side:
+        truncation_warning = f"WL truncated from {len(wl_fragments)} to {max_fragments_per_side}"
+        logger.warning(truncation_warning)
+    if len(gl_fragments) > max_fragments_per_side:
+        truncation_warning = f"{truncation_warning}, " if truncation_warning else ""
+        truncation_warning += f"GL truncated from {len(gl_fragments)} to {max_fragments_per_side}"
+        logger.warning(truncation_warning)
+    
     # Format fragments for the prompt (fragments are preformatted as "[Author, Year]: text")
-    wl_text = "\n".join([f"- [{i+1}] {f}" for i, f in enumerate(wl_fragments)]) if wl_fragments else "No academic fragments available."
-    gl_text = "\n".join([f"- [{i+1}] {f}" for i, f in enumerate(gl_fragments)]) if gl_fragments else "No practitioner fragments available."
+    wl_text = "\n".join([f"- [{i+1}] {f}" for i, f in enumerate(wl_fragments_truncated)]) if wl_fragments_truncated else "No academic fragments available."
+    gl_text = "\n".join([f"- [{i+1}] {f}" for i, f in enumerate(gl_fragments_truncated)]) if gl_fragments_truncated else "No practitioner fragments available."
     
     # Prompt Engineering for Theme Synthesis with Citation Tracking
     system_prompt = f"""
@@ -228,8 +243,9 @@ Practitioner (GL) Fragments:
         
         return {
             "synthesis": synthesis,
-            "wl_count": len(wl_fragments),
-            "gl_count": len(gl_fragments),
+            "wl_count": len(wl_fragments_truncated),
+            "gl_count": len(gl_fragments_truncated),
+            "truncation_warning": truncation_warning,
             "error": None
         }
         
@@ -239,3 +255,90 @@ Practitioner (GL) Fragments:
             "synthesis": None,
             "error": str(e)
         }
+
+
+def get_batch_predictions(
+    articles: list,
+    training_context: str,
+    max_articles: int = 20,
+    model: str = "llama3-70b-8192"
+) -> list:
+    """
+    Get batch predictions for article screening based on reviewer training.
+    
+    Args:
+        articles: List of article dictionaries with id, title, abstract
+        training_context: Few-shot prompt from active learning context
+        max_articles: Max articles to process in one batch
+        model: Model to use
+        
+    Returns:
+        List of predictions with id, decision, confidence, reason
+    """
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        logger.error("GROQ_API_KEY não encontrada.")
+        return []
+    
+    client = Groq(api_key=api_key)
+    
+    # Truncate articles to max batch size
+    batch = articles[:max_articles]
+    
+    # Build the batch prompt
+    articles_text = "\n\n".join([
+        f"Article {i+1} [ID:{a['id']}]:\nTitle: {a.get('title', '')[:80]}...\nAbstract: {a.get('abstract', '')[:120]}..."
+        for i, a in enumerate(batch)
+    ])
+    
+    prompt = f"""{training_context}
+
+### ARTICLES TO EVALUATE:
+{articles_text}
+
+### OUTPUT (JSON array, one object per article):
+[
+  {{"id": <article_id>, "decision": "include"|"exclude", "confidence": <0-100>, "reason": "<brief reason>"}}
+]
+
+Respond with ONLY the JSON array, no preamble."""
+
+    try:
+        response = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a research screening assistant. Respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            model=model,
+            temperature=0.1,
+            max_tokens=2000,
+            response_format={"type": "json_object"}
+        )
+        
+        # Parse JSON response
+        import json
+        content = response.choices[0].message.content
+        
+        # Try to parse as JSON array
+        try:
+            predictions = json.loads(content)
+        except json.JSONDecodeError:
+            # Try to extract array from text
+            import re
+            match = re.search(r'\[.*\]', content, re.DOTALL)
+            if match:
+                predictions = json.loads(match.group())
+            else:
+                logger.error(f"Could not parse batch predictions: {content[:200]}")
+                return []
+        
+        # Ensure list format
+        if isinstance(predictions, dict) and "predictions" in predictions:
+            predictions = predictions["predictions"]
+        
+        logger.info(f"Batch predictions generated for {len(predictions)} articles")
+        return predictions
+        
+    except Exception as e:
+        logger.error(f"Batch prediction error: {e}")
+        return []

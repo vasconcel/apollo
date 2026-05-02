@@ -18,20 +18,28 @@ def prepare_kappa(df):
     Calculates Cohen's Kappa with robust edge case handling.
     Returns (kappa, pivot) or (None, None) if calculation not possible.
     """
-    pivot = df.pivot_table(
-        index="article_id",
-        columns="reviewer_id",
-        values="decision",
-        aggfunc="first"
-    )
+    # Handle empty or too-small dataframes
+    if df is None or len(df) == 0:
+        return None, None
+    
+    try:
+        pivot = df.pivot_table(
+            index="article_id",
+            columns="reviewer_id",
+            values="decision",
+            aggfunc="first"
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Kappa pivot error: {e}")
+        return None, None
 
     mapping = {"include": 1, "exclude": 0}
     pivot = pivot.replace(mapping)
 
     pivot = pivot.dropna()
-
+    
     # Need at least 2 reviewers with overlapping articles
-    if pivot.shape[1] < 2:
+    if pivot.shape[1] < 2 or pivot.shape[0] == 0:
         return None, None
     
     # Need sufficient overlapping articles for meaningful kappa

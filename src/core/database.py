@@ -1,7 +1,17 @@
 import sqlite3
 import json
+import time
+import logging
 from contextlib import contextmanager
 from typing import Optional
+from functools import wraps
+
+# Import logger
+try:
+    from .logger import get_logger
+except ImportError:
+    import logging
+    get_logger = lambda *args: logging.getLogger("aims")
 
 
 class DatabaseError(Exception):
@@ -9,18 +19,54 @@ class DatabaseError(Exception):
     pass
 
 
+# Retry decorator for handling database locked errors
+def retry_on_busy(max_retries: int = 3, base_delay: float = 0.1):
+    """
+    Decorator to retry database operations on 'database is locked' errors.
+    Implements exponential backoff.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = get_logger("database")
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower():
+                        last_exception = e
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"Database locked, retry {attempt + 1}/{max_retries} in {delay:.2f}s...")
+                        time.sleep(delay)
+                    else:
+                        raise
+            
+            # All retries exhausted
+            logger.error(f"Database locked after {max_retries} attempts")
+            raise last_exception
+        
+        return wrapper
+    return decorator
+
+
 class Database:
     def __init__(self, db_path="aims.db"):
         self.db_path = db_path
+        self._logger = get_logger("database")
         self._initialize_schema()
 
     # =============================
-    # CONNECTION
+    # CONNECTION WITH RETRY
     # =============================
     @contextmanager
+    @retry_on_busy(max_retries=3, base_delay=0.1)
     def connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
+            # Enable foreign keys
+            conn.execute("PRAGMA foreign_keys = ON")
             yield conn
             conn.commit()
         except Exception:
@@ -365,8 +411,8 @@ class Database:
         with self.connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-            INSERT INTO articles (title, authors, year, abstract, doi, url, source, literature_type, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported')
+            INSERT INTO articles (title, authors, year, abstract, doi, url, source, literature_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 article_data.get("title", ""),
                 article_data.get("authors", ""),
@@ -907,7 +953,68 @@ class Database:
         df.to_csv(path, index=False, encoding='utf-8-sig')
         return len(df)
 
-    def export_all_research_artifacts(self, base_path: str) -> dict:
+    def export_included_bibtex(self, path: str) -> int:
+        """
+        Export final included articles as BibTeX for bibliography.
+        
+        Args:
+            path: Output .bib file path
+            
+        Returns:
+            Number of entries exported
+        """
+        import pandas as pd
+        
+        with self.connect() as conn:
+            articles = pd.read_sql_query("""
+                SELECT a.*, fd.final_decision
+                FROM articles a
+                JOIN final_decisions fd ON a.id = fd.article_id
+                WHERE fd.final_decision = 'include'
+                ORDER BY a.year DESC, a.title
+            """, conn)
+        
+        if articles.empty:
+            return 0
+        
+        bibtex_entries = []
+        
+        for idx, row in articles.iterrows():
+            # Generate citation key
+            first_author = "Unknown"
+            if row.get("authors"):
+                first_author = row["authors"].split(",")[0].split(" and ")[0].strip().split()[-1]
+            
+            year = row.get("year", "n.d.")
+            title = row.get("title", "Untitled")
+            citation_key = first_author.lower() + str(year)
+            
+            # Get field values
+            authors_val = row.get('authors', 'Unknown')
+            title_val = row.get('title', 'Untitled')
+            source_val = row.get('source', 'Unknown')
+            doi_val = row.get('doi', '')
+            abstract_val = row.get('abstract', '')[:500] if row.get('abstract') else ''
+            
+            # Build BibTeX entry
+            entry = f"""@article{{{citation_key},
+  author = {{{authors_val}}},
+  title = {{{title_val}}},
+  year = {{{year}}},
+  journal = {{{source_val}}},
+  doi = {{{doi_val}}},
+  abstract = {{{abstract_val}}}
+}}"""
+            
+            bibtex_entries.append(entry)
+        
+        # Write to file
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write("% BibTeX Export - AIMS Final Included Articles\n")
+            f.write(f"% Generated by AIMS Pipeline\n\n")
+            f.write("\n\n".join(bibtex_entries))
+        
+        return len(bibtex_entries)
         """
         Export all research artifacts to CSV files.
         

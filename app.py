@@ -898,6 +898,52 @@ def render_screening():
     st.progress(progress)
     st.caption(f"Progress: {screened_count}/{total_articles} articles screened ({int(progress*100)}%)")
     
+    # ===== AI BATCH PRE-SCREENING =====
+    st.divider()
+    with st.expander("🤖 AI Pre-Screening (Batch)", expanded=False):
+        st.caption("Let AI learn from your decisions and pre-screen pending articles")
+        
+        col_ai, col_batch = st.columns([1, 2])
+        with col_ai:
+            run_batch = st.button("🔮 Run AI Batch Screening (20 articles)", use_container_width=True)
+        
+        if run_batch:
+            with st.spinner("Learning from your decisions..."):
+                try:
+                    # Get training context from reviewer
+                    from src.core.active_learning import get_training_context, format_few_shot_prompt, get_pending_articles_for_screening
+                    from src.core.ai_handler import get_batch_predictions
+                    
+                    context = get_training_context(db, st.session_state.reviewer_id, limit=20)
+                    
+                    if context["total_includes"] == 0 and context["total_excludes"] == 0:
+                        st.warning("Need at least some screening decisions to learn from. Make some decisions first!")
+                    else:
+                        # Get pending articles
+                        pending_batch = get_pending_articles_for_screening(db, st.session_state.reviewer_id, limit=20)
+                        
+                        if not pending_batch:
+                            st.info("No pending articles for batch screening")
+                        else:
+                            # Format few-shot prompt
+                            few_shot = format_few_shot_prompt(context, settings)
+                            
+                            # Get batch predictions
+                            predictions = get_batch_predictions(pending_batch, few_shot, max_articles=20)
+                            
+                            if predictions:
+                                # Store predictions in session state
+                                ai_key = f"batch_predictions_{st.session_state.reviewer_id}"
+                                st.session_state[ai_key] = predictions
+                                st.success(f"✅ Generated predictions for {len(predictions)} articles!")
+                                st.rerun()
+                            else:
+                                st.error("Could not generate predictions")
+                except Exception as e:
+                    st.error(f"Batch screening error: {e}")
+        
+        st.info("AI will analyze articles based on your previous Include/Exclude decisions.")
+    
     st.divider()
     
     # Get pending articles for this reviewer

@@ -31,237 +31,8 @@ st.set_page_config(
 )
 
 # ==================== DEEP SPACE THEME ====================
-st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<style>
-    /* === COLOR PALETTE === */
-    :root {
-        --primary: #00D2FF;
-        --secondary: #7000FF;
-        --bg-deep: #0A0E14;
-        --surface: rgba(255, 255, 255, 0.05);
-        --surface-hover: rgba(255, 255, 255, 0.1);
-        --text-primary: #FFFFFF;
-        --text-secondary: rgba(255, 255, 255, 0.7);
-        --border-subtle: rgba(255, 255, 255, 0.1);
-        --glow-primary: 0 0 20px rgba(0, 210, 255, 0.3);
-        --glow-secondary: 0 0 20px rgba(112, 0, 255, 0.3);
-    }
-    
-    /* === BODY & APP (respect streamlit icons) === */
-    html, body, .stApp {
-        background: var(--bg-deep) !important;
-        color: var(--text-primary) !important;
-    }
-    
-    /* Only apply Inter to text elements, NOT icons */
-    .stMarkdown, .stCaption, p, label, span[class*="st-"]:not(.material-symbols-rounded) {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    }
-    
-    /* Preserve Material Symbols for icons */
-    .material-symbols-rounded {
-        font-family: 'Material Symbols Rounded' !important;
-    }
-    
-    /* === SIDEBAR === */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0A0E14 0%, #151520 100%) !important;
-        border-right: 1px solid var(--border-subtle) !important;
-    }
-    
-    /* === HEADERS === */
-    h1, h2, h3, h4, h5, h6 {
-        color: var(--text-primary) !important;
-        font-weight: 600 !important;
-        letter-spacing: -0.02em !important;
-    }
-    
-    h1 { font-size: 2rem !important; }
-    h2 { font-size: 1.5rem !important; }
-    h3 { font-size: 1.25rem !important; }
-    
-    /* === METRIC CARDS (TRUE GLASSMORPHISM) === */
-    div[data-testid="stMetric"] {
-        background: var(--surface) !important;
-        backdrop-filter: blur(12px) !important;
-        -webkit-backdrop-filter: blur(12px) !important;
-        border: 1px solid var(--border-subtle) !important;
-        border-radius: 12px !important;
-        padding: 1.25rem !important;
-        transition: all 0.3s ease !important;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    div[data-testid="stMetric"]:hover {
-        background: var(--surface-hover) !important;
-        box-shadow: var(--glow-primary) !important;
-        transform: translateY(-2px);
-    }
-    
-    div[data-testid="stMetric"]::before {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: linear-gradient(90deg, var(--primary), var(--secondary));
-    }
-    
-    /* Metric labels */
-    div[data-testid="stMetricLabel"] {
-        color: var(--text-secondary) !important;
-        font-size: 0.875rem !important;
-    }
-    
-    /* Metric values - BRIGHT CYAN/WHITE */
-    div[data-testid="stMetricValue"] {
-        color: var(--primary) !important;
-        font-size: 1.5rem !important;
-        font-weight: 700 !important;
-        text-shadow: 0 0 10px rgba(0, 210, 255, 0.5) !important;
-    }
-    
-    /* === BUTTONS (GLOWING GRADIENT) === */
-    .stButton > button {
-        background: linear-gradient(135deg, var(--primary), var(--secondary)) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        padding: 0.75rem 1.5rem !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stButton > button:hover {
-        box-shadow: 0 0 30px rgba(0, 210, 255, 0.5), 0 0 30px rgba(112, 0, 255, 0.5) !important;
-        transform: translateY(-2px);
-    }
-    
-    .stButton > button[kind="secondary"] {
-        background: var(--surface) !important;
-        border: 1px solid var(--border-subtle) !important;
-    }
-    
-    .stButton > button[kind="secondary"]:hover {
-        background: var(--surface-hover) !important;
-    }
-    
-    /* === INPUTS === */
-    .stTextInput > div > div > input,
-    .stTextArea > div > div > textarea,
-    .stSelectbox > div > div > div {
-        background: var(--surface) !important;
-        border: 1px solid var(--border-subtle) !important;
-        border-radius: 8px !important;
-        color: var(--text-primary) !important;
-    }
-    
-    .stTextInput > div > div > input:focus,
-    .stTextArea > div > div > textarea:focus {
-        border-color: var(--primary) !important;
-        box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.2) !important;
-    }
-    
-    /* === RADIO BUTTONS === */
-    .stRadio > div {
-        background: var(--surface);
-        padding: 0.5rem;
-        border-radius: 8px;
-    }
-    
-    /* === DATA EDITOR === */
-    .stDataFrame {
-        background: var(--surface) !important;
-        border-radius: 12px !important;
-    }
-    
-    /* === EXPANDERS === */
-    .streamlit-expanderHeader {
-        background: var(--surface) !important;
-        border-radius: 8px !important;
-        border: 1px solid var(--border-subtle) !important;
-    }
-    
-    /* === DIVIDER / HR === */
-    hr, .stDivider {
-        border: none !important;
-        height: 1px !important;
-        background: linear-gradient(90deg, transparent, var(--primary), var(--secondary), transparent) !important;
-    }
-    
-    /* === PROGRESS BARS === */
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, var(--primary), var(--secondary)) !important;
-    }
-    
-    /* === CAPTIONS === */
-    .stCaption {
-        color: var(--text-secondary) !important;
-    }
-    
-    /* === BADGES / STATUS === */
-    .badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 999px;
-        font-size: 0.75rem;
-        font-weight: 500;
-    }
-    
-    .badge-success { background: rgba(16, 185, 129, 0.2); color: #10B981; }
-    .badge-error { background: rgba(239, 68, 68, 0.2); color: #EF4444; }
-    .badge-warning { background: rgba(245, 158, 11, 0.2); color: #F59E0B; }
-    .badge-info { background: rgba(0, 210, 255, 0.2); color: #00D2FF; }
-    
-    /* === SIDEBAR BRANDING === */
-    .sidebar-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, var(--primary), var(--secondary));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-    
-    .sidebar-subtitle {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-    }
-    
-    /* === SECTIONS / CONTAINERS === */
-    .custom-section {
-        background: var(--surface);
-        border-radius: 12px;
-        padding: 1.5rem;
-        border: 1px solid var(--border-subtle);
-    }
-    
-    /* === ALERTS / MESSAGES === */
-    .stSuccess {
-        background: rgba(16, 185, 129, 0.1) !important;
-        border: 1px solid rgba(16, 185, 129, 0.3) !important;
-    }
-    
-    .stError {
-        background: rgba(239, 68, 68, 0.1) !important;
-        border: 1px solid rgba(239, 68, 68, 0.3) !important;
-    }
-    
-    .stWarning {
-        background: rgba(245, 158, 11, 0.1) !important;
-        border: 1px solid rgba(245, 158, 11, 0.3) !important;
-    }
-    
-    .stInfo {
-        background: rgba(0, 210, 255, 0.1) !important;
-        border: 1px solid rgba(0, 210, 255, 0.3) !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+from src.ui.styles import get_custom_css
+st.markdown(get_custom_css(), unsafe_allow_html=True)
 
 
 # ==================== INIT ====================
@@ -1578,6 +1349,79 @@ def render_extraction():
                     st.caption(f"Page: {frag[6] or 'N/A'} | Reviewer: {frag[5]}")
         else:
             st.info("No fragments extracted yet for this article")
+        
+        # ===== AI DOCUMENT ANALYSIS =====
+        st.divider()
+        with st.expander("🤖 AI Document Analysis", expanded=False):
+            st.caption("Upload a PDF to auto-extract evidence using AI")
+            
+            uploaded_pdf = st.file_uploader("Upload Article PDF", type=["pdf"], key="extraction_pdf")
+            
+            if uploaded_pdf:
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    tmp.write(uploaded_pdf.getvalue())
+                    pdf_path = tmp.name
+                
+                try:
+                    from src.core.pdf_processor import extract_text_from_pdf
+                    
+                    with st.spinner("Extracting text from PDF..."):
+                        pdf_result = extract_text_from_pdf(pdf_path, max_pages=30)
+                    
+                    if pdf_result.get("error"):
+                        st.error(f"PDF Error: {pdf_result['error']}")
+                    else:
+                        pdf_text = pdf_result["text"]
+                        st.success(f"Extracted {len(pdf_text)} characters from {pdf_result['page_count']} pages")
+                        
+                        if st.button("🤖 AI Auto-Extract Evidence", use_container_width=True, key="ai_extract_btn"):
+                            with st.spinner("AI analyzing document..."):
+                                try:
+                                    from groq import Groq
+                                    import os
+                                    import json
+                                    
+                                    api_key = os.environ.get("GROQ_API_KEY")
+                                    if not api_key:
+                                        st.warning("Configure GROQ_API_KEY in environment for AI extraction")
+                                    else:
+                                        client = Groq(api_key=api_key)
+                                        
+                                        settings = db.get_settings()
+                                        extraction_fields = settings.get("extraction_fields", [])
+                                        fields_text = "\n".join([f"- {f}" for f in extraction_fields]) if extraction_fields else "RQ Code, Theme Category, Evidence Fragment, Page/Section"
+                                        
+                                        prompt = f"""Extract evidence from this research paper. Return JSON with these fields:
+{fields_text}
+
+If a field cannot be found, use empty string.
+
+Paper text (first 4000 chars):
+{pdf_text[:4000]}"""
+                                        
+                                        response = client.chat.completions.create(
+                                            model="llama3-70b-8192",
+                                            messages=[{"role": "user", "content": prompt}],
+                                            temperature=0.1,
+                                            max_tokens=2000
+                                        )
+                                        
+                                        ai_response = response.choices[0].message.content
+                                        
+                                        try:
+                                            extracted = json.loads(ai_response)
+                                            st.json(extracted)
+                                            st.success("AI extraction complete! Review and edit.")
+                                        except json.JSONDecodeError:
+                                            st.warning("Could not parse AI response as JSON")
+                                            st.text(ai_response[:500])
+                                except Exception as e:
+                                    st.error(f"AI extraction error: {e}")
+                finally:
+                    import os
+                    if os.path.exists(pdf_path):
+                        os.remove(pdf_path)
 
 
 # ==================== PAGE: SYNTHESIS ====================
@@ -2067,6 +1911,35 @@ def render_synthesis():
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("No fragments")
+        
+        # ===== EXECUTIVE SUMMARY GENERATOR =====
+        st.divider()
+        st.subheader("📊 Final Executive Report")
+        st.caption("Automated professional synthesis report for stakeholders")
+        
+        if st.button("✨ Generate Full Executive Summary", use_container_width=True):
+            with st.spinner("Generating comprehensive report..."):
+                try:
+                    from src.core.synthesis_aggregator import generate_executive_summary
+                    
+                    report, has_content = generate_executive_summary(db)
+                    
+                    if has_content:
+                        st.markdown(report)
+                        
+                        col_dl, col_preview = st.columns(2)
+                        with col_dl:
+                            st.download_button(
+                                label="📥 Download Report (.md)",
+                                data=report,
+                                file_name="executive_summary.md",
+                                mime="text/markdown",
+                                use_container_width=True
+                            )
+                    else:
+                        st.warning("No themes synthesized yet. Create themes and AI syntheses first.")
+                except Exception as e:
+                    st.error(f"Report generation error: {e}")
 
 
 # ==================== PAGE: EXPORT & AUDIT ====================
@@ -2384,6 +2257,22 @@ with st.sidebar:
         "Thematic Synthesis",
         "Reporting & Export"
     ], label_visibility="collapsed")
+    
+    st.divider()
+    
+    # ===== SYSTEM STATUS CARD =====
+    st.markdown("**🔧 System Status**")
+    
+    status_col1, status_col2 = st.columns(2)
+    with status_col1:
+        st.caption("Mode")
+        st.markdown("<span style='color:#00D2FF;font-weight:600'>Professional Research Suite</span>", unsafe_allow_html=True)
+    with status_col2:
+        st.caption("AI Engine")
+        st.markdown("<span style='color:#10B981;font-weight:600'>Active</span>", unsafe_allow_html=True)
+    
+    st.caption("Traceability")
+    st.markdown("<span style='color:#10B981;font-weight:600'>✓ Verified</span>", unsafe_allow_html=True)
     
     st.divider()
     

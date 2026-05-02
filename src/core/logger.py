@@ -2,7 +2,6 @@
 Centralized Logger for AIMS Pipeline.
 Provides structured logging to both console and file.
 """
-import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path

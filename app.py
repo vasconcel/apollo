@@ -363,7 +363,7 @@ def render_overview():
                 margin=dict(l=20, r=20, t=50, b=20)
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width=True)
             
         except Exception as e:
             st.warning(f"Sankey diagram unavailable: {e}. Showing simplified flow.")
@@ -397,7 +397,7 @@ def render_overview():
                 yaxis={"categoryorder": "total"},
                 margin={"l": 150}
             )
-            st.plotly_chart(fig_excl, use_container_width=True)
+            st.plotly_chart(fig_excl, width=True)
             
             # Detailed table with descriptions
             with st.expander("📋 Detailed Exclusion Reasons Table"):
@@ -408,7 +408,7 @@ def render_overview():
                     "description": "Description",
                     "count": "Count",
                     "% of Total": "% of Screened"
-                }), hide_index=True, use_container_width=True)
+                }), hide_index=True, width=True)
     
     st.divider()
     
@@ -430,7 +430,7 @@ def render_overview():
             color_discrete_map={"WL": "#2563eb", "GL": "#64748b"}
         )
         fig_lit.update_layout(height=300, showlegend=False)
-        st.plotly_chart(fig_lit, use_container_width=True)
+        st.plotly_chart(fig_lit, width=True)
     else:
         st.info("No articles imported")
     
@@ -457,7 +457,7 @@ def render_overview():
     st.subheader("Quick Actions")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Refresh Statistics", use_container_width=True):
+        if st.button("Refresh Statistics", width=True):
             st.rerun()
     with c2:
         st.info("Import data via the database module")
@@ -472,11 +472,10 @@ def render_overview():
             placeholder="e.g., 'Find articles that mention remote work challenges'"
         )
         
-        if semantic_query and st.button("🔎 Semantic Search", use_container_width=True):
+        if semantic_query and st.button("🔎 Semantic Search", width=True):
             with st.spinner("AI searching literature..."):
                 try:
                     import os
-                    import sqlite3
                     import json
                     
                     api_key = os.environ.get("GROQ_API_KEY")
@@ -641,7 +640,7 @@ def render_screening():
                     
                     st.divider()
                     st.subheader("Preview (first 5 rows)")
-                    st.dataframe(combined.head(5), use_container_width=True)
+                    st.dataframe(combined.head(5))
                     
                     # Ingest button
                     if st.button("Import to Screening Queue", type="primary"):
@@ -736,7 +735,7 @@ def render_screening():
         
         col_ai, col_batch = st.columns([1, 2])
         with col_ai:
-            run_batch = st.button("🔮 Run AI Batch Screening (20 articles)", use_container_width=True)
+            run_batch = st.button("🔮 Run AI Batch Screening (20 articles)", width=True)
         
         if run_batch:
             with st.spinner("Learning from your decisions..."):
@@ -893,7 +892,7 @@ def render_screening():
             ai_analyze = st.form_submit_button(
                 "🤖 AI Analyze",
                 type="secondary",
-                use_container_width=True
+                width=True
             )
         
         if ai_analyze:
@@ -909,7 +908,7 @@ def render_screening():
             submit_decision = st.form_submit_button(
                 "💾 Submit Decision",
                 type="primary",
-                use_container_width=True
+                width=True
             )
     
     # Handle form submission (outside form for proper state management)
@@ -954,12 +953,12 @@ def render_screening():
     st.subheader("📑 Article Navigation")
     nav_c1, nav_c2, nav_c3 = st.columns([1, 2, 1])
     with nav_c1:
-        if st.button("◀️ Previous", disabled=st.session_state.current_article_idx == 0, use_container_width=True):
+        if st.button("◀️ Previous", disabled=st.session_state.current_article_idx == 0, width=True):
             st.session_state.current_article_idx = max(0, st.session_state.current_article_idx - 1)
             st.session_state.ai_suggestion = None
             st.rerun()
     with nav_c3:
-        if st.button("Next ▶️", disabled=st.session_state.current_article_idx >= len(pending_articles) - 1, use_container_width=True):
+        if st.button("Next ▶️", disabled=st.session_state.current_article_idx >= len(pending_articles) - 1, width=True):
             st.session_state.current_article_idx += 1
             st.session_state.ai_suggestion = None
             st.rerun()
@@ -1127,7 +1126,7 @@ def render_consensus():
                             submit_resolved = st.form_submit_button(
                                 "✅ Resolve Conflict",
                                 type="primary",
-                                use_container_width=True
+                                width=True
                             )
                         
                         if submit_resolved:
@@ -1186,7 +1185,7 @@ def render_consensus():
     col_auto, col_info = st.columns([1, 2])
     
     with col_auto:
-        if st.button("✅ Auto-finalize Unanimous Decisions", use_container_width=True, disabled=candidate_count == 0):
+        if st.button("✅ Auto-finalize Unanimous Decisions", width=True, disabled=candidate_count == 0):
             with st.spinner("Finalizing unanimous decisions..."):
                 count = consensus_engine.auto_resolve_consensus(db)
             st.success(f"Auto-resolved {count} articles with unanimous agreement!")
@@ -1345,7 +1344,7 @@ def render_extraction():
         })
     
     df_articles = pd.DataFrame(articles_data)
-    st.dataframe(df_articles, use_container_width=True, hide_index=True)
+    st.dataframe(df_articles, hide_index=True)
     
     st.divider()
     
@@ -1435,7 +1434,7 @@ def render_extraction():
                         pdf_text = pdf_result["text"]
                         st.success(f"Extracted {len(pdf_text)} characters from {pdf_result['page_count']} pages")
                         
-                        if st.button("🤖 AI Auto-Extract Evidence", use_container_width=True, key="ai_extract_btn"):
+                        if st.button("🤖 AI Auto-Extract Evidence", width=True, key="ai_extract_btn"):
                             with st.spinner("AI analyzing document..."):
                                 try:
                                     from groq import Groq
@@ -1525,7 +1524,7 @@ def render_synthesis():
                 })
             
             frag_df = pd.DataFrame(frag_data)
-            st.dataframe(frag_df, use_container_width=True, hide_index=True, height=300)
+            st.dataframe(frag_df, hide_index=True, height=300)
             
             st.divider()
             
@@ -1572,7 +1571,7 @@ def render_synthesis():
                         if code_desc:
                             st.caption(f"Description: {code_desc}")
                         
-                        if st.button("🔗 Link to Fragment", use_container_width=True):
+                        if st.button("🔗 Link to Fragment", width=True):
                             try:
                                 db.link_fragment_code(selected_frag_id, selected_code_id, st.session_state.reviewer_id)
                                 st.success(f"Linked fragment to code: {selected_code_label}")
@@ -1584,7 +1583,7 @@ def render_synthesis():
                         new_code_label = st.text_input("New Code Label", placeholder="e.g., 'Remote Hiring Challenge'")
                         new_code_desc = st.text_area("Code Description (optional)", placeholder="Brief description of what this code represents")
                         
-                        if st.button("➕ Create & Link", use_container_width=True):
+                        if st.button("➕ Create & Link", width=True):
                             if not new_code_label.strip():
                                 st.error("Code label is required")
                             else:
@@ -1605,7 +1604,7 @@ def render_synthesis():
                     new_code_label = st.text_input("New Code Label", placeholder="e.g., 'Remote Hiring Challenge'")
                     new_code_desc = st.text_area("Code Description (optional)", placeholder="Brief description")
                     
-                    if st.button("➕ Create Code", use_container_width=True):
+                    if st.button("➕ Create Code", width=True):
                         if not new_code_label.strip():
                             st.error("Code label is required")
                         else:
@@ -1716,7 +1715,7 @@ def render_synthesis():
                         if selected_theme_id in linked_theme_ids:
                             st.info("This code is already linked to this theme")
                         else:
-                            if st.button("🔗 Link Code to Theme", use_container_width=True):
+                            if st.button("🔗 Link Code to Theme", width=True):
                                 try:
                                     db.link_code_theme(selected_code_id, selected_theme_id, st.session_state.reviewer_id)
                                     st.success("Code linked to theme!")
@@ -1767,7 +1766,7 @@ def render_synthesis():
             with col_ai_btn:
                 generate_btn = st.button(
                     "🤖 Generate AI Synthesis",
-                    use_container_width=True,
+                    width=True,
                     key=f"ai_gen_{selected_theme_id}"
                 )
             
@@ -1848,11 +1847,11 @@ def render_synthesis():
                             data=synthesis_text,
                             file_name=f"{selected_theme[1]}_synthesis.txt",
                             mime="text/plain",
-                            use_container_width=True
+                            width=True
                         )
                     
                     with col_copy:
-                        if st.button("📋 Copy to Clipboard", use_container_width=True):
+                        if st.button("📋 Copy to Clipboard", width=True):
                             # Note: Streamlit doesn't have native clipboard, show instruction
                             st.info("Use Ctrl+C to copy the text above")
                 
@@ -1878,7 +1877,7 @@ def render_synthesis():
                         title="Fragment Distribution by Literature Type",
                         color="Type", color_discrete_sequence=["#2563eb", "#64748b"]
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width=True)
                 
                 st.markdown("#### 🌳 Hierarchical Tree")
                 
@@ -1954,21 +1953,21 @@ def render_synthesis():
             with c1:
                 if not fragments_by_rq.empty:
                     fig = px.bar(fragments_by_rq, x="rq_code", y="count", title="Fragments by RQ", color="rq_code", color_discrete_sequence=px.colors.qualitative.Set2)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width=True)
                 else:
                     st.info("No fragments")
             
             with c2:
                 if not codes_per_rq.empty:
                     fig = px.bar(codes_per_rq, x="rq_code", y="count", title="Codes by RQ", color="rq_code", color_discrete_sequence=px.colors.qualitative.Pastel)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width=True)
                 else:
                     st.info("No codes")
             
             with c3:
                 if not lit_dist.empty:
                     fig = px.pie(lit_dist, values="fragment_count", names="literature_type", title="Fragment Distribution", color_discrete_sequence=["#2563eb", "#64748b"])
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width=True)
                 else:
                     st.info("No fragments")
         
@@ -1977,7 +1976,7 @@ def render_synthesis():
         st.subheader("📊 Final Executive Report")
         st.caption("Automated professional synthesis report for stakeholders")
         
-        if st.button("✨ Generate Full Executive Summary", use_container_width=True):
+        if st.button("✨ Generate Full Executive Summary", width=True):
             with st.spinner("Generating comprehensive report..."):
                 try:
                     from src.core.synthesis_aggregator import generate_executive_summary
@@ -1994,7 +1993,7 @@ def render_synthesis():
                                 data=report,
                                 file_name="executive_summary.md",
                                 mime="text/markdown",
-                                use_container_width=True
+                                width=True
                             )
                     else:
                         st.warning("No themes synthesized yet. Create themes and AI syntheses first.")
@@ -2125,7 +2124,7 @@ def render_export_audit():
     with col_exp:
         generate_export = st.button(
             "📦 Generate Full Research Package",
-            use_container_width=True,
+            width=True,
             type="primary"
         )
     
@@ -2182,7 +2181,7 @@ def render_export_audit():
                         data=file_content,
                         file_name=filename,
                         mime="text/csv",
-                        use_container_width=True
+                        width=True
                     )
                 with col_desc:
                     st.caption(description)
@@ -2222,7 +2221,7 @@ def render_export_audit():
                 data=zip_data,
                 file_name="aims_research_package.zip",
                 mime="application/zip",
-                use_container_width=True
+                width=True
             )
     else:
         with col_status:
@@ -2272,7 +2271,7 @@ def render_export_audit():
     st.subheader("Danger Zone")
     st.warning("These actions cannot be undone. Use with caution.")
     
-    if st.button("Reset/Nuke Database", type="primary", use_container_width=True):
+    if st.button("Reset/Nuke Database", type="primary", width=True):
         confirm = st.checkbox("I understand this will delete ALL data. Confirm:")
         
         if confirm:
@@ -2348,7 +2347,7 @@ with st.sidebar:
         rqs_current = config_mgr.get("research_questions", [])
         rqs_edit = [{"RQ": rq} for rq in rqs_current]
         
-        rqs_editor = st.data_editor(rqs_edit, num_rows="dynamic", key="cfg_rqs", use_container_width=True)
+        rqs_editor = st.data_editor(rqs_edit, num_rows="dynamic", key="cfg_rqs")
         rqs_list = [row["RQ"] for row in rqs_editor if row.get("RQ", "").strip()]
         
         st.subheader("API Configuration")

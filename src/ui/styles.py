@@ -2,7 +2,6 @@
 
 def get_custom_css():
     return """
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
     /* === COLOR PALETTE === */
     :root {
@@ -18,20 +17,10 @@ def get_custom_css():
         --glow-secondary: 0 0 20px rgba(112, 0, 255, 0.3);
     }
     
-    /* === BODY & APP (respect streamlit icons) === */
+    /* === BODY & APP === */
     html, body, .stApp {
         background: var(--bg-deep) !important;
         color: var(--text-primary) !important;
-    }
-    
-    /* Only apply Inter to text elements, NOT icons */
-    .stMarkdown, .stCaption, p, label, span[class*="st-"]:not(.material-symbols-rounded) {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    }
-    
-    /* Preserve Material Symbols for icons */
-    .material-symbols-rounded {
-        font-family: 'Material Symbols Rounded' !important;
     }
     
     /* === SIDEBAR === */
@@ -51,7 +40,7 @@ def get_custom_css():
     h2 { font-size: 1.5rem !important; }
     h3 { font-size: 1.25rem !important; }
     
-    /* === METRIC CARDS (TRUE GLASSMORPHISM) === */
+    /* === METRIC CARDS (GLASSMORPHISM) === */
     div[data-testid="stMetric"] {
         background: var(--surface) !important;
         backdrop-filter: blur(12px) !important;
@@ -86,7 +75,7 @@ def get_custom_css():
         font-size: 0.875rem !important;
     }
     
-    /* Metric values - BRIGHT CYAN/WHITE */
+    /* Metric values - BRIGHT CYAN */
     div[data-testid="stMetricValue"] {
         color: var(--primary) !important;
         font-size: 1.5rem !important;
@@ -94,7 +83,7 @@ def get_custom_css():
         text-shadow: 0 0 10px rgba(0, 210, 255, 0.5) !important;
     }
     
-    /* === BUTTONS (GLOWING GRADIENT) === */
+    /* === BUTTONS (GRADIENT) === */
     .stButton > button {
         background: linear-gradient(135deg, var(--primary), var(--secondary)) !important;
         color: white !important;

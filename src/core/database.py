@@ -2,6 +2,7 @@ import sqlite3
 import json
 import time
 import logging
+import os
 from contextlib import contextmanager
 from typing import Optional
 from functools import wraps
@@ -1030,7 +1031,6 @@ class Database:
         Returns:
             dict with export counts for each file
         """
-        import os
         
         # Ensure directory exists
         os.makedirs(base_path, exist_ok=True)

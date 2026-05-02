@@ -2433,6 +2433,30 @@ with st.sidebar:
     st.metric("Articles", stats["total_articles"])
     st.metric("Screened", len(stats["decisions"]["article_id"].unique()) if not stats["decisions"].empty else 0)
     
+    # Data Quality Indicators
+    try:
+        articles = stats.get("total_articles", 0)
+        if articles > 0:
+            conn = sqlite3.connect(db.db_path)
+            df = pd.read_sql_query("SELECT abstract, doi FROM articles", conn)
+            conn.close()
+            
+            missing_abstracts = int((df['abstract'].isna() | (df['abstract'] == '')).sum() / len(df) * 100)
+            missing_dois = int((df['doi'].isna() | (df['doi'] == '')).sum() / len(df) * 100)
+            
+            st.caption("Data Quality:")
+            if missing_abstracts > 50:
+                st.warning(f"⚠️ {missing_abstracts}% missing abstracts")
+            else:
+                st.caption(f"📄 {missing_abstracts}% missing abstracts")
+            
+            if missing_dois > 50:
+                st.warning(f"⚠️ {missing_dois}% missing DOIs")
+            else:
+                st.caption(f"🔗 {missing_dois}% missing DOIs")
+    except:
+        pass
+    
     # Conflicts warning
     conflicts = consensus_engine.detect_conflicts()
     if not conflicts.empty:

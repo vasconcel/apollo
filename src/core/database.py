@@ -79,8 +79,12 @@ class Database:
             CREATE TABLE IF NOT EXISTS articles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT,
+                authors TEXT,
+                year INTEGER,
                 abstract TEXT,
-                source_id TEXT,
+                doi TEXT,
+                url TEXT,
+                source TEXT,
                 literature_type TEXT,
                 status TEXT DEFAULT 'imported'
             )
@@ -98,7 +102,8 @@ class Database:
                 exclusion_reason TEXT,
                 criteria_snapshot TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(article_id, reviewer_id)
+                UNIQUE(article_id, reviewer_id),
+                FOREIGN KEY (article_id) REFERENCES articles(id)
             )
             """)
 
@@ -111,7 +116,8 @@ class Database:
                 final_decision TEXT CHECK(final_decision IN ('include','exclude')),
                 resolved_by TEXT,
                 resolution_notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (article_id) REFERENCES articles(id)
             )
             """)
 
@@ -126,7 +132,8 @@ class Database:
                 criteria_scores TEXT,
                 total_score REAL,
                 decision TEXT CHECK(decision IN ('include','exclude')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (article_id) REFERENCES articles(id)
             )
             """)
 

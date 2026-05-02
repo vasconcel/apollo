@@ -55,8 +55,13 @@ st.markdown("""
     }
     
     /* Only apply Inter to text elements, NOT icons */
-    .stMarkdown, .stCaption, p, label, span[class*="st-"] {
+    .stMarkdown, .stCaption, p, label, span[class*="st-"]:not(.material-symbols-rounded) {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+    
+    /* Preserve Material Symbols for icons */
+    .material-symbols-rounded {
+        font-family: 'Material Symbols Rounded' !important;
     }
     
     /* === SIDEBAR === */

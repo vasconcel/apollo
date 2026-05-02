@@ -1,17 +1,21 @@
 import os
 import json
 import logging
+import time
 from typing import Dict, Any, Optional
 from groq import Groq
+from groq import RateLimitError, APIConnectionError, APITimeoutError
 
 # Configuração de Logging para Auditoria da IA
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_ai_suggestion(title: str, abstract: str, settings: Dict[str, Any]) -> Dict[str, Any]:
+def get_ai_suggestion(title: str, abstract: str, settings: Dict[str, Any], max_retries: int = 2, retry_delay: float = 1.0) -> Dict[str, Any]:
     """
     Analisa um artigo com base no protocolo de pesquisa (RQs, ICs, ECs).
     Retorna um veredito estruturado para apoiar a decisão do pesquisador.
+    
+    Includes resilient retry logic for rate limits and transient errors.
     """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
@@ -62,32 +66,71 @@ def get_ai_suggestion(title: str, abstract: str, settings: Dict[str, Any]) -> Di
 
     user_content = f"TITLE: {title}\n\nABSTRACT: {abstract}"
 
-    try:
-        # 3. Chamada à LLM com Temperatura Baixa (Rigor Científico)
-        response = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            model="llama3-70b-8192",
-            temperature=0.1, # Minimiza alucinações e variações
-            max_tokens=1000,
-            response_format={"type": "json_object"} # Garante parse estruturado
-        )
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            # 3. Chamada à LLM com Temperatura Baixa (Rigor Científico)
+            response = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                model="llama3-70b-8192",
+                temperature=0.1,
+                max_tokens=1000,
+                response_format={"type": "json_object"}
+            )
 
-        ai_response = json.loads(response.choices[0].message.content)
-        
-        # Log da decisão para rastreabilidade
-        logger.info(f"AI Decision for '{title[:30]}...': {ai_response['decision']} ({ai_response['confidence']}%)")
-        
-        return ai_response
+            ai_response = json.loads(response.choices[0].message.content)
+            
+            # Log da decisão para rastreabilidade
+            logger.info(f"AI Decision for '{title[:30]}...': {ai_response['decision']} ({ai_response['confidence']}%)")
+            
+            return ai_response
 
-    except json.JSONDecodeError:
-        logger.error("Erro ao decodificar resposta da IA (Formato inválido).")
-        return {"decision": "error", "reasons": ["Erro na formatação da resposta da IA."], "confidence": 0}
-    except Exception as e:
-        logger.error(f"Erro na chamada da API Groq: {str(e)}")
-        return {"decision": "error", "reasons": [f"Erro técnico: {str(e)}"], "confidence": 0}
+        except RateLimitError as e:
+            last_error = f"Rate limit: {str(e)}"
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logger.warning(f"Rate limit hit, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Rate limit exceeded after {max_retries} attempts")
+                
+        except APITimeoutError as e:
+            last_error = f"Timeout: {str(e)}"
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(f"API timeout, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"API timeout after {max_retries} attempts")
+                
+        except APIConnectionError as e:
+            last_error = f"Connection error: {str(e)}"
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(f"API connection error, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"API connection failed after {max_retries} attempts")
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Erro ao decodificar resposta da IA (Formato inválido): {str(e)}")
+            return {"decision": "error", "reasons": ["Erro na formatação da resposta da IA."], "confidence": 0}
+            
+        except Exception as e:
+            last_error = str(e)
+            logger.error(f"Erro inesperado na chamada da API Groq: {last_error}")
+            break
+    
+    # Return error response after all retries exhausted
+    return {
+        "decision": "error",
+        "reasons": [f"API error (após {max_retries} tentativas): {last_error}"],
+        "confidence": 0
+    }
 
 
 def generate_theme_synthesis(theme_label: str, wl_fragments: list, gl_fragments: list) -> Dict[str, Any]:

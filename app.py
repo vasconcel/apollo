@@ -18,8 +18,21 @@ from src.core.quality import QualityEngine
 # Extras
 from src.core.ai_handler import get_ai_suggestion, generate_theme_synthesis
 from src.core.config_manager import load_config
-from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_excel_to_df
+from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_excel_to_df, convert_wos_txt_to_df
 from src.core.snowballing import get_paper_references
+from src.core.workflow import ReviewStage, is_valid_transition
+
+
+# ==================== WORKFLOW GUARD ====================
+def require_stage(required_stage: ReviewStage, db) -> bool:
+    """Block page access if current stage doesn't permit it."""
+    current = ReviewStage(db.get_current_stage())
+    
+    if current != required_stage:
+        st.error(f"🔒 This section requires '{required_stage.value}' stage. Current: '{current.value}'")
+        st.info(f"💡 Methodological workflow: {db.get_stage_prompt()}")
+        return False
+    return True
 
 
 # ==================== CONFIG ====================
@@ -38,8 +51,20 @@ st.markdown(get_custom_css(), unsafe_allow_html=True)
 # ==================== INIT ====================
 @st.cache_resource
 def get_database():
-    """Returns a cached Database instance."""
-    return Database()
+    """Returns a cached Database instance with current review_id."""
+    review_id = get_current_review_id()
+    return Database(review_id=review_id)
+
+def get_current_review_id() -> int:
+    """Get the currently selected review_id from session state."""
+    if "review_id" not in st.session_state:
+        st.session_state.review_id = 1
+    return st.session_state.review_id
+
+def set_review_id(review_id: int):
+    """Set the active review ID and refresh."""
+    st.session_state.review_id = review_id
+    st.rerun()
 
 @st.cache_resource
 def get_consensus_engine():
@@ -455,12 +480,12 @@ def render_overview():
     
     # ===== QUICK ACTIONS =====
     st.subheader("Quick Actions")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([1, 3])
     with c1:
-        if st.button("Refresh Statistics", width=True):
+        if st.button("Refresh Statistics"):
             st.rerun()
     with c2:
-        st.info("Import data via the database module")
+        st.info("Import data via the Import page | Export via Export page")
     
     # ===== SEMANTIC DISCOVERY =====
     st.divider()
@@ -536,42 +561,47 @@ Respond ONLY with valid JSON array, no other text."""
                 except Exception as e:
                     st.error(f"Search error: {e}")
     
-    # ===== PROJECT MANIFESTO =====
+    # ===== CALIBRATION (MLR Protocol Requirement) =====
     st.divider()
-    with st.expander("🏆 Project Manifesto", expanded=True):
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, rgba(0, 210, 255, 0.1), rgba(112, 0, 255, 0.1));
-            border: 1px solid rgba(0, 210, 255, 0.3);
-            border-radius: 12px; padding: 1.5rem; margin: 1rem 0;">
-            <h3 style="color: #00d2ff; margin: 0 0 1rem 0;">🎯 AIMS - Automated Intelligence Mapping System</h3>
+    with st.expander("🎯 Calibration Phase (Required)", expanded=False):
+        st.caption("Protocol Step 1: Calibrate reviewers before screening (κ ≥ 0.8 required)")
+        
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            reviewer_1 = st.text_input("Reviewer 1", value=st.session_state.reviewer_id)
+            sample_size = st.number_input("Sample size", min_value=5, max_value=50, value=20)
+        
+        with c2:
+            reviewer_2 = st.text_input("Reviewer 2")
+        
+        if st.button("Create Calibration Set", width=True):
+            if reviewer_1 and reviewer_2:
+                set_id = db.create_calibration_set(reviewer_1, sample_size)
+                st.success(f"Calibration set #{set_id} created")
+                st.rerun()
+        
+        # Show existing calibration items
+        results = db.get_calibration_results()
+        if results:
+            latest = results[0]
+            st.metric("Latest Kappa", f"{latest[3]:.3f}" if latest[3] else "N/A")
             
-            <table style="width: 100%; color: white;">
-            <tr>
-                <td style="padding: 0.5rem;"><strong>Methodological Rigor:</strong></td>
-                <td style="color: #10b981;">✓ 100% (Garousi et al. compliant)</td>
-            </tr>
-            <tr>
-                <td style="padding: 0.5rem;"><strong>Test Suite Strength:</strong></td>
-                <td style="color: #00d2ff;">✓ 88 Tests Verified</td>
-            </tr>
-            <tr>
-                <td style="padding: 0.5rem;"><strong>Traceability Audit:</strong></td>
-                <td style="color: #10b981;">✓ PASSED</td>
-            </tr>
-            <tr>
-                <td style="padding: 0.5rem;"><strong>AI Engine:</strong></td>
-                <td style="color: #7000ff;">Groq LLaMA3-70B</td>
-            </tr>
-            </table>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-# ==================== PAGE: SCREENING ====================
+            if latest[3] and latest[3] >= 0.8:
+                st.success("✓ Kappa threshold met (≥ 0.8) - Can proceed to screening")
+            else:
+                st.warning("⚠️ Kappa below threshold - Continue calibration")
+        else:
+            st.info("No calibration completed yet")
+    
+    # ==================== PAGE: SCREENING ====================
 def render_screening():
     st.header("Screening")
     st.caption(f"Reviewer: **{st.session_state.reviewer_id}**")
+    
+    db = get_database()
+    if not require_stage(ReviewStage.SCREENING, db):
+        return
     
     stats = get_stats()
     decisions = stats["decisions"]
@@ -595,10 +625,11 @@ def render_screening():
                 lit_type = st.radio("Literature Source Type", ["White Literature (WL)", "Grey Literature (GL)"], horizontal=True)
             with col_file:
                 uploaded_files = st.file_uploader(
-                    "Upload files (.bib, .ris, .csv, .xlsx)",
-                    type=["bib", "ris", "csv", "xlsx"],
+                    "Upload files (any format: .bib, .ris, .csv, .xlsx, .txt, or no extension)",
                     accept_multiple_files=True
                 )
+                
+                st.caption("💡 Tip: Files with no extension (ACM exports) are auto-detected as BibTeX")
             
             if uploaded_files:
                 st.caption(f"📎 {len(uploaded_files)} file(s) selected")
@@ -614,16 +645,27 @@ def render_screening():
                         tmp_path = tmp.name
                     
                     # Convert based on extension
+                    # Handle files with no extension as BibTeX (ACM edge case)
                     suffix = Path(uploaded.name).suffix.lower()
+                    
+                    if not suffix or suffix not in [".bib", ".ris", ".xlsx", ".csv", ".txt"]:
+                        suffix = ".bib"
+                    
                     try:
                         if suffix == ".bib":
-                            df = convert_bibtex_to_df(tmp_path)
+                            try:
+                                df = convert_bibtex_to_df(tmp_path)
+                            except Exception as bib_error:
+                                st.warning(f"Not BibTeX format, skipping: {bib_error}")
+                                df = pd.DataFrame()
                         elif suffix == ".ris":
                             df = convert_ris_to_df(tmp_path)
                         elif suffix == ".xlsx":
                             df = convert_excel_to_df(tmp_path)
                         elif suffix == ".csv":
                             df = pd.read_csv(tmp_path)
+                        elif suffix == ".txt":
+                            df = convert_wos_txt_to_df(tmp_path)
                         else:
                             df = pd.DataFrame()
                         
@@ -972,6 +1014,10 @@ def render_consensus():
     st.header("Reliability & Resolution")
     st.caption("Inter-reviewer agreement and conflict resolution")
     
+    db = get_database()
+    if not require_stage(ReviewStage.CONSENSUS, db):
+        return
+    
     stats = get_stats()
     decisions = stats["decisions"]
     total_articles = stats["total_articles"]
@@ -1205,6 +1251,10 @@ def render_quality():
     st.header("🧪 Quality Assessment")
     st.caption("Appraise included articles using quality criteria")
     
+    db = get_database()
+    if not require_stage(ReviewStage.EXTRACTION, db):
+        return
+    
     # Get articles ready for QC (passed screening, not yet QC'd)
     conn = sqlite3.connect(db.db_path)
     
@@ -1323,6 +1373,10 @@ def render_quality():
 def render_extraction():
     st.header("🔬 Evidence Extraction")
     st.caption("Extract fragments from quality-assessed articles")
+    
+    db = get_database()
+    if not require_stage(ReviewStage.EXTRACTION, db):
+        return
     
     # Get articles ready for extraction
     ready_articles = db.get_included_articles_for_extraction()
@@ -1487,6 +1541,25 @@ Paper text (first 4000 chars):
 def render_synthesis():
     st.header("🧩 Thematic Synthesis Workspace")
     st.caption("Interactive qualitative analysis: Open Coding → Thematic Organization → Traceability")
+    
+    db = get_database()
+    if not require_stage(ReviewStage.SYNTHESIS, db):
+        return
+    
+    # ===== TRACEABILITY ENFORCEMENT =====
+    try:
+        integrity = db.validate_traceability_integrity()
+    except Exception as e:
+        st.error("Critical validation failure")
+        st.exception(e)
+        integrity = {"is_valid": False, "errors": [str(e)]}
+    
+    if not integrity.get("is_valid"):
+        st.error("⚠️ Traceability integrity issues detected:")
+        issues = integrity.get("issues", [])
+        for issue in issues[:5]:
+            st.caption(f"- {issue}")
+        st.warning("Fix issues before proceeding. All themes → codes → fragments → sources must be connected.")
     
     # Session state for managing selections
     if "selected_rq" not in st.session_state:
@@ -1725,7 +1798,7 @@ def render_synthesis():
     
     # ==================== TAB 3: TRACEABILITY MATRIX ====================
     with tab3:
-        st.subheader("Traceability Matrix: Theme → Codes → Fragments → Sources")
+        st.subheader("🔗 Traceability Matrix: Theme → Codes → Fragments → Sources")
         
         # Get all themes
         all_themes = []
@@ -1736,21 +1809,79 @@ def render_synthesis():
         if not all_themes:
             st.warning("No themes created yet. Go to Thematic Organization to create themes.")
         else:
-            # Theme selector
+            # Theme selector with lineage preview
             theme_options = {f"{t[1]}: {t[2]} ({t[3]})": t[0] for t in all_themes}
             selected_theme_label = st.selectbox("Select Theme to Explore", list(theme_options.keys()))
             selected_theme_id = theme_options[selected_theme_label]
+            
+            st.divider()
+            
+            # ===== TRACEABILITY INSPECTOR =====
+            with st.expander("🔍 Traceability Inspector", expanded=True):
+                lineage = db.get_theme_lineage(selected_theme_id)
+                
+                if lineage["theme"]:
+                    st.markdown(f"### 📂 {lineage['theme']['label']}")
+                    st.caption(f"Synthesis: {lineage['theme']['synthesis'] or 'No AI synthesis yet'}")
+                    
+                    st.markdown("#### Codes Linked")
+                    if lineage["codes"]:
+                        for code in lineage["codes"]:
+                            st.markdown(f"- **{code['label']}**: {code['description'] or 'No description'}")
+                    else:
+                        st.warning("No codes linked")
+                    
+                    st.markdown("#### Fragments Linked")
+                    if lineage["fragments"]:
+                        st.markdown(f"_{len(lineage['fragments'])} fragments from {len(lineage['sources'])} sources_")
+                    else:
+                        st.warning("No fragments linked")
+                    
+                    st.markdown("#### Evidence Sources")
+                    if lineage["sources"]:
+                        for src in lineage["sources"]:
+                            st.caption(f"- {src['title'][:50]}... ({src['year']}) by {src['authors'][:30]}")
+                    else:
+                        st.warning("No sources traced")
+                    
+                    st.divider()
+                    st.metric("Traceability Score", f"{len(lineage['fragments'])} frags / {len(lineage['sources'])} sources")
             
             # Get theme details
             selected_theme = next((t for t in all_themes if t[0] == selected_theme_id), None)
             
             st.divider()
             
-            # Theme header
+            # Theme header with WL vs GL classification
             if selected_theme:
-                st.markdown(f"### 📂 Theme: {selected_theme[1]} - {selected_theme[2]}")
-                if selected_theme[3]:
-                    st.caption(f"RQ: {selected_theme[3]} | Description: {selected_theme[3]}")
+                st.markdown(f"### Theme: {selected_theme[1]} - {selected_theme[2]}")
+                
+                dist = db.compute_theme_source_distribution(selected_theme_id)
+                classification = db.classify_theme(selected_theme_id)
+                
+                # Show classification badges
+                col_wl, col_gl, col_class = st.columns(3)
+                with col_wl:
+                    st.metric("WL Sources", dist["wl_count"])
+                with col_gl:
+                    st.metric("GL Sources", dist["gl_count"])
+                with col_class:
+                    if classification == "convergent":
+                        st.success(f"Classification: Convergent")
+                    elif classification == "academic_only":
+                        st.warning(f"Classification: Academic Only")
+                    elif classification == "practitioner_only":
+                        st.info(f"Classification: Practitioner Only")
+                    else:
+                        st.error(f"Classification: Unclassified")
+                
+                # Show divergence summary
+                if dist["wl_count"] > 0 and dist["gl_count"] > 0:
+                    st.info("Triangulation opportunity: Both WL and GL sources present")
+                elif dist["wl_count"] == 0 and dist["gl_count"] > 0:
+                    st.warning("Gap: No academic literature evidence")
+                elif dist["wl_count"] > 0 and dist["gl_count"] == 0:
+                    st.warning("Gap: No gray literature evidence")
             
             # ==================== AI INSIGHT GENERATOR ====================
             st.divider()
@@ -2021,7 +2152,13 @@ def render_export_audit():
     prisma = get_prisma_stats()
     
     # Validate traceability
-    integrity = db.validate_traceability_integrity()
+    try:
+        integrity = db.validate_traceability_integrity()
+    except Exception as e:
+        st.error("Critical validation failure in traceability check")
+        st.exception(e)
+        st.session_state.integrity = {"is_valid": False, "errors": [str(e)]}
+        return
     
     # Get additional audit metrics
     conn = sqlite3.connect(db.db_path)
@@ -2052,28 +2189,26 @@ def render_export_audit():
     has_issues = False
     
     # Orphaned Fragments (no codes)
-    if integrity["fragments_without_codes"]:
+    if integrity.get("fragments_without_codes"):
         has_issues = True
-        st.error(f"🚨 **Orphaned Fragments**: {len(integrity['fragments_without_codes'])} fragments have no codes assigned")
+        fragments_list = integrity["fragments_without_codes"]
+        st.error(f"🚨 **Orphaned Fragments**: {len(fragments_list)} fragments have no codes assigned")
         with st.expander("View Orphaned Fragments"):
-            for frag in integrity["fragments_without_codes"][:10]:
-                st.caption(f"- ID {frag['fragment_id']}: {frag['fragment_text'][:80]}... (RQ: {frag['rq_code']})")
-            if len(integrity["fragments_without_codes"]) > 10:
-                st.caption(f"... and {len(integrity['fragments_without_codes']) - 10} more")
+            for frag in fragments_list[:10]:
+                if isinstance(frag, dict):
+                    st.caption(f"- ID {frag.get('fragment_id', frag)}: {str(frag.get('fragment_text', ''))[:80]}...")
+                else:
+                    st.caption(f"- ID {frag}")
+            if len(fragments_list) > 10:
+                st.caption(f"... and {len(fragments_list) - 10} more")
     
     # Orphaned Codes (no themes)
-    if integrity["codes_without_fragments"]:
+    if integrity.get("codes_without_fragments"):
         st.warning(f"⚠️ **Orphaned Codes**: {len(integrity['codes_without_fragments'])} codes have no fragments linked")
-        with st.expander("View Orphaned Codes"):
-            for code in integrity["codes_without_fragments"][:10]:
-                st.caption(f"- {code['code_label']} (RQ: {code['rq_code']})")
     
     # Orphaned Themes (no codes)
-    if integrity["themes_without_codes"]:
+    if integrity.get("themes_without_codes"):
         st.warning(f"⚠️ **Orphaned Themes**: {len(integrity['themes_without_codes'])} themes have no codes linked")
-        with st.expander("View Orphaned Themes"):
-            for theme in integrity["themes_without_codes"][:10]:
-                st.caption(f"- {theme['theme_code']}: {theme['theme_label']} (RQ: {theme['rq_code']})")
     
     # Coverage Gap (included articles with no fragments)
     if zero_extraction:
@@ -2114,17 +2249,102 @@ def render_export_audit():
     
     st.divider()
     
-    # ==================== SECTION 3: EXPORT PACKAGE ====================
+    # ==================== SECTION 3: X-MARKER MATRIX ====================
+    st.subheader("X-Marker Evidence Presence Matrix")
+    st.caption("Track concept presence across sources (Evidence Cross-Tabulation)")
+    
+    with st.expander("Manage Concepts", expanded=False):
+        new_concept = st.text_input("New Concept Name")
+        concept_desc = st.text_area("Description")
+        
+        col_add, col_spacer = st.columns([1, 1])
+        with col_add:
+            add_clicked = st.button("➕ Add Concept", type="primary")
+        
+        if add_clicked and new_concept:
+            try:
+                db.create_concept(new_concept, concept_desc)
+                st.success(f"Concept '{new_concept}' created")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to add concept: {str(e)}")
+        
+        concepts = db.get_concepts()
+    
+    if not concepts:
+        st.info("No concepts defined. Create concepts above to track evidence presence.")
+    else:
+        st.markdown("#### Mark Presence")
+        
+        articles = pd.read_sql_query("""
+            SELECT id, title, literature_type FROM articles 
+            WHERE screening_status IN ('included', 'final_included')
+        """, sqlite3.connect(db.db_path))
+        
+        if not articles.empty:
+            selected_article = st.selectbox("Select Article", articles["id"], 
+                                       format_func=lambda x: articles[articles["id"]==x]["title"].values[0][:50])
+            
+            current_marks = db.get_concept_presence(selected_article)
+            
+            st.caption(f"Checking presence for: {articles[articles['id']==selected_article]['title'].values[0][:60]}...")
+            
+            cols = st.columns(min(len(concepts), 4))
+            for i, concept in enumerate(concepts):
+                with cols[i % 4]:
+                    is_checked = current_marks.get(concept[1], False)
+                    if st.checkbox(concept[1], value=is_checked, key=f"mark_{selected_article}_{concept[0]}"):
+                        try:
+                            db.mark_concept_presence(selected_article, concept[0], True)
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                    else:
+                        try:
+                            db.mark_concept_presence(selected_article, concept[0], False)
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+        
+        st.divider()
+        
+        st.markdown("#### Concept Frequency")
+        freq = db.compute_concept_frequency()
+        if freq:
+            freq_df = pd.DataFrame(freq)
+            if not freq_df.empty:
+                st.dataframe(freq_df, hide_index=True)
+        
+        st.divider()
+        
+        st.markdown("#### X-Marker Matrix")
+        matrix = db.get_X_marker_matrix()
+        if not matrix.empty:
+            st.dataframe(matrix, hide_index=True)
+            
+            try:
+                csv = matrix.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📥 Download Matrix (.csv)",
+                    data=csv,
+                    file_name="x_marker_matrix.csv",
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"Failed to generate CSV: {str(e)}")
+        else:
+            st.info("Mark concept presence above to generate matrix")
+    
+    st.divider()
+    
+    # ==================== SECTION 4: EXPORT PACKAGE ====================
     st.subheader("Publication-Ready Export")
     st.caption("Generate and download the complete research package")
     
     # Export button
-    col_exp, col_status = st.columns([1, 2])
+    col_exp, col_status = st.columns([1, 1])
     
     with col_exp:
         generate_export = st.button(
-            "📦 Generate Full Research Package",
-            width=True,
+            "📦 Generate Package",
             type="primary"
         )
     
@@ -2171,20 +2391,24 @@ def render_export_audit():
         for filename, description in export_files.items():
             filepath = os.path.join(export_path, filename)
             if os.path.exists(filepath):
-                with open(filepath, 'r', encoding='utf-8-sig') as f:
-                    file_content = f.read()
-                
-                col_dl, col_desc = st.columns([1, 2])
-                with col_dl:
-                    st.download_button(
-                        f"📥 {filename}",
-                        data=file_content,
-                        file_name=filename,
-                        mime="text/csv",
-                        width=True
-                    )
-                with col_desc:
-                    st.caption(description)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        file_content = f.read()
+                    
+                    col_dl, col_desc = st.columns([1, 2])
+                    with col_dl:
+                        st.download_button(
+                            f"📥 {filename}",
+                            data=file_content,
+                            file_name=filename,
+                            mime="text/csv",
+                            width=True,
+                            key=f"dl_{filename}"
+                        )
+                    with col_desc:
+                        st.caption(description)
+                except Exception as e:
+                    st.warning(f"Could not load {filename}: {str(e)}")
         
         st.divider()
         
@@ -2204,25 +2428,28 @@ def render_export_audit():
         import zipfile
         zip_path = f"{export_path}_package.zip"
         
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for filename in export_files.keys():
-                filepath = os.path.join(export_path, filename)
-                if os.path.exists(filepath):
-                    zipf.write(filepath, filename)
-        
-        with open(zip_path, 'rb') as f:
-            zip_data = f.read()
-        
-        st.divider()
-        col_zip, col_spacer = st.columns([1, 1])
-        with col_zip:
-            st.download_button(
-                "📦 Download Full Replication Package (.zip)",
-                data=zip_data,
-                file_name="aims_research_package.zip",
-                mime="application/zip",
-                width=True
-            )
+        try:
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filename in export_files.keys():
+                    filepath = os.path.join(export_path, filename)
+                    if os.path.exists(filepath):
+                        zipf.write(filepath, filename)
+            
+            with open(zip_path, 'rb') as f:
+                zip_data = f.read()
+            
+            st.divider()
+            col_zip, col_spacer = st.columns([1, 1])
+            with col_zip:
+                st.download_button(
+                    "📦 Download Full Replication Package (.zip)",
+                    data=zip_data,
+                    file_name="aims_research_package.zip",
+                    mime="application/zip",
+                    width=True
+                )
+        except Exception as e:
+            st.warning(f"Could not create ZIP package: {str(e)}")
     else:
         with col_status:
             st.info("Click 'Generate Full Research Package' to create export files")
@@ -2271,22 +2498,31 @@ def render_export_audit():
     st.subheader("Danger Zone")
     st.warning("These actions cannot be undone. Use with caution.")
     
-    if st.button("Reset/Nuke Database", type="primary", width=True):
-        confirm = st.checkbox("I understand this will delete ALL data. Confirm:")
-        
-        if confirm:
-            try:
-                # Close and delete database
-                db_path = db.db_path
-                del db
-                
-                if os.path.exists(db_path):
-                    os.remove(db_path)
-                    st.success("Database reset complete. Refresh the page to reinitialize.")
-                else:
-                    st.error("Database file not found")
-            except Exception as e:
-                st.error(f"Reset failed: {e}")
+    col_danger, col_check = st.columns([1, 1])
+    with col_danger:
+        reset_clicked = st.button("💣 Reset Database", type="primary")
+    
+    with col_check:
+        confirm = st.checkbox("I understand this will delete ALL data")
+    
+    if reset_clicked and confirm:
+        try:
+            db_path = db.db_path
+            del db
+            
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                st.success("Database reset complete. Refresh the page to reinitialize.")
+            else:
+                st.error("Database file not found")
+        except Exception as e:
+            st.error(f"Reset failed: {e}")
+    
+    col_danger, col_confirm = st.columns([1, 1])
+    with col_danger:
+        st.caption("💣 This will permanently delete all data")
+    with col_confirm:
+        st.caption("☑️ Required before action")
 
 
 # ==================== SIDEBAR ====================
@@ -2295,6 +2531,31 @@ with st.sidebar:
     <div class="sidebar-title">AIMS</div>
     <div class="sidebar-subtitle">Next-Gen Research Intelligence</div>
     """, unsafe_allow_html=True)
+    
+    # ===== REVIEW ISOLATION =====
+    st.divider()
+    st.subheader("Active Review")
+    
+    db = get_database()
+    review_id = get_current_review_id()
+    
+    reviews = db.get_reviews()
+    review_options = {r[1]: r[0] for r in reviews}
+    
+    selected_review = st.selectbox(
+        "Select Review",
+        options=list(review_options.keys()),
+        index=list(review_options.values()).index(review_id) if review_id in review_options.values() else 0,
+        key="review_selector"
+    )
+    
+    if review_options[selected_review] != review_id:
+        set_review_id(review_options[selected_review])
+    
+    st.caption(f"Review ID: {review_id}")
+    
+    if len(reviews) > 1:
+        st.success(f"Multiple reviews: {len(reviews)} projects isolated")
     
     st.divider()
     

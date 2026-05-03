@@ -7,12 +7,25 @@ import sqlite3
 from src.core.database import Database, DatabaseError
 
 
+@pytest.fixture
+def temp_db_file(tmp_path):
+    """Create a temporary database file for each test."""
+    return str(tmp_path / "test_aims.db")
+
+
+# Test fixtures with review_id
+@pytest.fixture
+def db_with_review(temp_db_file):
+    """Create database with review_id for testing."""
+    return Database(temp_db_file, review_id=1)
+
+
 class TestDatabaseSchema:
     """Test database schema initialization."""
 
     def test_database_creates_tables(self, temp_db_file):
         """Database should create all required tables."""
-        db = Database(temp_db_file)
+        db = Database(temp_db_file, review_id=1)
         
         with db.connect() as conn:
             result = conn.execute(
@@ -30,7 +43,7 @@ class TestArticleOperations:
 
     def test_add_article_returns_id_and_can_be_read_back(self, temp_db_file):
         """CRITICAL: Add article AND read it back from real database."""
-        db = Database(temp_db_file)
+        db = Database(temp_db_file, review_id=1)
         
         # Write
         article_id = db.add_article({
@@ -62,7 +75,7 @@ class TestArticleOperations:
 
     def test_multiple_articles_persist_in_database(self, temp_db_file):
         """CRITICAL: Multiple articles should all persist."""
-        db = Database(temp_db_file)
+        db = Database(temp_db_file, review_id=1)
         
         ids = []
         for i in range(5):
@@ -96,7 +109,7 @@ class TestForeignKeyConstraints:
 
     def test_fragment_fk_constraint_prevents_invalid_reference(self, temp_db_file):
         """Fragment for non-existent article should raise sqlite3.IntegrityError."""
-        db = Database(temp_db_file)
+        db = Database(temp_db_file, review_id=1)
         
         # Try to insert fragment for non-existent article
         with pytest.raises((DatabaseError, sqlite3.IntegrityError, sqlite3.OperationalError)):
@@ -110,7 +123,7 @@ class TestForeignKeyConstraints:
 
     def test_quality_fk_constraint_prevents_invalid_reference(self, temp_db_file):
         """Quality assessment for non-existent article should raise error."""
-        db = Database(temp_db_file)
+        db = Database(temp_db_file, review_id=1)
         
         with pytest.raises((DatabaseError, sqlite3.IntegrityError, sqlite3.OperationalError)):
             db.save_quality_assessment(
@@ -127,7 +140,7 @@ class TestScreeningDecisions:
 
     def test_save_and_retrieve_decision(self, temp_db_file):
         """CRITICAL: Decision saved must be retrievable."""
-        db = Database(temp_db_file)
+        db = Database(temp_db_file, review_id=1)
         
         # Add article
         art_id = db.add_article({

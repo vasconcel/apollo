@@ -2598,41 +2598,220 @@ with st.sidebar:
     
     # PROJECT CONFIGURATION HUB
     with st.expander("Project Configuration", expanded=False):
-        config_mgr = load_config()
+        db = get_database()
         
-        st.subheader("Project Identity")
+        # ========== SECTION 1: PROJECT IDENTITY ==========
+        st.subheader("1. Project Identity")
+        config_mgr = load_config()
         proj_name = st.text_input("Project Name", value=config_mgr.get("project_name", "My Research Project"), key="cfg_name")
         proj_desc = st.text_area("Description", value=config_mgr.get("project_description", ""), key="cfg_desc")
         
-        st.subheader("Research Questions")
-        rqs_current = config_mgr.get("research_questions", [])
-        rqs_edit = [{"RQ": rq} for rq in rqs_current]
+        # ========== SECTION 2: RESEARCH QUESTIONS ==========
+        st.subheader("2. Research Questions")
         
-        rqs_editor = st.data_editor(rqs_edit, num_rows="dynamic", key="cfg_rqs")
-        rqs_list = [row["RQ"] for row in rqs_editor if row.get("RQ", "").strip()]
+        rqs = db.get_research_questions()
+        rq_data = [{"ID": r[0], "Title": r[1][:60], "Type": r[3]} for r in rqs]
         
-        st.subheader("API Configuration")
-        api_key_input = st.text_input("Groq API Key", type="password", help="Optional: For AI-assisted features", key="cfg_api")
+        rqs_editor = st.data_editor(rq_data, num_rows="dynamic", key="cfg_rqs")
         
-        if st.button("Save Configuration", key="save_config_btn"):
-            new_config = {
-                "project_name": proj_name,
-                "project_description": proj_desc,
-                "research_questions": rqs_list,
-                "literature_types": config_mgr.get("literature_types", ["White Literature", "Grey Literature"]),
-                "literature_types_abbrev": config_mgr.get("literature_types_abbrev", ["WL", "GL"]),
-                "exclude_irrelevant": config_mgr.get("exclude_irrelevant", True),
-                "min_qa_score": config_mgr.get("min_qa_score", 0.5)
-            }
-            if api_key_input:
-                new_config["api_key"] = api_key_input
+        for row in rqs_editor:
+            if row.get("ID", "").strip():
+                try:
+                    db.add_research_question(row["ID"], row.get("Title", ""), row.get("Type", "quantitative"))
+                except:
+                    pass
+        
+        # Research Questions - ADD NEW
+        with st.form("add_rq_form"):
+            st.text_input("New RQ ID", key="new_rq_id", placeholder="RQ6")
+            st.text_input("Title", key="new_rq_title")
+            submitted = st.form_submit_button("Add Research Question")
+            if submitted:
+                new_rq_id = st.session_state.get("new_rq_id", "")
+                new_rq_title = st.session_state.get("new_rq_title", "")
+                if new_rq_id and new_rq_title:
+                    db.add_research_question(new_rq_id, new_rq_title, "quantitative")
+                    st.success(f"Added {new_rq_id}")
+                    st.rerun()
+        
+        st.divider()
+        
+        # ========== SECTION 3: ELIGIBILITY CRITERIA ==========
+        st.subheader("3. Eligibility Criteria")
+        
+        tab_ec, tab_ic = st.tabs(["Exclusion Criteria (EC)", "Inclusion Criteria (IC)"])
+        
+        with tab_ec:
+            ec_list = db.get_eligibility_criteria('EC')
+            ec_data = [{"ID": r[0], "Description": r[2]} for r in ec_list]
+            st.data_editor(ec_data, num_rows="dynamic", key="cfg_ec")
             
-            import json
-            with open("project_config.json", "w", encoding="utf-8") as f:
-                json.dump(new_config, f, indent=2)
+            with st.form("add_ec_form"):
+                st.text_input("ID", key="new_ec_id", placeholder="EC7")
+                st.text_input("Description", key="new_ec_desc")
+                submitted = st.form_submit_button("Add Exclusion Criterion")
+                if submitted:
+                    new_ec_id = st.session_state.get("new_ec_id", "")
+                    new_ec_desc = st.session_state.get("new_ec_desc", "")
+                    if new_ec_id and new_ec_desc:
+                        db.add_eligibility_criterion(new_ec_id, 'EC', new_ec_desc)
+                        st.success(f"Added {new_ec_id}")
+                        st.rerun()
+        
+        with tab_ic:
+            ic_list = db.get_eligibility_criteria('IC')
+            ic_data = [{"ID": r[0], "Description": r[2]} for r in ic_list]
+            st.data_editor(ic_data, num_rows="dynamic", key="cfg_ic")
             
-            st.success("Configuration saved!")
-            st.rerun()
+            with st.form("add_ic_form"):
+                st.text_input("ID", key="new_ic_id", placeholder="IC6")
+                st.text_input("Description", key="new_ic_desc")
+                submitted = st.form_submit_button("Add Inclusion Criterion")
+                if submitted:
+                    new_ic_id = st.session_state.get("new_ic_id", "")
+                    new_ic_desc = st.session_state.get("new_ic_desc", "")
+                    if new_ic_id and new_ic_desc:
+                        db.add_eligibility_criterion(new_ic_id, 'IC', new_ic_desc)
+                        st.success(f"Added {new_ic_id}")
+                        st.rerun()
+        
+        st.divider()
+        
+        # ========== SECTION 4: QUALITY CRITERIA ==========
+        st.subheader("4. Quality Assessment Criteria")
+        
+        tab_wl, tab_gl = st.tabs(["WL Criteria", "GL Criteria"])
+        
+        with tab_wl:
+            wl_list = db.get_quality_criteria('WL')
+            wl_data = [{"ID": r[0], "Description": r[2], "Scoring": r[3]} for r in wl_list]
+            st.data_editor(wl_data, num_rows="dynamic", key="cfg_wl")
+            
+            with st.form("add_wl_form"):
+                st.text_input("ID", key="new_wl_id", placeholder="WL-Q5")
+                st.text_input("Description", key="new_wl_desc")
+                submitted = st.form_submit_button("Add WL Criterion")
+                if submitted:
+                    new_wl_id = st.session_state.get("new_wl_id", "")
+                    new_wl_desc = st.session_state.get("new_wl_desc", "")
+                    if new_wl_id and new_wl_desc:
+                        db.add_quality_criterion(new_wl_id, 'WL', new_wl_desc)
+                        st.success(f"Added {new_wl_id}")
+                        st.rerun()
+        
+        with tab_gl:
+            gl_list = db.get_quality_criteria('GL')
+            gl_data = [{"ID": r[0], "Description": r[2], "Scoring": r[3]} for r in gl_list]
+            st.data_editor(gl_data, num_rows="dynamic", key="cfg_gl")
+            
+            with st.form("add_gl_form"):
+                st.text_input("ID", key="new_gl_id", placeholder="GL-Q5")
+                st.text_input("Description", key="new_gl_desc")
+                submitted = st.form_submit_button("Add GL Criterion")
+                if submitted:
+                    new_gl_id = st.session_state.get("new_gl_id", "")
+                    new_gl_desc = st.session_state.get("new_gl_desc", "")
+                    if new_gl_id and new_gl_desc:
+                        db.add_quality_criterion(new_gl_id, 'GL', new_gl_desc)
+                        st.success(f"Added {new_gl_id}")
+                        st.rerun()
+        
+        st.divider()
+        
+        # ========== SECTION 5: REVIEWERS ==========
+        st.subheader("5. Reviewers")
+        
+        reviewers = db.get_mlr_reviewers()
+        rev_data = [{"Name": r[1], "Role": r[2]} for r in reviewers]
+        st.data_editor(rev_data, num_rows="dynamic", key="cfg_reviewers")
+        
+        with st.form("add_reviewer_form"):
+            st.text_input("Name", key="new_reviewer", placeholder="John Doe")
+            st.selectbox("Role", ["primary", "auditor"], key="new_reviewer_role")
+            submitted = st.form_submit_button("Add Reviewer")
+            if submitted:
+                new_name = st.session_state.get("new_reviewer", "")
+                new_role = st.session_state.get("new_reviewer_role", "primary")
+                if new_name:
+                    db.add_mlr_reviewer(new_name, new_role)
+                    st.success(f"Added {new_name}")
+                    st.rerun()
+        
+        if reviewers:
+            with st.form("del_reviewer_form"):
+                st.selectbox("Select to Remove", [r[1] for r in reviewers], key="del_reviewer")
+                submitted = st.form_submit_button("Remove Reviewer")
+                if submitted:
+                    to_remove = st.session_state.get("del_reviewer", "")
+                    if to_remove:
+                        db.remove_mlr_reviewer(to_remove)
+                        st.success(f"Removed {to_remove}")
+                        st.rerun()
+                if st.button("❌", key="del_reviewer_btn", use_container_width=True):
+                    db.remove_mlr_reviewer(del_reviewer)
+                    st.success(f"Removed {del_reviewer}")
+                    st.rerun()
+        
+        st.divider()
+        
+        # ========== SECTION 6: PROJECT CONFIG ==========
+        st.subheader("6. Project Configuration")
+        
+        project_config = db.get_project_config()
+        
+        with st.form("save_proj_config_form"):
+            st.number_input("Temporal Start", value=project_config.get("temporal_start", 2015), min_value=1900, max_value=2030, key="temporal_start")
+            st.number_input("Temporal End", value=project_config.get("temporal_end", 2025), min_value=1900, max_value=2030, key="temporal_end")
+            st.number_input("QC Threshold", value=project_config.get("quality_threshold", 2.0), min_value=0.0, max_value=4.0, step=0.5, key="quality_threshold")
+            st.text_input("Domain", value=project_config.get("domain", "Software Engineering"), key="cfg_domain")
+            submitted = st.form_submit_button("Save Configuration")
+            if submitted:
+                t_start = st.session_state.get("temporal_start", 2015)
+                t_end = st.session_state.get("temporal_end", 2025)
+                q_thresh = st.session_state.get("quality_threshold", 2.0)
+                dom = st.session_state.get("cfg_domain", "Software Engineering")
+                db.update_project_config(
+                    temporal_start=int(t_start),
+                    temporal_end=int(t_end),
+                    quality_threshold=float(q_thresh),
+                    domain=dom
+                )
+                st.success("Configuration saved!")
+                st.rerun()
+        
+        st.divider()
+        
+        # ========== SECTION 7: API CONFIG ==========
+        st.subheader("7. API Configuration")
+        with st.form("save_api_config_form"):
+            st.text_input("Groq API Key", type="password", help="Optional: AI features", key="cfg_api")
+            submitted = st.form_submit_button("Save Configuration")
+            if submitted:
+                api_key = st.session_state.get("cfg_api", "")
+                new_config = {
+                    "project_name": proj_name,
+                    "project_description": proj_desc,
+                    "literature_types": config_mgr.get("literature_types", ["White Literature", "Grey Literature"]),
+                    "literature_types_abbrev": config_mgr.get("literature_types_abbrev", ["WL", "GL"]),
+                    "exclude_irrelevant": config_mgr.get("exclude_irrelevant", True),
+                    "min_qa_score": config_mgr.get("min_qa_score", 0.5)
+                }
+                if api_key:
+                    new_config["api_key"] = api_key
+                
+                import json
+                with open("project_config.json", "w", encoding="utf-8") as f:
+                    json.dump(new_config, f, indent=2)
+                
+                st.success("Configuration saved!")
+                st.rerun()
+                
+                import json
+                with open("project_config.json", "w", encoding="utf-8") as f:
+                    json.dump(new_config, f, indent=2)
+                
+                st.success("Configuration saved!")
+                st.rerun()
     
     st.divider()
     

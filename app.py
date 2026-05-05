@@ -24,6 +24,71 @@ from src.core.workflow import ReviewStage, is_valid_transition, get_stage_displa
 
 
 # ==================== PROTOCOL PROGRESS TRACKER ====================
+GAROUSI_STAGES = [
+    ("planning", "Planning", "Setup RQs and Criteria"),
+    ("search", "Search & Ingestion", "WL/GL Import"),
+    ("screening", "Screening", "Title/Abstract selection"),
+    ("quality", "Quality Assessment", "Scoring items"),
+    ("extraction", "Data Extraction", "Fragment retrieval"),
+    ("synthesis", "Synthesis", "Thematic coding"),
+]
+
+def display_protocol_stepper(db):
+    """Display a visual Protocol Stepper at the top of the main page."""
+    from src.core.workflow import ReviewStage
+    
+    progress = db.get_stage_progress()
+    current_stage = progress["current_stage"]
+    stage_index = progress["stage_index"]
+    
+    stage_mapping = {
+        "calibration": 0,
+        "planning": 0,
+        "search": 1,
+        "screening": 2,
+        "cross_audit": 3,
+        "quality": 3,
+        "consensus": 3,
+        "extraction": 4,
+        "synthesis": 5,
+    }
+    
+    mapped_index = stage_mapping.get(current_stage.lower(), stage_index)
+    
+    st.markdown("### Protocol Stepper")
+    
+    cols = st.columns(len(GAROUSI_STAGES))
+    
+    for idx, (stage_key, stage_name, stage_desc) in enumerate(GAROUSI_STAGES):
+        with cols[idx]:
+            if idx < mapped_index:
+                status = "[COMPLETED]"
+                color = "#10B981"
+                bg_color = "rgba(16, 185, 129, 0.15)"
+            elif idx == mapped_index:
+                status = "[CURRENT]"
+                color = "#3B82F6"
+                bg_color = "rgba(59, 130, 246, 0.2)"
+            else:
+                status = "[PENDING]"
+                color = "#6B7280"
+                bg_color = "rgba(107, 114, 128, 0.1)"
+            
+            st.markdown(f"""
+            <div style="
+                padding: 0.5rem;
+                background: {bg_color};
+                border-left: 3px solid {color};
+                border-radius: 4px;
+                margin-bottom: 0.5rem;
+            ">
+                <div style="color: {color}; font-weight: 600; font-size: 0.85rem;">{status}</div>
+                <div style="color: #E5E7EB; font-size: 0.9rem; font-weight: 500;">{stage_name}</div>
+                <div style="color: #9CA3AF; font-size: 0.75rem;">{stage_desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+
 def display_protocol_steps(db):
     """Display protocol progress tracker in sidebar."""
     from src.core.workflow import ReviewStage
@@ -304,6 +369,8 @@ def render_overview():
         <p style="color: var(--text-secondary); margin: 0.25rem 0 0 0;">Real-time pipeline statistics and PRISMA flow tracking</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    display_protocol_stepper(db)
     
     # Get PRISMA statistics
     prisma = get_prisma_stats()
@@ -858,13 +925,14 @@ def render_screening():
                                             "suggested_tags": result["saturation"].get("suggested_tags", [])
                                         })
                                         
-                                        db.add_gl_article(
+                                        article_id = db.add_gl_article(
                                             title=result["title"],
                                             url=result["url"],
                                             ingestion_notes=notes_json,
                                             abstract=result["content"][:500] if result["content"] else None
                                         )
-                                        new_count += 1
+                                        if article_id:
+                                            new_count += 1
                                     else:
                                         saturated_count += 1
                             finally:
@@ -876,6 +944,28 @@ def render_screening():
                             - **New articles imported:** {new_count}
                             - **Thematic saturation reached:** {saturated_count}
                             """)
+                            
+                            if results:
+                                results_df = pd.DataFrame([
+                                    {
+                                        "Title": r["title"][:60] + ("..." if len(r["title"]) > 60 else ""),
+                                        "URL": r["url"][:50] + ("..." if len(r["url"]) > 50 else ""),
+                                        "Status": r["status"].title(),
+                                        "Is New": "Yes" if r["saturation"].get("is_new") else "No",
+                                        "Reasoning": r["saturation"].get("reasoning", "")[:100]
+                                    }
+                                    for r in results
+                                ])
+                                
+                                with st.expander(f"📊 GL Ingestion Details ({len(results)} articles)", expanded=True):
+                                    st.dataframe(results_df, use_container_width=True, hide_index=True)
+                                    
+                                    saturated_articles = [r for r in results if r["status"] == "saturated"]
+                                    if saturated_articles:
+                                        with st.expander(f"🚫 Skipped Due to Saturation ({len(saturated_articles)})", expanded=False):
+                                            for r in saturated_articles:
+                                                st.caption(f"• {r['title'][:70]}...")
+                            
                             st.rerun()
                             
                 except Exception as e:

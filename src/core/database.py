@@ -711,8 +711,8 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
     
     def get_project_knowledge_base(self) -> dict:
         """
-        Fetch existing themes and abstracts to provide context for saturation checking.
-        Returns dict with themes_summary and research_questions.
+        Fetch existing themes and recent abstracts for context in saturation checking.
+        Bounds context to O(1) regardless of database size - only themes + 5 most recent GL abstracts.
         """
         rqs = self.get_research_questions()
         rq_text = "\n".join([f"{rq[0]}: {rq[1]}" for rq in rqs])
@@ -732,12 +732,15 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             gl_abstracts = conn.execute("""
                 SELECT title, abstract 
                 FROM articles 
-                WHERE literature_type = 'GL' AND abstract IS NOT NULL AND abstract != ''
-                LIMIT 20
+                WHERE literature_type = 'GL' 
+                  AND abstract IS NOT NULL 
+                  AND abstract != ''
+                ORDER BY id DESC
+                LIMIT 5
             """).fetchall()
             
             abstracts_text = "\n\n".join([
-                f"Title: {a[0]}\nAbstract: {a[1][:500]}"
+                f"Title: {a[0]}\nAbstract: {a[1][:300]}"
                 for a in gl_abstracts
             ]) if gl_abstracts else "No GL articles imported yet."
         
@@ -753,11 +756,22 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
         """
         Add a GL article to the database with status 'imported'.
         Only inserts if is_new was True from saturation check.
+        Prevents duplicate URLs for the same review_id.
         
-        Returns the article ID.
+        Returns the article ID, or None if duplicate.
         """
         with self.connect() as conn:
             cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id FROM articles 
+                WHERE review_id = ? AND url = ?
+            """, (self._review_id, url))
+            
+            if cursor.fetchone():
+                self._logger.warning(f"Duplicate URL skipped: {url}")
+                return None
+            
             cursor.execute("""
                 INSERT INTO articles (title, url, abstract, literature_type, status, ingestion_notes, review_id)
                 VALUES (?, ?, ?, 'GL', 'imported', ?, ?)

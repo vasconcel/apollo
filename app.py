@@ -98,25 +98,13 @@ def display_protocol_steps(db):
     stage_index = progress["stage_index"]
     stages = progress["stages"]
     
-    st.markdown("**PROTOCOL**")
+    st.caption(f"Progress: {stage_index + 1}/{progress['total_stages']} - {current_stage.title()}")
     
-    progress_bar = st.progress(progress["progress_percent"] / 100)
-    st.caption(f"Stage {stage_index + 1}/{progress['total_stages']}: {current_stage.title()}")
-    
-    with st.expander("View Protocol Stages", expanded=True):
-        for idx, stage in enumerate(stages):
-            if idx < stage_index:
-                icon = "[DONE]"
-                style = "color: #10B981;"
-            elif idx == stage_index:
-                icon = "🔵"
-                style = "color: #3B82F6; font-weight: 600;"
-            else:
-                icon = "⚪"
-                style = "color: #9CA3AF;"
-            
-            display_name = get_stage_display_name(ReviewStage(stage))
-            st.markdown(f"<span style='{style}'>{icon} {display_name}</span>", unsafe_allow_html=True)
+    stage_text = " | ".join([
+        f"{'[x]' if idx < stage_index else '[ ]' if idx > stage_index else '[>]'} {get_stage_display_name(ReviewStage(stage))}"
+        for idx, stage in enumerate(stages)
+    ])
+    st.caption(stage_text)
 
 
 # ==================== WORKFLOW GUARD ====================
@@ -125,8 +113,8 @@ def require_stage(required_stage: ReviewStage, db) -> bool:
     current = ReviewStage(db.get_current_stage())
     
     if current != required_stage:
-        st.error(f"🔒 This section requires '{required_stage.value}' stage. Current: '{current.value}'")
-        st.info(f"💡 Methodological workflow: {db.get_stage_prompt()}")
+        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
+        st.info(f"Workflow: {db.get_stage_prompt()}")
         return False
     return True
 
@@ -450,8 +438,7 @@ def render_overview():
             
             st.dataframe(
                 gl_articles[['title', 'Decision', 'Reasoning', 'status']],
-                use_container_width=True,
-                hide_index=True
+                use_container_width=True
             )
     
     # Get PRISMA statistics
@@ -476,10 +463,10 @@ def render_overview():
     st.divider()
     
     # ===== PRISMA FLOW SANKEY DIAGRAM =====
-    st.subheader(" PRISMA Flow Diagram")
+    st.subheader(" Flow Diagram")
     
     if not has_data:
-        st.info("No articles imported yet. Import data to see the PRISMA flow.")
+        st.info("Import data from the Ingestion module to begin.")
     else:
         try:
             import plotly.graph_objects as go
@@ -613,7 +600,7 @@ def render_overview():
                     "description": "Description",
                     "count": "Count",
                     "% of Total": "% of Screened"
-                }), hide_index=True, width=True)
+                }), use_container_width=True)
     
     st.divider()
     
@@ -1040,7 +1027,7 @@ def render_screening():
                                 ])
                                 
                                 with st.expander(f" GL Ingestion Details ({len(results)} articles)", expanded=True):
-                                    st.dataframe(results_df, use_container_width=True, hide_index=True)
+                                    st.dataframe(results_df, use_container_width=True)
                                     
                                     saturated_articles = [r for r in results if r["status"] == "saturated"]
                                     if saturated_articles:
@@ -1709,7 +1696,7 @@ def render_extraction():
         })
     
     df_articles = pd.DataFrame(articles_data)
-    st.dataframe(df_articles, hide_index=True, use_container_width=True)
+    st.dataframe(df_articles, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
@@ -1923,7 +1910,7 @@ def render_synthesis():
                 })
             
             frag_df = pd.DataFrame(frag_data)
-            st.dataframe(frag_df, hide_index=True, height=300)
+            st.dataframe(frag_df, use_container_width=True, height=300)
             
             st.divider()
             
@@ -2637,14 +2624,14 @@ def render_export_audit():
         if freq:
             freq_df = pd.DataFrame(freq)
             if not freq_df.empty:
-                st.dataframe(freq_df, hide_index=True)
+                st.dataframe(freq_df, use_container_width=True)
         
         st.divider()
         
         st.markdown("#### X-Marker Matrix")
         matrix = db.get_X_marker_matrix()
         if not matrix.empty:
-            st.dataframe(matrix, hide_index=True)
+            st.dataframe(matrix, use_container_width=True)
             
             try:
                 csv = matrix.to_csv(index=False).encode("utf-8")
@@ -2853,26 +2840,37 @@ def render_export_audit():
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
-    st.markdown("""
-    <div class="sidebar-title">AIMS</div>
-    <div class="sidebar-subtitle">Research Intelligence Platform</div>
-    """, unsafe_allow_html=True)
-    
-    display_protocol_steps(db)
+    st.markdown("**AIMS**", unsafe_allow_html=True)
+    st.caption("Research Intelligence Platform")
     
     st.divider()
     
-    # ===== REVIEW ISOLATION =====
-    st.subheader("Active Review")
+    # Navigation - Radio with stages
+    st.caption("MODULE")
+    page = st.radio("Navigate", [
+        "Overview",
+        "Planning",
+        "Ingestion",
+        "Screening",
+        "Consensus",
+        "Quality",
+        "Extraction",
+        "Synthesis",
+        "Export"
+    ], label_visibility="collapsed", horizontal=True)
     
+    st.divider()
+    
+    # Review isolation
     db = get_database()
     review_id = get_current_review_id()
     
     reviews = db.get_reviews()
     review_options = {r[1]: r[0] for r in reviews}
     
+    st.caption("REVIEW")
     selected_review = st.selectbox(
-        "Select Review",
+        "Select",
         options=list(review_options.keys()),
         index=list(review_options.values()).index(review_id) if review_id in review_options.values() else 0,
         key="review_selector"
@@ -2881,67 +2879,52 @@ with st.sidebar:
     if review_options[selected_review] != review_id:
         set_review_id(review_options[selected_review])
     
-    st.divider()
-    
     # Reviewer session
-    st.subheader("Reviewer Session")
+    st.caption("REVIEWER")
     st.session_state.reviewer_id = st.text_input("Reviewer ID", value=st.session_state.reviewer_id)
-    st.caption("Blind review mode")
     
     st.divider()
     
-    # Navigation - Clean professional labels
-    st.subheader("Navigation")
-    page = st.selectbox("Select Module", [
-        "Dashboard",
-        "Eligibility Screening", 
-        "Agreement & Consensus",
-        "Quality Appraisal",
-        "Data Extraction",
-        "Thematic Synthesis",
-        "Reporting & Export"
-    ])
-    
-    st.divider()
-    
-    # Status
     st.caption("System Status: Ready")
     
     st.divider()
     
-    # Note: Full Project Configuration moved to Overview page (collapsed expander)
-    with st.expander("Project Configuration", expanded=False):
+    # Project Configuration expander
+    with st.expander("Configuration", expanded=False):
         db = get_database()
         
-        # ========== SECTION 1: PROJECT IDENTITY ==========
-        st.subheader("1. Project Identity")
+        st.subheader("Project Identity")
         config_mgr = load_config()
         proj_name = st.text_input("Project Name", value=config_mgr.get("project_name", "My Research Project"), key="cfg_name")
         proj_desc = st.text_area("Description", value=config_mgr.get("project_description", ""), key="cfg_desc")
         
-        # ========== SECTION 2: RESEARCH QUESTIONS ==========
-        st.subheader("2. Research Questions")
+        st.subheader("Research Questions")
         
         rqs = db.get_research_questions()
-        rq_data = [{"ID": r[0], "Title": r[1][:60], "Type": r[3]} for r in rqs]
+        rq_data = [{"ID": r[0], "Question": r[1][:60], "Type": r[3]} for r in rqs]
         
         rqs_editor = st.data_editor(rq_data, num_rows="dynamic", key="cfg_rqs")
         
         for row in rqs_editor:
             if row.get("ID", "").strip():
                 try:
-                    db.add_research_question(row["ID"], row.get("Title", ""), row.get("Type", "quantitative"))
+                    db.add_research_question(row["ID"], row.get("Question", ""), row.get("Type", "quantitative"))
                 except:
                     pass
         
-        # Research Questions - ADD NEW
         with st.form("add_rq_form"):
             st.text_input("New RQ ID", key="new_rq_id", placeholder="RQ6")
-            st.text_input("Title", key="new_rq_title")
-            submitted = st.form_submit_button("Add Research Question")
+            st.text_input("Question", key="new_rq_title")
+            submitted = st.form_submit_button("Add")
             if submitted:
                 new_rq_id = st.session_state.get("new_rq_id", "")
                 new_rq_title = st.session_state.get("new_rq_title", "")
+                if new_rq_id and new_rq_title:
+                    try:
+                        db.add_research_question(new_rq_id, new_rq_title, "quantitative")
+                        st.rerun()
+                    except:
+                        pass
                 if new_rq_id and new_rq_title:
                     db.add_research_question(new_rq_id, new_rq_title, "quantitative")
                     st.success(f"Added {new_rq_id}")

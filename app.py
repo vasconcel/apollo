@@ -808,36 +808,37 @@ def render_screening():
                                 progress_bar.progress(current / total)
                                 status_text.caption(status)
                             
-                            results = process_gl_ingestion(
-                                df,
-                                project_themes,
-                                research_questions,
-                                progress_callback=update_progress
-                            )
-                            
-                            new_count = 0
-                            saturated_count = 0
-                            
-                            for result in results:
-                                if result["status"] == "processed":
-                                    notes_json = json.dumps({
-                                        "is_new": result["saturation"].get("is_new"),
-                                        "reasoning": result["saturation"].get("reasoning", ""),
-                                        "suggested_tags": result["saturation"].get("suggested_tags", [])
-                                    })
-                                    
-                                    db.add_gl_article(
-                                        title=result["title"],
-                                        url=result["url"],
-                                        ingestion_notes=notes_json,
-                                        abstract=result["content"][:500] if result["content"] else None
-                                    )
-                                    new_count += 1
-                                else:
-                                    saturated_count += 1
-                            
-                            progress_bar.empty()
-                            status_text.empty()
+                            try:
+                                results = process_gl_ingestion(
+                                    df,
+                                    project_themes,
+                                    research_questions,
+                                    progress_callback=update_progress
+                                )
+                                
+                                new_count = 0
+                                saturated_count = 0
+                                
+                                for result in results:
+                                    if result["status"] == "processed":
+                                        notes_json = json.dumps({
+                                            "is_new": result["saturation"].get("is_new"),
+                                            "reasoning": result["saturation"].get("reasoning", ""),
+                                            "suggested_tags": result["saturation"].get("suggested_tags", [])
+                                        })
+                                        
+                                        db.add_gl_article(
+                                            title=result["title"],
+                                            url=result["url"],
+                                            ingestion_notes=notes_json,
+                                            abstract=result["content"][:500] if result["content"] else None
+                                        )
+                                        new_count += 1
+                                    else:
+                                        saturated_count += 1
+                            finally:
+                                progress_bar.empty()
+                                status_text.empty()
                             
                             st.success(f"✅ GL Ingestion Complete!")
                             st.markdown(f"""

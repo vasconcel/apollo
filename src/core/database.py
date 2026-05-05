@@ -67,6 +67,9 @@ class Database:
         
         # Migration: ensure all existing rows have review_id
         self._migrate_review_id()
+        
+        # Migration: ensure ingestion_notes column exists
+        self._migrate_ingestion_notes()
     
     def get_review_id(self) -> int:
         """Get current review_id - guaranteed to exist."""
@@ -87,6 +90,23 @@ class Database:
                         cursor.execute(f"UPDATE {table} SET review_id = 1 WHERE review_id IS NULL")
         except:
             pass
+    
+    def _migrate_ingestion_notes(self) -> bool:
+        """Ensure ingestion_notes column exists in articles table."""
+        try:
+            with self.connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(articles)")
+                columns = [row[1] for row in cursor.fetchall()]
+                
+                if 'ingestion_notes' not in columns:
+                    cursor.execute("ALTER TABLE articles ADD COLUMN ingestion_notes TEXT")
+                    self._logger.info("Migration: added ingestion_notes column to articles table")
+                    return True
+                return False
+        except Exception as e:
+            self._logger.warning(f"Migration ingestion_notes failed: {e}")
+            return False
 
     # =============================
     # CONNECTION WITH RETRY

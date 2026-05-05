@@ -219,7 +219,18 @@ hr, .stDivider {
 
 /* Radio buttons in sidebar */
 [data-testid="stRadio"] > div {
-    gap: 0.25rem !important;
+    gap: 0.5rem !important;
+    flex-direction: column !important;
+}
+
+/* Main content area visibility */
+[class*="main"] {
+    color: var(--text-primary) !important;
+}
+
+/* Ensure all text is visible */
+div[data-testid="stVerticalBlock"] {
+    color: var(--text-primary) !important;
 }
 
 /* Empty state styling */
@@ -227,5 +238,10 @@ div[data-testid="stInfoMessageContainer"] {
     background: var(--bg-card) !important;
     border: 1px dashed var(--border) !important;
     border-radius: 8px !important;
+}
+
+/* Viewport container */
+[data-testid="stViewBlock"] {
+    background: var(--bg-deep) !important;
 }
 </style>"""

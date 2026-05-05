@@ -3144,17 +3144,23 @@ with st.sidebar:
 
 
 # ==================== MAIN ====================
-if page == "Dashboard":
+st.caption(f"Modules > {page}")
+
+st.markdown("---")
+
+if page == "Overview":
     render_overview()
-elif page == "Eligibility Screening":
+elif page == "Ingestion":
+    render_overview()  # Use overview for now
+elif page == "Screening":
     render_screening()
-elif page == "Agreement & Consensus":
+elif page == "Consensus":
     render_consensus()
-elif page == "Quality Appraisal":
+elif page == "Quality":
     render_quality()
-elif page == "Data Extraction":
+elif page == "Extraction":
     render_extraction()
-elif page == "Thematic Synthesis":
+elif page == "Synthesis":
     render_synthesis()
-elif page == "Reporting & Export":
+elif page == "Export":
     render_export_audit()

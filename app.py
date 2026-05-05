@@ -98,7 +98,7 @@ def display_protocol_steps(db):
     stage_index = progress["stage_index"]
     stages = progress["stages"]
     
-    st.markdown("**📋 Protocol Progress**")
+    st.markdown("**PROTOCOL**")
     
     progress_bar = st.progress(progress["progress_percent"] / 100)
     st.caption(f"Stage {stage_index + 1}/{progress['total_stages']}: {current_stage.title()}")
@@ -106,7 +106,7 @@ def display_protocol_steps(db):
     with st.expander("View Protocol Stages", expanded=True):
         for idx, stage in enumerate(stages):
             if idx < stage_index:
-                icon = "✅"
+                icon = "[DONE]"
                 style = "color: #10B981;"
             elif idx == stage_index:
                 icon = "🔵"
@@ -136,7 +136,7 @@ st.set_page_config(
     page_title="AIMS - Research Synthesis Platform",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_icon="🔬"
+    page_icon=""
 )
 
 # ==================== DEEP SPACE THEME ====================
@@ -362,6 +362,8 @@ def render_metric_card(label, value, delta=None, help_text=None):
 
 # ==================== PAGE: OVERVIEW ====================
 def render_overview():
+    db = get_database()
+    
     proj_name = settings.get("project_name", "Research Project")
     st.markdown(f"""
     <div style="margin-bottom: 1.5rem;">
@@ -371,6 +373,86 @@ def render_overview():
     """, unsafe_allow_html=True)
     
     display_protocol_stepper(db)
+    
+    # ===== ELEVATED PLANNING CONFIGURATION =====
+    with st.expander("**PROTOCOL** Protocol Planning (RQs, Criteria)", expanded=False):
+        db = get_database()
+        
+        col_rq, col_crit = st.columns([1, 1])
+        
+        with col_rq:
+            st.markdown("**Research Questions**")
+            rqs = db.get_research_questions()
+            for rq in rqs:
+                st.caption(f"**{rq[0]}:** {rq[1][:70]}...")
+        
+        with col_crit:
+            st.markdown("**Exclusion Criteria**")
+            ec_list = db.get_eligibility_criteria('EC')
+            for ec in ec_list[:5]:
+                st.caption(f"**{ec[0]}:** {ec[2][:60]}...")
+    
+    # ===== STAGE MANAGEMENT =====
+    current_stage = db.get_current_stage()
+    current_stage = db.get_current_stage()
+    
+    with st.expander("🔧 Protocol Stage Control", expanded=False):
+        st.caption(f"Current Stage: **{current_stage.title()}**")
+        
+        stage_options = ["planning", "search", "screening", "quality", "extraction", "synthesis"]
+        stage_labels = ["Planning", "Search & Ingestion", "Screening", "Quality Assessment", "Data Extraction", "Synthesis"]
+        
+        current_idx = stage_options.index(current_stage) if current_stage in stage_options else 0
+        next_stage = stage_options[current_idx + 1] if current_idx < len(stage_options) - 1 else None
+        
+        col_status, col_action = st.columns([2, 1])
+        with col_status:
+            st.success(f"🟢 Active: {current_stage.title()}")
+        with col_action:
+            if next_stage:
+                if st.button(f"Advance to {stage_labels[current_idx + 1]}", type="primary"):
+                    result = db.advance_stage(next_stage)
+                    if result.get('success'):
+                        st.success(f"Advanced to {next_stage.title()}!")
+                        st.rerun()
+                    else:
+                        blockers = result.get('blockers', result.get('reasons', []))
+                        st.error(f"Cannot advance: {blockers[0] if blockers else 'Requirements not met'}")
+    
+    # ===== GL ARTICLES WITH INGESTION NOTES =====
+    st.divider()
+    with st.expander("📥 Grey Literature Inventory (with Saturation Notes)", expanded=False):
+        conn = sqlite3.connect(db.db_path)
+        gl_articles = pd.read_sql_query("""
+            SELECT title, url, ingestion_notes, status, created_at
+            FROM articles 
+            WHERE literature_type = 'GL'
+            ORDER BY id DESC
+        """, conn)
+        conn.close()
+        
+        if gl_articles.empty:
+            st.info("No GL articles imported yet.")
+        else:
+            def parse_notes(notes_json):
+                try:
+                    data = json.loads(notes_json) if isinstance(notes_json, str) else {}
+                    return {
+                        "is_new": "[PASS] New" if data.get("is_new") else " Saturation",
+                        "reasoning": data.get("reasoning", "")[:80]
+                    }
+                except:
+                    return {"is_new": "Unknown", "reasoning": "Parse error"}
+            
+            notes_data = gl_articles['ingestion_notes'].apply(parse_notes)
+            gl_articles['Decision'] = notes_data.apply(lambda x: x["is_new"])
+            gl_articles['Reasoning'] = notes_data.apply(lambda x: x["reasoning"])
+            
+            st.dataframe(
+                gl_articles[['title', 'Decision', 'Reasoning', 'status']],
+                use_container_width=True,
+                hide_index=True
+            )
     
     # Get PRISMA statistics
     prisma = get_prisma_stats()
@@ -394,7 +476,7 @@ def render_overview():
     st.divider()
     
     # ===== PRISMA FLOW SANKEY DIAGRAM =====
-    st.subheader("📊 PRISMA Flow Diagram")
+    st.subheader(" PRISMA Flow Diagram")
     
     if not has_data:
         st.info("No articles imported yet. Import data to see the PRISMA flow.")
@@ -523,7 +605,7 @@ def render_overview():
             st.plotly_chart(fig_excl, width=True)
             
             # Detailed table with descriptions
-            with st.expander("📋 Detailed Exclusion Reasons Table"):
+            with st.expander("**PROTOCOL** Detailed Exclusion Reasons Table"):
                 excl_df = pd.DataFrame(exclusion_reasons)
                 excl_df["% of Total"] = (excl_df["count"] / prisma["screened"] * 100).round(1)
                 st.dataframe(excl_df.rename(columns={
@@ -587,7 +669,7 @@ def render_overview():
     
     # ===== SEMANTIC DISCOVERY =====
     st.divider()
-    with st.expander("🔍 Semantic Discovery (AI Search)", expanded=False):
+    with st.expander(" Semantic Discovery (AI Search)", expanded=False):
         st.caption("Search your database using natural language")
         
         semantic_query = st.text_input(
@@ -661,7 +743,7 @@ Respond ONLY with valid JSON array, no other text."""
     
     # ===== CALIBRATION (MLR Protocol Requirement) =====
     st.divider()
-    with st.expander("🎯 Calibration Phase (Required)", expanded=False):
+    with st.expander(" Calibration Phase (Required)", expanded=False):
         st.caption("Protocol Step 1: Calibrate reviewers before screening (κ ≥ 0.8 required)")
         
         c1, c2 = st.columns(2)
@@ -686,9 +768,9 @@ Respond ONLY with valid JSON array, no other text."""
             st.metric("Latest Kappa", f"{latest[3]:.3f}" if latest[3] else "N/A")
             
             if latest[3] and latest[3] >= 0.8:
-                st.success("✓ Kappa threshold met (≥ 0.8) - Can proceed to screening")
+                st.success("[OK] Kappa threshold met (≥ 0.8) - Can proceed to screening")
             else:
-                st.warning("⚠️ Kappa below threshold - Continue calibration")
+                st.warning("[WARN] Kappa below threshold - Continue calibration")
         else:
             st.info("No calibration completed yet")
     
@@ -770,7 +852,7 @@ def render_screening():
                         if not df.empty:
                             df["literature_type"] = "WL" if "White" in lit_type else "GL"
                             all_dfs.append(df)
-                            st.success(f"✓ Converted: {len(df)} records")
+                            st.success(f"[OK] Converted: {len(df)} records")
                     except Exception as e:
                         st.error(f"Error: {e}")
                 
@@ -803,7 +885,7 @@ def render_screening():
                                 final_count = db.count_articles()
                                 imported = final_count - initial_count
                                 
-                                st.success(f"✅ {imported} records added to screening queue!")
+                                st.success(f"[PASS] {imported} records added to screening queue!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Ingestion failed: {e}")
@@ -891,7 +973,7 @@ def render_screening():
                         st.dataframe(df.head(), use_container_width=True)
                         st.caption(f"Ready to process {len(df)} URLs")
                         
-                        if st.button("🚀 Process GL Ingestion", type="primary"):
+                        if st.button("Execute Process GL Ingestion", type="primary"):
                             from src.core.gl_handler import process_gl_ingestion
                             
                             kb = db.get_project_knowledge_base()
@@ -939,7 +1021,7 @@ def render_screening():
                                 progress_bar.empty()
                                 status_text.empty()
                             
-                            st.success(f"✅ GL Ingestion Complete!")
+                            st.success(f"[PASS] GL Ingestion Complete!")
                             st.markdown(f"""
                             - **New articles imported:** {new_count}
                             - **Thematic saturation reached:** {saturated_count}
@@ -957,7 +1039,7 @@ def render_screening():
                                     for r in results
                                 ])
                                 
-                                with st.expander(f"📊 GL Ingestion Details ({len(results)} articles)", expanded=True):
+                                with st.expander(f" GL Ingestion Details ({len(results)} articles)", expanded=True):
                                     st.dataframe(results_df, use_container_width=True, hide_index=True)
                                     
                                     saturated_articles = [r for r in results if r["status"] == "saturated"]
@@ -1017,7 +1099,7 @@ def render_screening():
                                 # Store predictions in session state
                                 ai_key = f"batch_predictions_{st.session_state.reviewer_id}"
                                 st.session_state[ai_key] = predictions
-                                st.success(f"✅ Generated predictions for {len(predictions)} articles!")
+                                st.success(f"[PASS] Generated predictions for {len(predictions)} articles!")
                                 st.rerun()
                             else:
                                 st.error("Could not generate predictions")
@@ -1053,8 +1135,9 @@ def render_screening():
     current_article = pending_articles[st.session_state.current_article_idx]
     art_id, title, abstract, source_id, lit_type, status = current_article
     
-    # Article card
+    # Article card with Design System
     with st.container():
+        st.markdown('<div class="ais-card">', unsafe_allow_html=True)
         st.markdown(f"### {title}")
         
         # Metadata
@@ -1062,16 +1145,18 @@ def render_screening():
         with c1:
             st.caption(f"📂 Source: {source_id}")
         with c2:
-            st.caption(f"📚 Type: {lit_type}")
+            lit_badge = "📚 WL" if lit_type == "WL" else "📥 GL"
+            st.caption(f"{lit_badge} Type: {lit_type}")
         with c3:
             st.caption(f"🆔 ID: {art_id}")
-    
-    # Abstract
-    if abstract:
-        with st.expander("📝 Abstract", expanded=True):
-            st.write(abstract[:800] + "..." if len(str(abstract)) > 800 else abstract)
-    else:
-        st.warning("No abstract available")
+        
+        if abstract:
+            with st.expander("📝 Abstract", expanded=True):
+                st.write(abstract[:1000] + "..." if len(str(abstract)) > 1000 else abstract)
+        else:
+            st.warning("No abstract available")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # AI Suggestion (if enabled)
     ai_suggestion = st.session_state.get("ai_suggestion")
@@ -1082,11 +1167,14 @@ def render_screening():
     st.divider()
     
     # ========== ELIGIBILITY CRITERIA FUNNEL ==========
-    st.subheader("🎯 Decision: Eligibility Criteria Funnel")
+    st.subheader(" Decision: Eligibility Criteria Funnel")
     
     # Load criteria from settings
     exclusion_criteria = settings.get("exclusion_criteria", {})
     inclusion_criteria = settings.get("inclusion_criteria", {})
+    
+    # Card container for decision form
+    st.markdown('<div class="ais-card">', unsafe_allow_html=True)
     
     # Create a form for formal screening decision
     with st.form(key=f"screening_form_{art_id}", clear_on_submit=False):
@@ -1095,9 +1183,9 @@ def render_screening():
             "Select Decision Type",
             options=["include", "exclude", "uncertain"],
             format_func=lambda x: {
-                "include": "✅ Include",
-                "exclude": "❌ Exclude", 
-                "uncertain": "⚠️ Uncertain"
+                "include": "[PASS] Include",
+                "exclude": " Exclude", 
+                "uncertain": "[WARN] Uncertain"
             }.get(x, x),
             horizontal=True,
             help="Select the type of screening decision"
@@ -1121,7 +1209,7 @@ def render_screening():
             )
             
             if not selected_ec:
-                st.error("⚠️ You must select at least one Exclusion Criterion to exclude an article.")
+                st.error("[WARN] You must select at least one Exclusion Criterion to exclude an article.")
             
             selected_exclusion_reason = selected_ec
             
@@ -1171,7 +1259,7 @@ def render_screening():
     if submit_decision:
         # Validate exclusion criterion is selected for exclude decisions
         if decision_type == "exclude" and not selected_exclusion_reason:
-            st.error("❌ Exclusion requires selecting at least one Exclusion Criterion.")
+            st.error(" Exclusion requires selecting at least one Exclusion Criterion.")
         else:
             # Build criteria dict for include decisions
             criteria_dict = None
@@ -1205,12 +1293,12 @@ def render_screening():
     st.subheader("📑 Article Navigation")
     nav_c1, nav_c2, nav_c3 = st.columns([1, 2, 1])
     with nav_c1:
-        if st.button("◀️ Previous", disabled=st.session_state.current_article_idx == 0, width=True):
+        if st.button("Previous", disabled=st.session_state.current_article_idx == 0, width=True):
             st.session_state.current_article_idx = max(0, st.session_state.current_article_idx - 1)
             st.session_state.ai_suggestion = None
             st.rerun()
     with nav_c3:
-        if st.button("Next ▶️", disabled=st.session_state.current_article_idx >= len(pending_articles) - 1, width=True):
+        if st.button("Next", disabled=st.session_state.current_article_idx >= len(pending_articles) - 1, width=True):
             st.session_state.current_article_idx += 1
             st.session_state.ai_suggestion = None
             st.rerun()
@@ -1238,7 +1326,10 @@ def render_consensus():
         return
     
     # ==================== SECTION 1: INTER-REVIEWER AGREEMENT ====================
-    st.subheader("Inter-Reviewer Agreement (Cohen's Kappa)")
+    st.subheader(" Inter-Rater Reliability (Cohen's Kappa)")
+    
+    # Card container for Kappa
+    st.markdown('<div class="ais-card">', unsafe_allow_html=True)
     
     if not decisions.empty and len(decisions["reviewer_id"].unique()) >= 2:
         kappa, pivot = prepare_kappa(decisions)
@@ -1260,15 +1351,15 @@ def render_consensus():
         # Kappa interpretation with detailed guidance
         if kappa is not None:
             if kappa < 0.2:
-                st.error("⚠️ **Poor agreement** - Reviewers largely disagree. Recommend additional reviewer training and protocol clarification.")
+                st.error("[WARN] **Poor agreement** - Reviewers largely disagree. Recommend additional reviewer training and protocol clarification.")
             elif kappa < 0.4:
-                st.warning("⚠️ **Fair agreement** - Some conflicts expected. Close monitoring recommended.")
+                st.warning("[WARN] **Fair agreement** - Some conflicts expected. Close monitoring recommended.")
             elif kappa < 0.6:
-                st.success("✓ **Moderate agreement** - Acceptable for systematic reviews.")
+                st.success("[OK] **Moderate agreement** - Acceptable for systematic reviews.")
             elif kappa < 0.8:
-                st.success("✓ ✓ **Good agreement** - High reliability.")
+                st.success("[OK] [OK] **Good agreement** - High reliability.")
             else:
-                st.success("✓ ✓ ✓ **Excellent agreement** - Near-perfect consensus.")
+                st.success("[OK] [OK] [OK] **Excellent agreement** - Near-perfect consensus.")
             
             # Formal interpretation table
             with st.expander("📖 Kappa Interpretation Guide"):
@@ -1287,7 +1378,7 @@ def render_consensus():
     st.divider()
     
     # ==================== SECTION 2: CONFLICT RESOLUTION ====================
-    st.subheader("🚩 Conflict Resolution")
+    st.subheader("[FLAG] Conflict Resolution")
     
     # Get conflicts with detailed information
     conflicts = consensus_engine.detect_conflicts()
@@ -1308,7 +1399,7 @@ def render_consensus():
         st.caption(f"Conflict Resolution Progress: {total_conflicts - unresolved_count} of {total_conflicts} resolved ({int(progress*100)}%)")
     
     if conflicts.empty:
-        st.success("✅ No conflicts detected - all reviewers agree!")
+        st.success("[PASS] No conflicts detected - all reviewers agree!")
     else:
         st.error(f"Found {total_conflicts} articles with conflicting decisions that need human mediation")
         
@@ -1330,7 +1421,7 @@ def render_consensus():
             
             is_resolved = article_id in resolved_ids
             
-            with st.expander(f"{'✅' if is_resolved else '🚩'} Article ID {article_id}: {article['title'][:60]}... ({'RESOLVED' if is_resolved else 'UNRESOLVED'})"):
+            with st.expander(f"{'[PASS]' if is_resolved else '[FLAG]'} Article ID {article_id}: {article['title'][:60]}... ({'RESOLVED' if is_resolved else 'UNRESOLVED'})"):
                 # Show article metadata
                 st.markdown(f"**📄 Title:** {article['title']}")
                 st.caption(f"**Type:** {article['literature_type']}")
@@ -1346,7 +1437,7 @@ def render_consensus():
                 cols = st.columns(len(article_decisions))
                 for i, (_, row) in enumerate(article_decisions.iterrows()):
                     with cols[i]:
-                        decision_emoji = "✅" if row['decision'] == 'include' else "❌" if row['decision'] == 'exclude' else "⚠️"
+                        decision_emoji = "[PASS]" if row['decision'] == 'include' else "" if row['decision'] == 'exclude' else "[WARN]"
                         st.markdown(f"**{row['reviewer_id']}**: {decision_emoji} {row['decision'].upper()}")
                         
                         # Show criteria/reasons
@@ -1359,7 +1450,7 @@ def render_consensus():
                 
                 # Resolution form (only if not yet resolved)
                 if not is_resolved:
-                    st.markdown("**📋 Final Resolution Form**")
+                    st.markdown("****PROTOCOL** Final Resolution Form**")
                     
                     with st.form(f"resolve_{article_id}"):
                         c1, c2 = st.columns([1, 2])
@@ -1380,7 +1471,7 @@ def render_consensus():
                         col_submit, col_spacer = st.columns([1, 2])
                         with col_submit:
                             submit_resolved = st.form_submit_button(
-                                "✅ Resolve Conflict",
+                                "[PASS] Resolve Conflict",
                                 type="primary",
                                 width=True
                             )
@@ -1403,8 +1494,8 @@ def render_consensus():
                     resolution = pd.read_sql_query(f"SELECT * FROM final_decisions WHERE article_id = {article_id}", conn2).iloc[0]
                     conn2.close()
                     
-                    st.markdown("**✅ Resolved Decision:**")
-                    decision_emoji = "✅" if resolution['final_decision'] == 'include' else "❌"
+                    st.markdown("**[PASS] Resolved Decision:**")
+                    decision_emoji = "[PASS]" if resolution['final_decision'] == 'include' else ""
                     st.markdown(f"**Final Decision:** {decision_emoji} {resolution['final_decision'].upper()}")
                     st.markdown(f"**Resolved By:** {resolution['resolved_by']}")
                     st.markdown(f"**Notes:** {resolution['resolution_notes']}")
@@ -1415,7 +1506,7 @@ def render_consensus():
     st.divider()
     
     # ==================== SECTION 3: AUTO-CONSENSUS ====================
-    st.subheader("⚙️ Auto-Consensus")
+    st.subheader(" Auto-Consensus")
     st.caption("Automatically finalize unanimous decisions to save time")
     
     conn = sqlite3.connect(db.db_path)
@@ -1441,7 +1532,7 @@ def render_consensus():
     col_auto, col_info = st.columns([1, 2])
     
     with col_auto:
-        if st.button("✅ Auto-finalize Unanimous Decisions", width=True, disabled=candidate_count == 0):
+        if st.button("[PASS] Auto-finalize Unanimous Decisions", width=True, disabled=candidate_count == 0):
             with st.spinner("Finalizing unanimous decisions..."):
                 count = consensus_engine.auto_resolve_consensus(db)
             st.success(f"Auto-resolved {count} articles with unanimous agreement!")
@@ -1489,32 +1580,35 @@ def render_quality():
         ready_for_qc = passed_screening[~passed_screening["id"].isin(assessed_ids)]
         
         if ready_for_qc.empty:
-            st.success("✅ All included articles have been quality assessed!")
+            st.success("[PASS] All included articles have been quality assessed!")
             
-            # Show summary
-            st.subheader("QC Summary")
+            # Show summary with Design System
+            st.subheader(" QC Summary")
             if not assessed.empty:
                 qc_passed = len(assessed[assessed["decision"] == "include"])
                 qc_failed = len(assessed[assessed["decision"] == "exclude"])
                 
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.metric("Passed QC", qc_passed)
+                    st.metric("[PASS] Passed QC", qc_passed)
                 with c2:
-                    st.metric("Failed QC", qc_failed)
+                    st.metric(" Failed QC", qc_failed)
         else:
-            # Progress
+            # Progress with Design System
             total_ready = len(passed_screening)
             assessed_count = len(passed_screening) - len(ready_for_qc)
             progress = assessed_count / total_ready if total_ready > 0 else 0
             
-            st.progress(progress)
-            st.caption(f"QC Progress: {assessed_count}/{total_ready} assessed")
+            with st.container():
+                st.markdown('<div class="ais-card">', unsafe_allow_html=True)
+                st.progress(progress)
+                st.caption(f"QC Progress: {assessed_count}/{total_ready} assessed ({int(progress*100)}%)")
+                st.markdown('</div>', unsafe_allow_html=True)
             
             st.divider()
             
             # Article selector
-            st.subheader("Select Article for Assessment")
+            st.subheader("📄 Select Article for Assessment")
             
             article_titles = ready_for_qc["title"].tolist()
             selected_title = st.selectbox("Article", article_titles)
@@ -1522,27 +1616,31 @@ def render_quality():
             if selected_title:
                 art = ready_for_qc[ready_for_qc["title"] == selected_title].iloc[0]
                 
-                # Article info
-                with st.container():
-                    st.markdown(f"### {art['title']}")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.caption(f"📚 Type: {art['literature_type']}")
-                    with c2:
-                        st.caption(f"🆔 ID: {art['id']}")
+                # Article info with Design System
+                st.markdown('<div class="ais-card">', unsafe_allow_html=True)
+                st.markdown(f"### {art['title']}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    lit_badge = "📚 WL" if art['literature_type'] == "WL" else "📥 GL"
+                    st.caption(f"{lit_badge} Type: {art['literature_type']}")
+                with c2:
+                    st.caption(f"🆔 ID: {art['id']}")
                 
                 if art['abstract']:
-                    with st.expander("📝 Abstract"):
-                        st.write(art['abstract'][:500] + "..." if len(str(art['abstract'])) > 500 else art['abstract'])
+                    with st.expander("📝 Abstract", expanded=True):
+                        st.write(art['abstract'][:800] + "..." if len(str(art['abstract'])) > 800 else art['abstract'])
+                st.markdown('</div>', unsafe_allow_html=True)
                 
-                # QC form
+                # QC form with Design System
                 st.divider()
-                st.subheader(f"Quality Criteria ({art['literature_type']})")
+                st.markdown(f"### **PROTOCOL** Quality Criteria ({art['literature_type']})")
                 
                 if art['literature_type'] == "WL":
                     q_list = settings["quality_criteria"]["WL"]
                 else:
                     q_list = settings["quality_criteria"]["GL"]
+                
+                st.markdown('<div class="ais-card">', unsafe_allow_html=True)
                 
                 with st.form("qc_form"):
                     scores = {}
@@ -1556,16 +1654,17 @@ def render_quality():
                     st.divider()
                     result = quality_engine.evaluate(scores)
                     
+                    # Real-time score display
                     c1, c2 = st.columns(2)
                     with c1:
                         st.metric("Total Score", f"{result['total_score']:.1f}")
                     with c2:
                         if result['decision'] == 'include':
-                            st.metric("Decision", "✅ Include", delta="PASS")
+                            st.metric("Decision", "[PASS] Include", delta="PASS")
                         else:
-                            st.metric("Decision", "❌ Exclude", delta="FAIL", delta_color="inverse")
+                            st.metric("Decision", " Exclude", delta="FAIL", delta_color="inverse")
                     
-                    if st.form_submit_button("💾 Save Assessment"):
+                    if st.form_submit_button("💾 Save Assessment", type="primary"):
                         db.save_quality_assessment(
                             art['id'],
                             st.session_state.reviewer_id,
@@ -1575,13 +1674,15 @@ def render_quality():
                         )
                         st.success("Quality assessment saved!")
                         st.rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No articles have passed screening yet. Complete screening first.")
 
 
 # ==================== PAGE: EXTRACTION ====================
 def render_extraction():
-    st.header("🔬 Evidence Extraction")
+    st.header(" Evidence Extraction")
     st.caption("Extract fragments from quality-assessed articles")
     
     db = get_database()
@@ -1595,25 +1696,26 @@ def render_extraction():
         st.warning("No articles ready for extraction. Complete screening and quality assessment first.")
         return
     
-    # Show ready articles
-    st.subheader(f"📄 Ready for Extraction ({len(ready_articles)} articles)")
+    # Show ready articles with Design System
+    st.markdown("### 📄 Ready for Extraction")
     
-    # Create a dataframe for display
+    st.markdown('<div class="ais-card">', unsafe_allow_html=True)
     articles_data = []
     for art in ready_articles:
         articles_data.append({
             "ID": art[0],
-            "Title": art[1],
+            "Title": art[1][:70] + ("..." if len(art[1]) > 70 else ""),
             "Type": art[3]
         })
     
     df_articles = pd.DataFrame(articles_data)
-    st.dataframe(df_articles, hide_index=True)
+    st.dataframe(df_articles, hide_index=True, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
     
-    # Extraction interface
-    st.subheader("Extract Evidence")
+    # Extraction interface with Design System
+    st.markdown("### 📥 Extract Evidence")
     
     col1, col2 = st.columns([1, 2])
     
@@ -1628,12 +1730,24 @@ def render_extraction():
     existing_fragments = db.get_fragments_by_article(selected_article_id)
     
     with col2:
-        st.caption(f"Existing fragments: {len(existing_fragments)}")
+        st.metric("Extracted", f"{len(existing_fragments)} fragments")
     
     if selected_article_id:
         # Find article title
         article_title = next((a[1] for a in ready_articles if a[0] == selected_article_id), "")
+        
+        # Extraction card
+        st.markdown('<div class="ais-card">', unsafe_allow_html=True)
         st.markdown(f"**Selected:** {article_title}")
+        
+        # Get article abstract
+        conn = sqlite3.connect(db.db_path)
+        article_abstract = pd.read_sql_query(f"SELECT abstract FROM articles WHERE id = {selected_article_id}", conn).iloc[0]['abstract']
+        conn.close()
+        
+        if article_abstract:
+            with st.expander("📝 Abstract", expanded=False):
+                st.write(article_abstract[:500] + "..." if len(str(article_abstract)) > 500 else article_abstract)
         
         # Extraction form
         with st.form("extraction_form"):
@@ -1642,7 +1756,7 @@ def render_extraction():
             fragment_text = st.text_area("Evidence Fragment", height=100, placeholder="Paste or type the extracted evidence...")
             page_or_section = st.text_input("Page/Section Reference", placeholder="e.g., 4.2, Introduction")
             
-            if st.form_submit_button("➕ Add Fragment"):
+            if st.form_submit_button("➕ Add Fragment", type="primary"):
                 if not fragment_text.strip():
                     st.error("Fragment text cannot be empty")
                 else:
@@ -1660,10 +1774,12 @@ def render_extraction():
                     except DatabaseError as e:
                         st.error(str(e))
         
+        st.markdown('</div>', unsafe_allow_html=True)
+        
         st.divider()
         
-        # Show existing fragments for this article
-        st.subheader("Existing Fragments")
+        # Show existing fragments with Design System
+        st.markdown("### **PROTOCOL** Extracted Fragments")
         
         if existing_fragments:
             for frag in existing_fragments:
@@ -1671,7 +1787,7 @@ def render_extraction():
                     st.write(frag[3])
                     st.caption(f"Page: {frag[6] or 'N/A'} | Reviewer: {frag[5]}")
         else:
-            st.info("No fragments extracted yet for this article")
+            st.info("No fragments extracted yet")
         
         # ===== AI DOCUMENT ANALYSIS =====
         st.divider()
@@ -1765,7 +1881,7 @@ def render_synthesis():
         integrity = {"is_valid": False, "errors": [str(e)]}
     
     if not integrity.get("is_valid"):
-        st.error("⚠️ Traceability integrity issues detected:")
+        st.error("[WARN] Traceability integrity issues detected:")
         issues = integrity.get("issues", [])
         for issue in issues[:5]:
             st.caption(f"- {issue}")
@@ -1775,7 +1891,7 @@ def render_synthesis():
     if "selected_rq" not in st.session_state:
         st.session_state.selected_rq = "RQ1"
     
-    tab1, tab2, tab3 = st.tabs(["1. 🔬 Open Coding", "2. 🎨 Thematic Organization", "3. 🔗 Traceability Matrix"])
+    tab1, tab2, tab3 = st.tabs(["1.  Open Coding", "2.  Thematic Organization", "3. 🔗 Traceability Matrix"])
     
     # ==================== TAB 1: OPEN CODING ====================
     with tab1:
@@ -1912,7 +2028,7 @@ def render_synthesis():
         
         # Theme management section
         with col_theme:
-            st.markdown("#### 🎨 Theme Management")
+            st.markdown("####  Theme Management")
             
             # Create new theme
             with st.expander("➕ Create New Theme", expanded=False):
@@ -2027,7 +2143,7 @@ def render_synthesis():
             st.divider()
             
             # ===== TRACEABILITY INSPECTOR =====
-            with st.expander("🔍 Traceability Inspector", expanded=True):
+            with st.expander(" Traceability Inspector", expanded=True):
                 lineage = db.get_theme_lineage(selected_theme_id)
                 
                 if lineage["theme"]:
@@ -2158,7 +2274,7 @@ def render_synthesis():
                 synthesis_data = st.session_state[ai_key]
                 if synthesis_data and synthesis_data.get("synthesis"):
                     with col_ai_status:
-                        st.caption(f"✅ Generated - WL: {synthesis_data['wl_count']} fragments | GL: {synthesis_data['gl_count']} fragments")
+                        st.caption(f"[PASS] Generated - WL: {synthesis_data['wl_count']} fragments | GL: {synthesis_data['gl_count']} fragments")
                     
                     st.divider()
                     st.markdown("### 📝 AI Synthesis Report")
@@ -2192,7 +2308,7 @@ def render_synthesis():
                         )
                     
                     with col_copy:
-                        if st.button("📋 Copy to Clipboard", width=True):
+                        if st.button("**PROTOCOL** Copy to Clipboard", width=True):
                             # Note: Streamlit doesn't have native clipboard, show instruction
                             st.info("Use Ctrl+C to copy the text above")
                 
@@ -2211,7 +2327,7 @@ def render_synthesis():
                 comparison = db.compare_theme_by_literature_type(selected_theme_id)
                 
                 if comparison:
-                    st.markdown("#### 📊 Literature Distribution")
+                    st.markdown("####  Literature Distribution")
                     comp_data = [{"Type": c[0], "Fragments": c[1], "Sources": c[2]} for c in comparison]
                     fig = px.bar(
                         comp_data, x="Type", y="Fragments", 
@@ -2260,7 +2376,7 @@ def render_synthesis():
             
             # Synthesis Summary
             st.divider()
-            st.markdown("#### 📊 Synthesis Summary")
+            st.markdown("####  Synthesis Summary")
             
             # Get all stats
             conn = sqlite3.connect(db.db_path)
@@ -2314,7 +2430,7 @@ def render_synthesis():
         
         # ===== EXECUTIVE SUMMARY GENERATOR =====
         st.divider()
-        st.subheader("📊 Final Executive Report")
+        st.subheader(" Final Executive Report")
         st.caption("Automated professional synthesis report for stakeholders")
         
         if st.button("✨ Generate Full Executive Summary", width=True):
@@ -2414,16 +2530,16 @@ def render_export_audit():
     
     # Orphaned Codes (no themes)
     if integrity.get("codes_without_fragments"):
-        st.warning(f"⚠️ **Orphaned Codes**: {len(integrity['codes_without_fragments'])} codes have no fragments linked")
+        st.warning(f"[WARN] **Orphaned Codes**: {len(integrity['codes_without_fragments'])} codes have no fragments linked")
     
     # Orphaned Themes (no codes)
     if integrity.get("themes_without_codes"):
-        st.warning(f"⚠️ **Orphaned Themes**: {len(integrity['themes_without_codes'])} themes have no codes linked")
+        st.warning(f"[WARN] **Orphaned Themes**: {len(integrity['themes_without_codes'])} themes have no codes linked")
     
     # Coverage Gap (included articles with no fragments)
     if zero_extraction:
         has_issues = True
-        st.warning(f"⚠️ **Coverage Gap**: {len(zero_extraction)} included articles have no fragments extracted")
+        st.warning(f"[WARN] **Coverage Gap**: {len(zero_extraction)} included articles have no fragments extracted")
         with st.expander("View Articles Needing Extraction"):
             for art in zero_extraction[:10]:
                 st.caption(f"- {art['title'][:60]}...")
@@ -2432,7 +2548,7 @@ def render_export_audit():
     
     # All clear
     if not has_issues:
-        st.success("✅ **Audit Passed**: No data integrity issues detected. Your research is ready for export!")
+        st.success("[PASS] **Audit Passed**: No data integrity issues detected. Your research is ready for export!")
     
     st.divider()
     
@@ -2584,7 +2700,7 @@ def render_export_audit():
         export_path = st.session_state["export_data"]["path"]
         
         with col_status:
-            st.success(f"✅ Export complete! Generated {sum(export_results.values())} files")
+            st.success(f"[PASS] Export complete! Generated {sum(export_results.values())} files")
         
         st.divider()
         
@@ -2623,7 +2739,7 @@ def render_export_audit():
         st.divider()
         
         # Quick stats for the export
-        st.markdown("### 📊 Export Statistics")
+        st.markdown("###  Export Statistics")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.metric("Themes", export_results.get("themes", 0))
@@ -2685,14 +2801,14 @@ def render_export_audit():
     c1, c2 = st.columns(2)
     with c1:
         if db_healthy:
-            st.success(f"✅ Database Connected ({db_size:.1f} KB)")
+            st.success(f"[PASS] Database Connected ({db_size:.1f} KB)")
         else:
-            st.error("❌ Database Not Found")
+            st.error(" Database Not Found")
     with c2:
         if api_healthy:
-            st.success("✅ Groq API Ready")
+            st.success("[PASS] Groq API Ready")
         else:
-            st.warning("⚠️ Groq API Not Configured")
+            st.warning("[WARN] Groq API Not Configured")
             st.caption("Configure GROQ_API_KEY environment variable for AI features")
     
     st.divider()
@@ -2710,7 +2826,7 @@ def render_export_audit():
     
     col_danger, col_check = st.columns([1, 1])
     with col_danger:
-        reset_clicked = st.button("💣 Reset Database", type="primary")
+        reset_clicked = st.button("RESET Reset Database", type="primary")
     
     with col_check:
         confirm = st.checkbox("I understand this will delete ALL data")
@@ -2730,16 +2846,16 @@ def render_export_audit():
     
     col_danger, col_confirm = st.columns([1, 1])
     with col_danger:
-        st.caption("💣 This will permanently delete all data")
+        st.caption("RESET This will permanently delete all data")
     with col_confirm:
-        st.caption("☑️ Required before action")
+        st.caption("Checked Required before action")
 
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-title">AIMS</div>
-    <div class="sidebar-subtitle">Next-Gen Research Intelligence</div>
+    <div class="sidebar-subtitle">Research Intelligence Platform</div>
     """, unsafe_allow_html=True)
     
     display_protocol_steps(db)
@@ -2747,7 +2863,6 @@ with st.sidebar:
     st.divider()
     
     # ===== REVIEW ISOLATION =====
-    st.divider()
     st.subheader("Active Review")
     
     db = get_database()
@@ -2766,11 +2881,6 @@ with st.sidebar:
     if review_options[selected_review] != review_id:
         set_review_id(review_options[selected_review])
     
-    st.caption(f"Review ID: {review_id}")
-    
-    if len(reviews) > 1:
-        st.success(f"Multiple reviews: {len(reviews)} projects isolated")
-    
     st.divider()
     
     # Reviewer session
@@ -2780,37 +2890,26 @@ with st.sidebar:
     
     st.divider()
     
-    # Navigation - Academic labels
+    # Navigation - Clean professional labels
     st.subheader("Navigation")
-    page = st.radio("Go to", [
+    page = st.selectbox("Select Module", [
         "Dashboard",
-        "Eligibility Screening",
+        "Eligibility Screening", 
         "Agreement & Consensus",
         "Quality Appraisal",
         "Data Extraction",
         "Thematic Synthesis",
         "Reporting & Export"
-    ], label_visibility="collapsed")
+    ])
     
     st.divider()
     
-    # ===== SYSTEM STATUS CARD =====
-    st.markdown("**🔧 System Status**")
-    
-    status_col1, status_col2 = st.columns(2)
-    with status_col1:
-        st.caption("Mode")
-        st.markdown("<span style='color:#00D2FF;font-weight:600'>Professional Research Suite</span>", unsafe_allow_html=True)
-    with status_col2:
-        st.caption("AI Engine")
-        st.markdown("<span style='color:#10B981;font-weight:600'>Active</span>", unsafe_allow_html=True)
-    
-    st.caption("Traceability")
-    st.markdown("<span style='color:#10B981;font-weight:600'>✓ Verified</span>", unsafe_allow_html=True)
+    # Status
+    st.caption("System Status: Ready")
     
     st.divider()
     
-    # PROJECT CONFIGURATION HUB
+    # Note: Full Project Configuration moved to Overview page (collapsed expander)
     with st.expander("Project Configuration", expanded=False):
         db = get_database()
         
@@ -3044,12 +3143,12 @@ with st.sidebar:
             
             st.caption("Data Quality:")
             if missing_abstracts > 50:
-                st.warning(f"⚠️ {missing_abstracts}% missing abstracts")
+                st.warning(f"[WARN] {missing_abstracts}% missing abstracts")
             else:
                 st.caption(f"📄 {missing_abstracts}% missing abstracts")
             
             if missing_dois > 50:
-                st.warning(f"⚠️ {missing_dois}% missing DOIs")
+                st.warning(f"[WARN] {missing_dois}% missing DOIs")
             else:
                 st.caption(f"🔗 {missing_dois}% missing DOIs")
     except:

@@ -75,14 +75,23 @@ class ConfigManager:
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
-                    file_config = json.load(f)
-                    # Merge file configurations with defaults to ensure no keys are missing
+                    file_content = f.read().strip()
+                    if not file_content:
+                        raise json.decoder.JSONDecodeError("Empty file", "", 0)
+                    file_config = json.loads(file_content)
                     self._config = {**DEFAULT_CONFIG, **file_config}
+            except (json.decoder.JSONDecodeError, json.JSONDecodeError) as e:
+                print(f"Warning: Failed to load config: {e}. Reinitializing defaults.")
+                self._config = DEFAULT_CONFIG.copy()
+                try:
+                    with open(self.config_path, 'w', encoding='utf-8') as f:
+                        json.dump(DEFAULT_CONFIG, f, indent=2)
+                except:
+                    pass
             except Exception as e:
                 print(f"Warning: Failed to load config: {e}. Using defaults.")
                 self._config = DEFAULT_CONFIG.copy()
         else:
-            # If the file doesn't exist, use the strictly aligned protocol defaults
             self._config = DEFAULT_CONFIG.copy()
 
     def get(self, key: str, default: Any = None) -> Any:

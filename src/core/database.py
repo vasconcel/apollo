@@ -206,6 +206,7 @@ class Database:
                 source TEXT,
                 literature_type TEXT,
                 status TEXT DEFAULT 'imported',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (review_id) REFERENCES reviews(id)
             )
             """)
@@ -231,6 +232,8 @@ class Database:
                     cursor.execute("ALTER TABLE articles ADD COLUMN literature_type TEXT")
                 if 'ingestion_notes' not in columns:
                     cursor.execute("ALTER TABLE articles ADD COLUMN ingestion_notes TEXT")
+                if 'created_at' not in columns:
+                    cursor.execute("ALTER TABLE articles ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             except Exception:
                 pass  # Table already has all columns or doesn't support ALTER
 

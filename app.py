@@ -150,6 +150,16 @@ def set_review_id(review_id: int):
     st.session_state.review_id = review_id
     st.rerun()
 
+def set_current_module(module: str):
+    """Set the active module."""
+    st.session_state.current_module = module
+
+def get_current_module() -> str:
+    """Get the currently active module."""
+    if "current_module" not in st.session_state:
+        st.session_state.current_module = "Overview"
+    return st.session_state.current_module
+
 @st.cache_resource
 def get_consensus_engine():
     """Returns a cached ConsensusEngine - uses db path internally."""
@@ -2845,9 +2855,9 @@ with st.sidebar:
     
     st.divider()
     
-    # Navigation - Radio with stages
+    # Navigation - Radio with stages (session state managed)
     st.caption("MODULE")
-    page = st.radio("Navigate", [
+    modules = [
         "Overview",
         "Planning",
         "Ingestion",
@@ -2857,7 +2867,20 @@ with st.sidebar:
         "Extraction",
         "Synthesis",
         "Export"
-    ], label_visibility="collapsed", horizontal=True)
+    ]
+    
+    current_idx = modules.index(get_current_module()) if get_current_module() in modules else 0
+    selected = st.radio(
+        "Navigate", 
+        modules,
+        index=current_idx,
+        label_visibility="collapsed",
+        horizontal=False,
+        key="module_selector"
+    )
+    
+    if selected != get_current_module():
+        set_current_module(selected)
     
     st.divider()
     
@@ -3144,23 +3167,26 @@ with st.sidebar:
 
 
 # ==================== MAIN ====================
-st.caption(f"Modules > {page}")
+# Get current module from session state
+current_module = get_current_module()
+
+st.caption(f"Modules > {current_module}")
 
 st.markdown("---")
 
-if page == "Overview":
+if current_module == "Overview":
     render_overview()
-elif page == "Ingestion":
+elif current_module == "Ingestion":
     render_overview()  # Use overview for now
-elif page == "Screening":
+elif current_module == "Screening":
     render_screening()
-elif page == "Consensus":
+elif current_module == "Consensus":
     render_consensus()
-elif page == "Quality":
+elif current_module == "Quality":
     render_quality()
-elif page == "Extraction":
+elif current_module == "Extraction":
     render_extraction()
-elif page == "Synthesis":
+elif current_module == "Synthesis":
     render_synthesis()
-elif page == "Export":
+elif current_module == "Export":
     render_export_audit()

@@ -217,10 +217,36 @@ hr, .stDivider {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* Radio buttons in sidebar */
-[data-testid="stRadio"] > div {
-    gap: 0.5rem !important;
-    flex-direction: column !important;
+/* Radio buttons in sidebar - precise targeting */
+section[data-testid="stSidebar"] [data-testid="stRadio"] {
+    gap: 0 !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] > label {
+    display: flex !important;
+    align-items: center !important;
+    padding: 0.5rem 0.75rem !important;
+    margin: 2px 0 !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    font-size: 0.875rem !important;
+    transition: all 0.15s ease !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] > label:hover {
+    background: #1F2937 !important;
+    color: var(--text-primary) !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] > label:has(input:checked) {
+    background: rgba(37, 99, 235, 0.15) !important;
+    color: #2563EB !important;
+    border-left: 2px solid #2563EB !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] span[data-testid="stRadioLabel"] {
+    margin-left: 0.5rem !important;
 }
 
 /* Main content area visibility */

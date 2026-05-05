@@ -383,7 +383,7 @@ def render_overview():
     display_protocol_stepper(db)
     
     # Protocol Planning (collapsible)
-    with st.expander("**PROTOCOL** Protocol Planning (RQs, Criteria)", expanded=False):
+    with st.expander("Protocol Planning", expanded=False):
         db = get_database()
         
         col_rq, col_crit = st.columns([1, 1])
@@ -612,7 +612,7 @@ def render_overview():
             st.plotly_chart(fig_excl, width=True)
             
             # Detailed table with descriptions
-            with st.expander("**PROTOCOL** Detailed Exclusion Reasons Table"):
+            with st.expander("Detailed Exclusion Reasons"):
                 excl_df = pd.DataFrame(exclusion_reasons)
                 excl_df["% of Total"] = (excl_df["count"] / prisma["screened"] * 100).round(1)
                 st.dataframe(excl_df.rename(columns={
@@ -1457,7 +1457,7 @@ def render_consensus():
                 
                 # Resolution form (only if not yet resolved)
                 if not is_resolved:
-                    st.markdown("****PROTOCOL** Final Resolution Form**")
+                    st.markdown("**Resolution Form**")
                     
                     with st.form(f"resolve_{article_id}"):
                         c1, c2 = st.columns([1, 2])
@@ -1640,7 +1640,7 @@ def render_quality():
                 
                 # QC form with Design System
                 st.divider()
-                st.markdown(f"### **PROTOCOL** Quality Criteria ({art['literature_type']})")
+                st.markdown(f"### Quality Criteria")
                 
                 if art['literature_type'] == "WL":
                     q_list = settings["quality_criteria"]["WL"]
@@ -1786,7 +1786,7 @@ def render_extraction():
         st.divider()
         
         # Show existing fragments with Design System
-        st.markdown("### **PROTOCOL** Extracted Fragments")
+        st.markdown("### Extracted Fragments")
         
         if existing_fragments:
             for frag in existing_fragments:
@@ -2315,7 +2315,7 @@ def render_synthesis():
                         )
                     
                     with col_copy:
-                        if st.button("**PROTOCOL** Copy to Clipboard", width=True):
+                        if st.button("Copy to Clipboard", width=True):
                             # Note: Streamlit doesn't have native clipboard, show instruction
                             st.info("Use Ctrl+C to copy the text above")
                 

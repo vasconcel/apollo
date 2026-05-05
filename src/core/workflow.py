@@ -63,3 +63,16 @@ def get_stage_prompt(stage: ReviewStage) -> str:
         ReviewStage.SYNTHESIS: "Generate themes and synthesize findings"
     }
     return prompts.get(stage, "Unknown stage")
+
+
+def get_stage_display_name(stage: ReviewStage) -> str:
+    """Get user-friendly stage name."""
+    names = {
+        ReviewStage.CALIBRATION: "Calibration",
+        ReviewStage.SCREENING: "Screening",
+        ReviewStage.CROSS_AUDIT: "Cross-Audit",
+        ReviewStage.CONSENSUS: "Consensus",
+        ReviewStage.EXTRACTION: "Extraction",
+        ReviewStage.SYNTHESIS: "Synthesis"
+    }
+    return names.get(stage, stage.value.title())

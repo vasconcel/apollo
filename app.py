@@ -20,7 +20,38 @@ from src.core.ai_handler import get_ai_suggestion, generate_theme_synthesis
 from src.core.config_manager import load_config
 from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_excel_to_df, convert_wos_txt_to_df
 from src.core.snowballing import get_paper_references
-from src.core.workflow import ReviewStage, is_valid_transition
+from src.core.workflow import ReviewStage, is_valid_transition, get_stage_display_name
+
+
+# ==================== PROTOCOL PROGRESS TRACKER ====================
+def display_protocol_steps(db):
+    """Display protocol progress tracker in sidebar."""
+    from src.core.workflow import ReviewStage
+    
+    progress = db.get_stage_progress()
+    current_stage = progress["current_stage"]
+    stage_index = progress["stage_index"]
+    stages = progress["stages"]
+    
+    st.markdown("**📋 Protocol Progress**")
+    
+    progress_bar = st.progress(progress["progress_percent"] / 100)
+    st.caption(f"Stage {stage_index + 1}/{progress['total_stages']}: {current_stage.title()}")
+    
+    with st.expander("View Protocol Stages", expanded=True):
+        for idx, stage in enumerate(stages):
+            if idx < stage_index:
+                icon = "✅"
+                style = "color: #10B981;"
+            elif idx == stage_index:
+                icon = "🔵"
+                style = "color: #3B82F6; font-weight: 600;"
+            else:
+                icon = "⚪"
+                style = "color: #9CA3AF;"
+            
+            display_name = get_stage_display_name(ReviewStage(stage))
+            st.markdown(f"<span style='{style}'>{icon} {display_name}</span>", unsafe_allow_html=True)
 
 
 # ==================== WORKFLOW GUARD ====================
@@ -2620,6 +2651,10 @@ with st.sidebar:
     <div class="sidebar-title">AIMS</div>
     <div class="sidebar-subtitle">Next-Gen Research Intelligence</div>
     """, unsafe_allow_html=True)
+    
+    display_protocol_steps(db)
+    
+    st.divider()
     
     # ===== REVIEW ISOLATION =====
     st.divider()

@@ -2063,6 +2063,33 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             result = conn.execute("SELECT current_stage FROM review_state WHERE id = 1").fetchone()
             return result[0] if result else "calibration"
     
+    def get_stage_progress(self) -> dict:
+        """
+        Get protocol completion progress.
+        Returns dict with current_stage, stage_index, total_stages, and progress_percent.
+        """
+        from src.core.workflow import ReviewStage
+        
+        current = self.get_current_stage()
+        order = ReviewStage.get_order()
+        
+        try:
+            current_stage = ReviewStage(current)
+            stage_index = current_stage.get_index()
+        except ValueError:
+            stage_index = 0
+        
+        total = len(order)
+        percent = int((stage_index / (total - 1)) * 100) if total > 1 else 0
+        
+        return {
+            "current_stage": current,
+            "stage_index": stage_index,
+            "total_stages": total,
+            "progress_percent": percent,
+            "stages": [s.value for s in order]
+        }
+    
     def get_reviews(self) -> list:
         """Get all reviews (global, not scoped to review_id)."""
         with self.connect() as conn:

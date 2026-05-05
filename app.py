@@ -4,8 +4,13 @@ import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Configure logging for router diagnostics
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -359,6 +364,11 @@ def render_metric_card(label, value, delta=None, help_text=None):
 
 
 # ==================== PAGE: OVERVIEW ====================
+def render_module_header(module_name: str):
+    """Render unified breadcrumb and title."""
+    st.caption(f"AIMS > {module_name}")
+    st.markdown("---")
+
 def render_overview():
     db = get_database()
     
@@ -372,7 +382,7 @@ def render_overview():
     
     display_protocol_stepper(db)
     
-    # ===== ELEVATED PLANNING CONFIGURATION =====
+    # Protocol Planning (collapsible)
     with st.expander("**PROTOCOL** Protocol Planning (RQs, Criteria)", expanded=False):
         db = get_database()
         
@@ -2906,13 +2916,7 @@ with st.sidebar:
     st.caption("REVIEWER")
     st.session_state.reviewer_id = st.text_input("Reviewer ID", value=st.session_state.reviewer_id)
     
-    st.divider()
-    
-    st.caption("System Status: Ready")
-    
-    st.divider()
-    
-    # Project Configuration expander
+    # Configuration moved to collapsed expander at bottom
     with st.expander("Configuration", expanded=False):
         db = get_database()
         
@@ -3166,27 +3170,38 @@ with st.sidebar:
         st.warning(f"{len(conflicts)} conflicts")
 
 
+# ==================== ROUTER REGISTRY ====================
+# Maps sidebar module names to their rendering functions
+MODULE_ROUTERS = {
+    "Overview": render_overview,
+    "Planning": render_overview,     # Placeholder - uses overview for now
+    "Ingestion": render_overview,   # Placeholder - uses overview for now
+    "Screening": render_screening,
+    "Consensus": render_consensus,
+    "Quality": render_quality,
+    "Extraction": render_extraction,
+    "Synthesis": render_synthesis,
+    "Export": render_export_audit,
+}
+
+def execute_router(module_name: str):
+    """Execute the appropriate renderer based on module name."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    renderer = MODULE_ROUTERS.get(module_name)
+    
+    logger.debug(f"Current Module: {module_name} | Renderer: {renderer.__name__ if renderer else 'None'}")
+    
+    if renderer:
+        renderer()
+    else:
+        logger.warning(f"No renderer for module: {module_name}, defaulting to Overview")
+        render_overview()
+
 # ==================== MAIN ====================
-# Get current module from session state
 current_module = get_current_module()
 
-st.caption(f"Modules > {current_module}")
+render_module_header(current_module)
 
-st.markdown("---")
-
-if current_module == "Overview":
-    render_overview()
-elif current_module == "Ingestion":
-    render_overview()  # Use overview for now
-elif current_module == "Screening":
-    render_screening()
-elif current_module == "Consensus":
-    render_consensus()
-elif current_module == "Quality":
-    render_quality()
-elif current_module == "Extraction":
-    render_extraction()
-elif current_module == "Synthesis":
-    render_synthesis()
-elif current_module == "Export":
-    render_export_audit()
+execute_router(current_module)

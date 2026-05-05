@@ -1215,7 +1215,7 @@ def render_screening():
     # AI Suggestion (if enabled)
     ai_suggestion = st.session_state.get("ai_suggestion")
     if ai_suggestion and ai_suggestion.get("decision") != "error":
-        st.info(f"🤖 AI Suggestion: **{ai_suggestion.get('decision', 'N/A').upper()}** (confidence: {ai_suggestion.get('confidence', 0)}%)")
+        st.info(f"[AI] Suggestion: **{ai_suggestion.get('decision', 'N/A').upper()}** (confidence: {ai_suggestion.get('confidence', 0)}%)")
         st.caption(f"Reason: {ai_suggestion.get('reasons', ['No reason'])[0]}")
     
     st.divider()

@@ -27,6 +27,16 @@ from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_
 from src.core.snowballing import get_paper_references
 from src.core.workflow import ReviewStage, is_valid_transition, get_stage_display_name
 
+# Modular Views - Explicit imports to prevent NameError
+from src.ui.modules.planning_view import render_planning
+from src.ui.modules.ingestion_view import render_ingestion
+from src.ui.modules.screening_view import render_screening
+from src.ui.modules.consensus_view import render_consensus
+from src.ui.modules.quality_view import render_quality
+from src.ui.modules.extraction_view import render_extraction
+from src.ui.modules.synthesis_view import render_synthesis
+from src.ui.modules.export_view import render_export_audit
+
 
 # ==================== PROTOCOL PROGRESS TRACKER ====================
 GAROUSI_STAGES = [

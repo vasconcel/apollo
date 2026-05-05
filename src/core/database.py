@@ -209,6 +209,8 @@ class Database:
                     cursor.execute("ALTER TABLE articles ADD COLUMN source TEXT")
                 if 'literature_type' not in columns:
                     cursor.execute("ALTER TABLE articles ADD COLUMN literature_type TEXT")
+                if 'ingestion_notes' not in columns:
+                    cursor.execute("ALTER TABLE articles ADD COLUMN ingestion_notes TEXT")
             except Exception:
                 pass  # Table already has all columns or doesn't support ALTER
 
@@ -686,6 +688,61 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
         """Get all research questions."""
         with self.connect() as conn:
             return conn.execute("SELECT id, title, description, type FROM research_questions ORDER BY id").fetchall()
+    
+    def get_project_knowledge_base(self) -> dict:
+        """
+        Fetch existing themes and abstracts to provide context for saturation checking.
+        Returns dict with themes_summary and research_questions.
+        """
+        rqs = self.get_research_questions()
+        rq_text = "\n".join([f"{rq[0]}: {rq[1]}" for rq in rqs])
+        
+        with self.connect() as conn:
+            themes = conn.execute("""
+                SELECT theme_code, theme_label, theme_description 
+                FROM themes 
+                ORDER BY theme_code
+            """).fetchall()
+            
+            themes_text = "\n".join([
+                f"- {t[0]} ({t[1]}): {t[2] or 'No description'}"
+                for t in themes
+            ]) if themes else "No themes defined yet."
+            
+            gl_abstracts = conn.execute("""
+                SELECT title, abstract 
+                FROM articles 
+                WHERE literature_type = 'GL' AND abstract IS NOT NULL AND abstract != ''
+                LIMIT 20
+            """).fetchall()
+            
+            abstracts_text = "\n\n".join([
+                f"Title: {a[0]}\nAbstract: {a[1][:500]}"
+                for a in gl_abstracts
+            ]) if gl_abstracts else "No GL articles imported yet."
+        
+        return {
+            "research_questions": rq_text,
+            "themes_summary": themes_text,
+            "existing_abstracts": abstracts_text,
+            "theme_count": len(themes) if themes else 0,
+            "gl_article_count": len(gl_abstracts) if gl_abstracts else 0
+        }
+    
+    def add_gl_article(self, title: str, url: str, ingestion_notes: str, abstract: str = None) -> int:
+        """
+        Add a GL article to the database with status 'imported'.
+        Only inserts if is_new was True from saturation check.
+        
+        Returns the article ID.
+        """
+        with self.connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO articles (title, url, abstract, literature_type, status, ingestion_notes, review_id)
+                VALUES (?, ?, ?, 'GL', 'imported', ?, ?)
+            """, (title, url, abstract, ingestion_notes, self._review_id))
+            return cursor.lastrowid
     
     def add_research_question(self, rq_id: str, title: str, description: str = None, rq_type: str = 'quantitative') -> bool:
         """Add a research question."""

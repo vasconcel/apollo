@@ -761,6 +761,94 @@ def render_screening():
                     else:
                         st.info("No included articles yet")
         
+        # ========== GL INGESTION MODULE ==========
+        st.divider()
+        with st.expander("📥 GL Ingestion (Grey Literature)", expanded=False):
+            st.markdown("""
+            **Grey Literature Ingestion Module**
+            
+            Import Grey Literature from TSV files. Each URL is scraped and evaluated for thematic saturation.
+            Based on Garousi et al. (2019) MLR Protocol.
+            """)
+            
+            gl_file = st.file_uploader(
+                "Upload TSV file (columns: Position, Title, URL)",
+                type=["txt", "tsv"]
+            )
+            
+            if gl_file:
+                try:
+                    import tempfile
+                    from pathlib import Path
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".tsv") as tmp:
+                        tmp.write(gl_file.getvalue())
+                        tmp_path = tmp.name
+                    
+                    df = pd.read_csv(tmp_path, sep='\t')
+                    
+                    if not {'Position', 'Title', 'URL'}.issubset(df.columns):
+                        st.error("TSV must contain columns: Position, Title, URL")
+                    else:
+                        st.dataframe(df.head(), use_container_width=True)
+                        st.caption(f"Ready to process {len(df)} URLs")
+                        
+                        if st.button("🚀 Process GL Ingestion", type="primary"):
+                            from src.core.gl_handler import process_gl_ingestion
+                            
+                            kb = db.get_project_knowledge_base()
+                            
+                            research_questions = [rq[1] for rq in db.get_research_questions()]
+                            project_themes = kb.get("themes_summary", "")
+                            
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            def update_progress(current, total, status):
+                                progress_bar.progress(current / total)
+                                status_text.caption(status)
+                            
+                            results = process_gl_ingestion(
+                                df,
+                                project_themes,
+                                research_questions,
+                                progress_callback=update_progress
+                            )
+                            
+                            new_count = 0
+                            saturated_count = 0
+                            
+                            for result in results:
+                                if result["status"] == "processed":
+                                    notes_json = json.dumps({
+                                        "is_new": result["saturation"].get("is_new"),
+                                        "reasoning": result["saturation"].get("reasoning", ""),
+                                        "suggested_tags": result["saturation"].get("suggested_tags", [])
+                                    })
+                                    
+                                    db.add_gl_article(
+                                        title=result["title"],
+                                        url=result["url"],
+                                        ingestion_notes=notes_json,
+                                        abstract=result["content"][:500] if result["content"] else None
+                                    )
+                                    new_count += 1
+                                else:
+                                    saturated_count += 1
+                            
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            st.success(f"✅ GL Ingestion Complete!")
+                            st.markdown(f"""
+                            - **New articles imported:** {new_count}
+                            - **Thematic saturation reached:** {saturated_count}
+                            """)
+                            st.rerun()
+                            
+                except Exception as e:
+                    st.error(f"Error processing GL ingestion: {e}")
+        
         return
     
     # Progress bar

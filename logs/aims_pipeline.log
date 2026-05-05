@@ -1,0 +1,2 @@
+2026-05-05 15:40:48 - aims.database - INFO - Migration: added ingestion_notes column to articles table
+2026-05-05 15:40:48 - aims.database - WARNING - Duplicate URL skipped: https://example.com/article

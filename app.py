@@ -2747,10 +2747,6 @@ with st.sidebar:
                         db.remove_mlr_reviewer(to_remove)
                         st.success(f"Removed {to_remove}")
                         st.rerun()
-                if st.button("❌", key="del_reviewer_btn", use_container_width=True):
-                    db.remove_mlr_reviewer(del_reviewer)
-                    st.success(f"Removed {del_reviewer}")
-                    st.rerun()
         
         st.divider()
         

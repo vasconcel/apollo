@@ -81,16 +81,21 @@ def render_ingestion():
                 
                 if st.button(f"Import {len(combined)} Records", type="primary"):
                     imported = 0
+                    review_id = st.session_state.get("review_id", 1)
                     for _, row in combined.iterrows():
                         try:
                             art_id = db.add_article(
-                                title=row.get("title", "Untitled"),
-                                abstract=row.get("abstract"),
-                                doi=row.get("doi"),
-                                url=row.get("url"),
-                                source=row.get("source"),
-                                literature_type=row.get("literature_type", "WL"),
-                                status="imported"
+                                {
+                                    "title": row.get("title", "Untitled"),
+                                    "abstract": row.get("abstract"),
+                                    "doi": row.get("doi"),
+                                    "url": row.get("url"),
+                                    "source": row.get("source"),
+                                    "literature_type": row.get("literature_type", "WL"),
+                                    "authors": row.get("authors", ""),
+                                    "year": row.get("year")
+                                },
+                                review_id
                             )
                             if art_id:
                                 imported += 1

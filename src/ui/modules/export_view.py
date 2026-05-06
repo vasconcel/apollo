@@ -1,97 +1,21 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
+import sqlite3
 import os
-
-from src.core.database import Database
-
-
-def get_database():
-    review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
+import zipfile
 
 
-def get_prisma_stats():
-    db = get_database()
-    conn = sqlite3.connect(db.db_path)
+def render_export_audit_view():
+    from src.core.database import Database
     
-    total_imported = pd.read_sql_query("SELECT COUNT(*) as count FROM articles", conn).iloc[0]['count']
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
     
-    screened = pd.read_sql_query("""
-        SELECT COUNT(DISTINCT article_id) as count FROM screening_decisions
-    """, conn).iloc[0]['count']
+    db = get_db()
     
-    excluded_by_ec = pd.read_sql_query("""
-        SELECT exclusion_reason, COUNT(*) as count 
-        FROM screening_decisions 
-        WHERE decision = 'exclude' AND exclusion_reason IS NOT NULL
-        GROUP BY exclusion_reason
-        ORDER BY count DESC
-    """, conn)
-    
-    included_screening = pd.read_sql_query("""
-        SELECT COUNT(DISTINCT article_id) as count 
-        FROM screening_decisions 
-        WHERE decision = 'include'
-    """, conn).iloc[0]['count']
-    
-    final_included = pd.read_sql_query("""
-        SELECT COUNT(*) as count 
-        FROM final_decisions 
-        WHERE final_decision = 'include'
-    """, conn).iloc[0]['count']
-    
-    final_excluded = pd.read_sql_query("""
-        SELECT COUNT(*) as count 
-        FROM final_decisions 
-        WHERE final_decision = 'exclude'
-    """, conn).iloc[0]['count']
-    
-    qa_passed = pd.read_sql_query("""
-        SELECT COUNT(*) as count 
-        FROM quality_assessments 
-        WHERE decision = 'include'
-    """, conn).iloc[0]['count']
-    
-    qa_failed = pd.read_sql_query("""
-        SELECT COUNT(*) as count 
-        FROM quality_assessments 
-        WHERE decision = 'exclude'
-    """, conn).iloc[0]['count']
-    
-    pending_screening = total_imported - screened
-    
-    qa_pending = pd.read_sql_query("""
-        SELECT COUNT(*) as count 
-        FROM final_decisions f
-        WHERE f.final_decision = 'include'
-        AND NOT EXISTS (
-            SELECT 1 FROM quality_assessments q WHERE q.article_id = f.article_id
-        )
-    """, conn).iloc[0]['count']
-    
-    conn.close()
-    
-    return {
-        "total_imported": total_imported,
-        "screened": screened,
-        "pending_screening": pending_screening,
-        "included_screening": included_screening,
-        "excluded_screening": screened - included_screening,
-        "final_included": final_included,
-        "final_excluded": final_excluded,
-        "qa_passed": qa_passed,
-        "qa_failed": qa_failed,
-        "qa_pending": qa_pending,
-        "excluded_by_ec": excluded_by_ec
-    }
-
-
-def render_export_audit():
     st.header("Reporting & Export")
     st.caption("Quality control, audit trails, and publication-ready exports")
-    
-    db = get_database()
     
     if "export_data" not in st.session_state:
         st.session_state.export_data = {}
@@ -238,35 +162,35 @@ def render_export_audit():
                             db.mark_concept_presence(selected_article, concept[0], False)
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
-    
-    st.divider()
-    
-    st.markdown("#### Concept Frequency")
-    freq = db.compute_concept_frequency()
-    if freq:
-        freq_df = pd.DataFrame(freq)
-        if not freq_df.empty:
-            st.dataframe(freq_df, use_container_width=True)
-    
-    st.divider()
-    
-    st.markdown("#### X-Marker Matrix")
-    matrix = db.get_X_marker_matrix()
-    if not matrix.empty:
-        st.dataframe(matrix, use_container_width=True)
         
-        try:
-            csv = matrix.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "📥 Download Matrix (.csv)",
-                data=csv,
-                file_name="x_marker_matrix.csv",
-                mime="text/csv"
-            )
-        except Exception as e:
-            st.error(f"Failed to generate CSV: {str(e)}")
-    else:
-        st.info("Mark concept presence above to generate matrix")
+        st.divider()
+        
+        st.markdown("#### Concept Frequency")
+        freq = db.compute_concept_frequency()
+        if freq:
+            freq_df = pd.DataFrame(freq)
+            if not freq_df.empty:
+                st.dataframe(freq_df, use_container_width=True)
+        
+        st.divider()
+        
+        st.markdown("#### X-Marker Matrix")
+        matrix = db.get_X_marker_matrix()
+        if not matrix.empty:
+            st.dataframe(matrix, use_container_width=True)
+            
+            try:
+                csv = matrix.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📥 Download Matrix (.csv)",
+                    data=csv,
+                    file_name="x_marker_matrix.csv",
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"Failed to generate CSV: {str(e)}")
+        else:
+            st.info("Mark concept presence above to generate matrix")
     
     st.divider()
     
@@ -287,45 +211,174 @@ def render_export_audit():
                 export_dir = "research_export"
                 os.makedirs(export_dir, exist_ok=True)
                 
-                conn = sqlite3.connect(db.db_path)
+                export_results = db.export_all_research_artifacts(export_dir)
                 
-                articles_df = pd.read_sql_query("SELECT * FROM articles", conn)
-                articles_df.to_csv(f"{export_dir}/articles.csv", index=False)
+                st.session_state.export_data = {
+                    "success": True,
+                    "results": export_results,
+                    "path": export_dir
+                }
+                st.rerun()
                 
-                decisions_df = pd.read_sql_query("SELECT * FROM screening_decisions", conn)
-                decisions_df.to_csv(f"{export_dir}/screening_decisions.csv", index=False)
-                
-                final_df = pd.read_sql_query("SELECT * FROM final_decisions", conn)
-                final_df.to_csv(f"{export_dir}/final_decisions.csv", index=False)
-                
-                qa_df = pd.read_sql_query("SELECT * FROM quality_assessments", conn)
-                qa_df.to_csv(f"{export_dir}/quality_assessments.csv", index=False)
-                
-                fragments_df = pd.read_sql_query("SELECT * FROM fragments", conn)
-                fragments_df.to_csv(f"{export_dir}/fragments.csv", index=False)
-                
-                codes_df = pd.read_sql_query("SELECT * FROM codes", conn)
-                codes_df.to_csv(f"{export_dir}/codes.csv", index=False)
-                
-                themes_df = pd.read_sql_query("SELECT * FROM themes", conn)
-                themes_df.to_csv(f"{export_dir}/themes.csv", index=False)
-                
-                conn.close()
-                
-                import zipfile
-                with zipfile.ZipFile("research_package.zip", "w") as zipf:
-                    for root, dirs, files in os.walk(export_dir):
-                        for file in files:
-                            zipf.write(os.path.join(root, file), file)
-                
-                with open("research_package.zip", "rb") as f:
-                    st.download_button(
-                        "📥 Download Package (.zip)",
-                        data=f.read(),
-                        file_name="research_package.zip",
-                        mime="application/zip"
-                    )
-                
-                st.success("Export package generated!")
             except Exception as e:
                 st.error(f"Export failed: {str(e)}")
+    
+    if st.session_state.get("export_data", {}).get("success"):
+        export_results = st.session_state["export_data"]["results"]
+        export_path = st.session_state["export_data"]["path"]
+        
+        with col_status:
+            st.success(f"[PASS] Export complete! Generated {sum(export_results.values())} files")
+        
+        st.divider()
+        
+        st.markdown("### 📥 Download Export Files")
+        
+        export_files = {
+            "traceability_matrix.csv": "Full traceability: Theme → Code → Fragment → Source",
+            "fragments_with_sources.csv": "All evidence fragments with source metadata",
+            "codes.csv": "Codebook with RQ associations",
+            "themes.csv": "Theme definitions and RQ mappings"
+        }
+        
+        for filename, description in export_files.items():
+            filepath = os.path.join(export_path, filename)
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        file_content = f.read()
+                    
+                    col_dl, col_desc = st.columns([1, 2])
+                    with col_dl:
+                        st.download_button(
+                            f"📥 {filename}",
+                            data=file_content,
+                            file_name=filename,
+                            mime="text/csv",
+                            width=True,
+                            key=f"dl_{filename}"
+                        )
+                    with col_desc:
+                        st.caption(description)
+                except Exception as e:
+                    st.warning(f"Could not load {filename}: {str(e)}")
+        
+        st.divider()
+        
+        st.markdown("###  Export Statistics")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Themes", export_results.get("themes", 0))
+        with c2:
+            st.metric("Codes", export_results.get("codes", 0))
+        with c3:
+            st.metric("Fragments", export_results.get("fragments_with_sources", 0))
+        with c4:
+            st.metric("Matrix Rows", export_results.get("traceability_matrix", 0))
+        
+        zip_path = f"{export_path}_package.zip"
+        
+        try:
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filename in export_files.keys():
+                    filepath = os.path.join(export_path, filename)
+                    if os.path.exists(filepath):
+                        zipf.write(filepath, filename)
+            
+            with open(zip_path, 'rb') as f:
+                zip_data = f.read()
+            
+            st.divider()
+            col_zip, col_spacer = st.columns([1, 1])
+            with col_zip:
+                st.download_button(
+                    "📦 Download Full Replication Package (.zip)",
+                    data=zip_data,
+                    file_name="aims_research_package.zip",
+                    mime="application/zip",
+                    width=True
+                )
+        except Exception as e:
+            st.warning(f"Could not create ZIP package: {str(e)}")
+    else:
+        with col_status:
+            st.info("Click 'Generate Full Research Package' to create export files")
+    
+    st.divider()
+    
+    st.subheader("💻 System Health")
+    
+    db_healthy = os.path.exists(db.db_path)
+    db_size = os.path.getsize(db.db_path) / 1024 if db_healthy else 0
+    
+    import os as os_module
+    api_key = os_module.environ.get("GROQ_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GROQ_API_KEY", "")
+        except:
+            pass
+    api_healthy = bool(api_key)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if db_healthy:
+            st.success(f"[PASS] Database Connected ({db_size:.1f} KB)")
+        else:
+            st.error(" Database Not Found")
+    with c2:
+        if api_healthy:
+            st.success("[PASS] Groq API Ready")
+        else:
+            st.warning("[WARN] Groq API Not Configured")
+            st.caption("Configure GROQ_API_KEY environment variable for AI features")
+    
+    st.divider()
+    
+    with st.expander("Database Information"):
+        st.markdown(f"**Database Path:** `{db.db_path}`")
+        st.markdown(f"**Database Size:** {os.path.getsize(db.db_path) / 1024:.1f} KB" if os.path.exists(db.db_path) else "N/A")
+    
+    st.divider()
+    
+    st.subheader("Danger Zone")
+    st.warning("These actions cannot be undone. Use with caution.")
+    
+    col_danger, col_check = st.columns([1, 1])
+    with col_danger:
+        reset_clicked = st.button("RESET Reset Database", type="primary")
+    
+    with col_check:
+        confirm = st.checkbox("I understand this will delete ALL data")
+    
+    if reset_clicked and confirm:
+        try:
+            db_path = db.db_path
+            del db
+            
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                st.success("Database reset complete. Refresh the page to reinitialize.")
+            else:
+                st.error("Database file not found")
+        except Exception as e:
+            st.error(f"Reset failed: {e}")
+    
+    col_danger, col_confirm = st.columns([1, 1])
+    with col_danger:
+        st.caption("RESET This will permanently delete all data")
+    with col_confirm:
+        st.caption("Checked Required before action")
+
+
+def get_prisma_stats():
+    """Calculate PRISMA Flow Diagram statistics from database."""
+    from src.core.database import Database
+    
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
+    
+    db = get_db()
+    review_id = st.session_state.get("review_id", 1)
+    return db.get_prisma_stats(review_id)

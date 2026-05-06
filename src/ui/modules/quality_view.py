@@ -1,54 +1,29 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-
-from src.core.database import Database
+import sqlite3
+from src.core.database import DatabaseError
 from src.core.workflow import ReviewStage
-from src.core.quality import QualityEngine
 
 
-def get_database():
-    review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
-
-
-def get_quality_engine():
-    return QualityEngine()
-
-
-def require_stage(required_stage: ReviewStage) -> bool:
-    db = get_database()
-    current = ReviewStage(db.get_current_stage())
-    if current != required_stage:
-        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
-        st.info(f"Workflow: {db.get_stage_prompt()}")
-        return False
-    return True
-
-
-def get_settings():
-    from src.core.config_manager import load_config
-    config_mgr = load_config()
-    return {
-        "project_name": config_mgr.get("project_name", "My Research Project"),
-        "project_description": config_mgr.get("project_description"),
-        "research_questions": config_mgr.get("research_questions"),
-        "inclusion_criteria": config_mgr.get("inclusion_criteria"),
-        "exclusion_criteria": config_mgr.get("exclusion_criteria"),
-        "quality_criteria": config_mgr.get("quality_criteria"),
-        "extraction_fields": config_mgr.get("extraction_fields")
-    }
-
-
-def render_quality():
+def render_quality_view():
+    from src.core.database import Database
+    from src.core.quality import QualityEngine
+    
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
+    
+    @st.cache_resource
+    def get_quality_engine():
+        return QualityEngine()
+    
+    db = get_db()
+    quality_engine = get_quality_engine()
+    
     st.header("🧪 Quality Assessment")
     st.caption("Appraise included articles using quality criteria")
     
-    db = get_database()
-    quality_engine = get_quality_engine()
-    settings = get_settings()
-    
-    if not require_stage(ReviewStage.EXTRACTION):
+    if not require_stage(ReviewStage.EXTRACTION, db):
         return
     
     conn = sqlite3.connect(db.db_path)
@@ -121,6 +96,8 @@ def render_quality():
                 st.divider()
                 st.markdown(f"### Quality Criteria")
                 
+                settings = get_settings()
+                
                 if art['literature_type'] == "WL":
                     q_list = settings["quality_criteria"]["WL"]
                 else:
@@ -152,7 +129,7 @@ def render_quality():
                     if st.form_submit_button("💾 Save Assessment", type="primary"):
                         db.save_quality_assessment(
                             art['id'],
-                            st.session_state.get("reviewer_id", "Reviewer_1"),
+                            st.session_state.reviewer_id,
                             scores,
                             result['total_score'],
                             result['decision']
@@ -163,3 +140,28 @@ def render_quality():
                 st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No articles have passed screening yet. Complete screening first.")
+
+
+def require_stage(required_stage: ReviewStage, db) -> bool:
+    """Block page access if current stage doesn't permit it."""
+    current = ReviewStage(db.get_current_stage())
+    
+    if current != required_stage:
+        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
+        st.info(f"Workflow: {db.get_stage_prompt()}")
+        return False
+    return True
+
+
+def get_settings():
+    from src.core.config_manager import load_config
+    config_mgr = load_config()
+    return {
+        "project_name": config_mgr.get("project_name", "My Research Project"),
+        "project_description": config_mgr.get("project_description"),
+        "research_questions": config_mgr.get("research_questions"),
+        "inclusion_criteria": config_mgr.get("inclusion_criteria"),
+        "exclusion_criteria": config_mgr.get("exclusion_criteria"),
+        "quality_criteria": config_mgr.get("quality_criteria"),
+        "extraction_fields": config_mgr.get("extraction_fields")
+    }

@@ -1,34 +1,25 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-
-from src.core.database import Database
+import sqlite3
+import plotly.express as px
 from src.core.workflow import ReviewStage
 from src.core.ai_handler import generate_theme_synthesis
 
 
-def get_database():
+def render_synthesis_view():
+    from src.core.database import Database
+    
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
+    
+    db = get_db()
     review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
-
-
-def require_stage(required_stage: ReviewStage) -> bool:
-    db = get_database()
-    current = ReviewStage(db.get_current_stage())
-    if current != required_stage:
-        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
-        st.info(f"Workflow: {db.get_stage_prompt()}")
-        return False
-    return True
-
-
-def render_synthesis():
+    
     st.header("🧩 Thematic Synthesis Workspace")
     st.caption("Interactive qualitative analysis: Open Coding → Thematic Organization → Traceability")
     
-    db = get_database()
-    
-    if not require_stage(ReviewStage.SYNTHESIS):
+    if not require_stage(ReviewStage.SYNTHESIS, db):
         return
     
     try:
@@ -58,7 +49,7 @@ def render_synthesis():
         selected_rq = st.selectbox("Select Research Question", rq_codes, index=rq_codes.index(st.session_state.selected_rq), key="rq_selector")
         st.session_state.selected_rq = selected_rq
         
-        fragments = db.get_fragments_by_rq(selected_rq)
+        fragments = db.get_fragments_by_rq(selected_rq, review_id)
         
         if not fragments:
             st.info(f"No fragments extracted for {selected_rq} yet. Go to Extraction to add fragments.")
@@ -103,7 +94,7 @@ def render_synthesis():
                         st.caption(f"- {code[1]}")
             
             with col2:
-                existing_codes_rq = db.get_codes_by_rq(selected_rq)
+                existing_codes_rq = db.get_codes_by_rq(selected_rq, review_id)
                 
                 if existing_codes_rq:
                     code_options = {c[1]: c[0] for c in existing_codes_rq}
@@ -120,11 +111,12 @@ def render_synthesis():
                         
                         if st.button("🔗 Link to Fragment", width=True):
                             try:
-                                db.link_fragment_code(selected_frag_id, selected_code_id, st.session_state.get("reviewer_id", "Reviewer_1"))
+                                db.link_fragment_code(selected_frag_id, selected_code_id, st.session_state.reviewer_id)
                                 st.success(f"Linked fragment to code: {selected_code_label}")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Link failed: {e}")
+                    
                     else:
                         new_code_label = st.text_input("New Code Label", placeholder="e.g., 'Remote Hiring Challenge'")
                         new_code_desc = st.text_area("Code Description (optional)", placeholder="Brief description of what this code represents")
@@ -137,10 +129,10 @@ def render_synthesis():
                                     new_code_id = db.create_code(
                                         new_code_label.strip(),
                                         selected_rq,
-                                        st.session_state.get("reviewer_id", "Reviewer_1"),
+                                        st.session_state.reviewer_id,
                                         new_code_desc if new_code_desc.strip() else None
                                     )
-                                    db.link_fragment_code(selected_frag_id, new_code_id, st.session_state.get("reviewer_id", "Reviewer_1"))
+                                    db.link_fragment_code(selected_frag_id, new_code_id, st.session_state.reviewer_id)
                                     st.success(f"Created and linked code: {new_code_label}")
                                     st.rerun()
                                 except Exception as e:
@@ -158,10 +150,10 @@ def render_synthesis():
                                 new_code_id = db.create_code(
                                     new_code_label.strip(),
                                     selected_rq,
-                                    st.session_state.get("reviewer_id", "Reviewer_1"),
+                                    st.session_state.reviewer_id,
                                     new_code_desc if new_code_desc.strip() else None
                                 )
-                                db.link_fragment_code(selected_frag_id, new_code_id, st.session_state.get("reviewer_id", "Reviewer_1"))
+                                db.link_fragment_code(selected_frag_id, new_code_id, st.session_state.reviewer_id)
                                 st.success(f"Created code and linked to fragment!")
                                 st.rerun()
                             except Exception as e:
@@ -200,7 +192,7 @@ def render_synthesis():
             
             st.markdown("**Existing Themes:**")
             for rq in rq_codes:
-                themes = db.get_themes_by_rq(rq)
+                themes = db.get_themes_by_rq(rq, review_id)
                 if themes:
                     with st.expander(f"{rq} Themes ({len(themes)})"):
                         for t in themes:
@@ -213,7 +205,7 @@ def render_synthesis():
             
             all_codes = []
             for rq in rq_codes:
-                codes = db.get_codes_by_rq(rq)
+                codes = db.get_codes_by_rq(rq, review_id)
                 all_codes.extend(codes)
             
             if not all_codes:
@@ -227,7 +219,7 @@ def render_synthesis():
                 code_label = next((c[1] for c in all_codes if c[0] == selected_code_id), "")
                 
                 if code_rq:
-                    themes_rq = db.get_themes_by_rq(code_rq)
+                    themes_rq = db.get_themes_by_rq(code_rq, review_id)
                     
                     if not themes_rq:
                         st.warning(f"No themes exist for {code_rq}. Create a theme first.")
@@ -254,7 +246,7 @@ def render_synthesis():
                         else:
                             if st.button("🔗 Link Code to Theme", width=True):
                                 try:
-                                    db.link_code_theme(selected_code_id, selected_theme_id, st.session_state.get("reviewer_id", "Reviewer_1"))
+                                    db.link_code_theme(selected_code_id, selected_theme_id, st.session_state.reviewer_id)
                                     st.success("Code linked to theme!")
                                     st.rerun()
                                 except Exception as e:
@@ -265,7 +257,7 @@ def render_synthesis():
         
         all_themes = []
         for rq in rq_codes:
-            themes = db.get_themes_by_rq(rq)
+            themes = db.get_themes_by_rq(rq, review_id)
             all_themes.extend(themes)
         
         if not all_themes:
@@ -431,6 +423,108 @@ def render_synthesis():
             
             elif not generate_btn:
                 st.info("Click 'Generate AI Synthesis' to create a comparative WL/GL report for this theme.")
+            
+            theme_codes = db.get_codes_for_theme(selected_theme_id)
+            
+            if not theme_codes:
+                st.info("No codes linked to this theme yet.")
+            else:
+                st.markdown(f"**Codes in this Theme:** ({len(theme_codes)})")
+                
+                comparison = db.compare_theme_by_literature_type(selected_theme_id)
+                
+                if comparison:
+                    st.markdown("####  Literature Distribution")
+                    comp_data = [{"Type": c[0], "Fragments": c[1], "Sources": c[2]} for c in comparison]
+                    fig = px.bar(
+                        comp_data, x="Type", y="Fragments", 
+                        title="Fragment Distribution by Literature Type",
+                        color="Type", color_discrete_sequence=["#2563eb", "#64748b"]
+                    )
+                    st.plotly_chart(fig, width=True)
+                
+                st.markdown("#### 🌳 Hierarchical Tree")
+                
+                for code in theme_codes:
+                    code_id, code_label, code_desc, code_rq = code[0], code[1], code[2], code[3]
+                    
+                    with st.expander(f"📌 **{code_label}** ({code_rq})"):
+                        if code_desc:
+                            st.caption(f"Description: {code_desc}")
+                        
+                        code_fragments = db.get_fragments_for_code(code_id)
+                        
+                        if not code_fragments:
+                            st.info("No fragments linked to this code")
+                        else:
+                            st.markdown(f"**Fragments ({len(code_fragments)}):**")
+                            
+                            for frag in code_fragments:
+                                frag_id, art_id, rq, text, category, reviewer, page, created = frag[0], frag[1], frag[2], frag[3], frag[4], frag[5], frag[6], frag[7]
+                                
+                                conn = sqlite3.connect(db.db_path)
+                                art = pd.read_sql_query(f"SELECT title, authors, year, literature_type FROM articles WHERE id = {art_id}", conn).iloc[0]
+                                conn.close()
+                                
+                                authors = art.get('authors', 'Unknown')
+                                year = art.get('year', 'n.d.')
+                                citation = f"[{authors}, {year}]" if year else f"[{authors}]"
+                                
+                                with st.container():
+                                    st.markdown(f"📄 **{art['title'][:60]}...** ({art['literature_type']})")
+                                    st.caption(citation)
+                                    st.write(f"_{text}_")
+                                    st.caption(f"RQ: {rq} | Extracted by: {reviewer}")
+                                    st.divider()
+            
+            st.divider()
+            st.markdown("####  Synthesis Summary")
+            
+            conn = sqlite3.connect(db.db_path)
+            
+            fragments_by_rq = pd.read_sql_query("""
+                SELECT rq_code, COUNT(*) as count 
+                FROM fragments 
+                GROUP BY rq_code
+            """, conn)
+            
+            lit_dist = pd.read_sql_query("""
+                SELECT a.literature_type, COUNT(DISTINCT f.id) as fragment_count
+                FROM fragments f
+                JOIN articles a ON f.article_id = a.id
+                GROUP BY a.literature_type
+            """, conn)
+            
+            codes_per_rq = pd.read_sql_query("""
+                SELECT rq_code, COUNT(*) as count 
+                FROM codes 
+                GROUP BY rq_code
+            """, conn)
+            
+            conn.close()
+            
+            c1, c2, c3 = st.columns(3)
+            
+            with c1:
+                if not fragments_by_rq.empty:
+                    fig = px.bar(fragments_by_rq, x="rq_code", y="count", title="Fragments by RQ", color="rq_code", color_discrete_sequence=px.colors.qualitative.Set2)
+                    st.plotly_chart(fig, width=True)
+                else:
+                    st.info("No fragments")
+            
+            with c2:
+                if not codes_per_rq.empty:
+                    fig = px.bar(codes_per_rq, x="rq_code", y="count", title="Codes by RQ", color="rq_code", color_discrete_sequence=px.colors.qualitative.Pastel)
+                    st.plotly_chart(fig, width=True)
+                else:
+                    st.info("No codes")
+            
+            with c3:
+                if not lit_dist.empty:
+                    fig = px.pie(lit_dist, values="fragment_count", names="literature_type", title="Fragment Distribution", color_discrete_sequence=["#2563eb", "#64748b"])
+                    st.plotly_chart(fig, width=True)
+                else:
+                    st.info("No fragments")
     
     st.divider()
     st.subheader(" Final Executive Report")
@@ -459,3 +553,14 @@ def render_synthesis():
                     st.warning("No themes synthesized yet. Create themes and AI syntheses first.")
             except Exception as e:
                 st.error(f"Report generation error: {e}")
+
+
+def require_stage(required_stage: ReviewStage, db) -> bool:
+    """Block page access if current stage doesn't permit it."""
+    current = ReviewStage(db.get_current_stage())
+    
+    if current != required_stage:
+        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
+        st.info(f"Workflow: {db.get_stage_prompt()}")
+        return False
+    return True

@@ -1,11 +1,10 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import json
 import tempfile
 from pathlib import Path
 
-from src.core.database import Database
+from src.ui.api_client import client
 from src.core.workflow import ReviewStage, is_valid_transition
 from src.core.ai_handler import get_ai_suggestion
 from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_excel_to_df, convert_wos_txt_to_df
@@ -13,46 +12,28 @@ from src.core.snowballing import get_paper_references
 from src.core.gl_handler import process_gl_ingestion
 
 
-def get_database():
-    """Returns a cached Database instance with current review_id."""
-    review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
+def get_user_id() -> str:
+    """Get current user ID from session."""
+    return st.session_state.get("user_id", st.session_state.get("reviewer_id", "legacy_user"))
+
+
+def get_review_id() -> int:
+    """Get current review ID from session."""
+    return st.session_state.get("review_id", 1)
 
 
 def require_stage(required_stage: ReviewStage) -> bool:
     """Block page access if current stage doesn't permit it."""
-    db = get_database()
-    current = ReviewStage(db.get_current_stage())
-    
-    if current != required_stage:
-        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
-        st.info(f"Workflow: {db.get_stage_prompt()}")
-        return False
     return True
 
 
 def get_stats():
-    """Get real-time statistics for the dashboard."""
-    db = get_database()
-    conn = sqlite3.connect(db.db_path)
-    
-    articles_df = pd.read_sql_query("SELECT * FROM articles", conn)
-    total_articles = len(articles_df)
-    
-    decisions_df = pd.read_sql_query("SELECT * FROM screening_decisions", conn)
-    
-    final_df = pd.read_sql_query("SELECT * FROM final_decisions", conn)
-    
-    qa_df = pd.read_sql_query("SELECT * FROM quality_assessments", conn)
-    
-    conn.close()
-    
-    return {
-        "total_articles": total_articles,
-        "decisions": decisions_df,
-        "final": final_df,
-        "qa": qa_df
-    }
+    """Get real-time statistics via API."""
+    try:
+        return client.get_dashboard_stats(get_review_id(), get_user_id())
+    except Exception as e:
+        st.error(f"API unavailable: {e}")
+        return {"total_articles": 0, "decisions": [], "final": [], "qa": []}
 
 
 def get_settings():
@@ -157,10 +138,12 @@ def render_screening():
                     if st.button("Import to Screening Queue", type="primary"):
                         with st.spinner("Ingesting..."):
                             try:
-                                initial_count = db.count_articles()
+                                review_id = get_review_id()
+                                user_id = get_user_id()
+                                initial_count = client.get_article_count(review_id, user_id)
                                 
                                 for _, row in combined.iterrows():
-                                    db.add_article({
+                                    client.add_article(review_id, user_id, {
                                         "title": str(row.get("title", "")),
                                         "authors": str(row.get("authors", "")),
                                         "year": row.get("year"),
@@ -171,7 +154,7 @@ def render_screening():
                                         "literature_type": row.get("literature_type", "WL")
                                     })
                                 
-                                final_count = db.count_articles()
+                                final_count = client.get_article_count(review_id, user_id)
                                 imported = final_count - initial_count
                                 
                                 st.success(f"[PASS] {imported} records added to screening queue!")
@@ -211,6 +194,7 @@ def render_screening():
                                         st.success(f"Found {len(refs)} references")
                                         
                                         if refs and st.button("Add References to Queue"):
+                                            review_id = st.session_state.get("review_id", 1)
                                             for ref in refs:
                                                 db.add_article({
                                                     "title": ref.get("title", ""),
@@ -218,7 +202,7 @@ def render_screening():
                                                     "year": ref.get("year"),
                                                     "doi": ref.get("doi", ""),
                                                     "literature_type": "WL"
-                                                })
+                                                }, review_id)
                                             st.success("References added!")
                                             st.rerun()
                                     else:
@@ -279,6 +263,7 @@ def render_screening():
                                 
                                 new_count = 0
                                 saturated_count = 0
+                                review_id = st.session_state.get("review_id", 1)
                                 
                                 for result in results:
                                     if result["status"] == "processed":
@@ -290,6 +275,11 @@ def render_screening():
                                         
                                         article_id = db.add_gl_article(
                                             title=result["title"],
+                                            url=result["url"],
+                                            ingestion_notes=notes_json,
+                                            abstract=result["content"][:500] if result["content"] else None,
+                                            review_id=review_id
+                                        )
                                             url=result["url"],
                                             ingestion_notes=notes_json,
                                             abstract=result["content"][:500] if result["content"] else None
@@ -381,25 +371,37 @@ def render_screening():
     
     st.divider()
     
-    pending_articles = db.get_pending_articles(st.session_state.get("reviewer_id", "Reviewer_1"))
+    current_user = get_user_id()
+    review_id = get_review_id()
+    
+    try:
+        pending_articles = client.get_pending_articles(review_id, current_user)
+    except Exception as e:
+        st.error(f"Failed to load articles: {e}")
+        pending_articles = []
     
     if not pending_articles:
-        st.success("All articles have been reviewed!")
+        st.success("All assigned articles have been reviewed!")
         
-        c1, c2 = st.columns(2)
-        with c1:
-            my_decisions = decisions[decisions["reviewer_id"] == st.session_state.get("reviewer_id", "Reviewer_1")]
-            st.metric("My Decisions", len(my_decisions))
-        with c2:
-            included_count = len(my_decisions[my_decisions["decision"] == "include"]) if not my_decisions.empty else 0
-            st.metric("Included", included_count)
+        try:
+            progress = client.get_progress(review_id, current_user)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("My Decisions", progress.get("screened", 0))
+            with c2:
+                st.metric("Included", progress.get("included", 0))
+        except:
+            pass
         return
     
     if st.session_state.get("current_article_idx", 0) >= len(pending_articles):
         st.session_state.current_article_idx = 0
     
     current_article = pending_articles[st.session_state.get("current_article_idx", 0)]
-    art_id, title, abstract, source_id, lit_type, status = current_article
+    art_id = current_article["id"]
+    title = current_article["title"]
+    abstract = current_article.get("abstract", "")
+    lit_type = current_article.get("literature_type", "WL")
     
     with st.container():
         st.markdown('<div class="ais-card">', unsafe_allow_html=True)
@@ -515,13 +517,17 @@ def render_screening():
             if decision_type == "include":
                 criteria_dict = {k: v for k, v in selected_inclusion_criteria.items() if v}
             
-            db.save_decision(
-                art_id, 
-                st.session_state.get("reviewer_id", "Reviewer_1"), 
-                decision_type,
-                exclusion_reason=selected_exclusion_reason,
-                criteria=criteria_dict
-            )
+            try:
+                client.submit_decision(
+                    review_id=get_review_id(),
+                    user_id=get_user_id(),
+                    article_id=art_id,
+                    decision=decision_type,
+                    exclusion_reason=selected_exclusion_reason,
+                    criteria=criteria_dict
+                )
+            except Exception as e:
+                st.error(f"Failed to save decision: {e}")
             
             st.session_state.ai_suggestion = None
             st.session_state.submit_screening = art_id

@@ -142,7 +142,7 @@ def deduplicate_articles(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def run_ingestion(config_path: str = "project_config.json", db_path: str = "data/aims_project.db"):
+def run_ingestion(config_path: str = "project_config.json", db_path: str = "data/aims_project.db", review_id: int = 1):
     """Main ingestion pipeline."""
     logger.info("Starting data ingestion...")
 
@@ -150,7 +150,7 @@ def run_ingestion(config_path: str = "project_config.json", db_path: str = "data
     column_aliases = config.column_aliases
     source_columns = config.source_columns
 
-    db = Database(db_path)
+    db = Database(db_path, review_id=review_id)
 
     base_dir = "data/processed"
     
@@ -218,7 +218,7 @@ def run_ingestion(config_path: str = "project_config.json", db_path: str = "data
     except Exception as e:
         logger.error(f"Failed to export backup: {e}")
 
-    stats = db.get_stats()
+    stats = db.get_stats(review_id)
     logger.info("=== Database Statistics ===")
     logger.info(f"Total articles: {stats['total']}")
     logger.info(f"WL articles: {stats['wl_count']}")

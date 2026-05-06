@@ -1,37 +1,27 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-import tempfile
-
-from src.core.database import Database, DatabaseError
+import sqlite3
+from src.core.database import DatabaseError
 from src.core.workflow import ReviewStage
 
 
-def get_database():
+def render_extraction_view():
+    from src.core.database import Database
+    
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
+    
+    db = get_db()
     review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
-
-
-def require_stage(required_stage: ReviewStage) -> bool:
-    db = get_database()
-    current = ReviewStage(db.get_current_stage())
-    if current != required_stage:
-        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
-        st.info(f"Workflow: {db.get_stage_prompt()}")
-        return False
-    return True
-
-
-def render_extraction():
+    
     st.header(" Evidence Extraction")
     st.caption("Extract fragments from quality-assessed articles")
     
-    db = get_database()
-    
-    if not require_stage(ReviewStage.EXTRACTION):
+    if not require_stage(ReviewStage.EXTRACTION, db):
         return
     
-    ready_articles = db.get_included_articles_for_extraction()
+    ready_articles = db.get_included_articles_for_extraction(review_id)
     
     if not ready_articles:
         st.warning("No articles ready for extraction. Complete screening and quality assessment first.")
@@ -99,7 +89,7 @@ def render_extraction():
                             article_id=selected_article_id,
                             rq_code=rq_code,
                             fragment_text=fragment_text,
-                            reviewer_id=st.session_state.get("reviewer_id", "Reviewer_1"),
+                            reviewer_id=st.session_state.reviewer_id,
                             theme_category=theme_category,
                             page_or_section=page_or_section
                         )
@@ -129,6 +119,7 @@ def render_extraction():
             uploaded_pdf = st.file_uploader("Upload Article PDF", type=["pdf"], key="extraction_pdf")
             
             if uploaded_pdf:
+                import tempfile
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     tmp.write(uploaded_pdf.getvalue())
                     pdf_path = tmp.name
@@ -192,3 +183,14 @@ Paper text (first 4000 chars):
                     import os
                     if os.path.exists(pdf_path):
                         os.remove(pdf_path)
+
+
+def require_stage(required_stage: ReviewStage, db) -> bool:
+    """Block page access if current stage doesn't permit it."""
+    current = ReviewStage(db.get_current_stage())
+    
+    if current != required_stage:
+        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
+        st.info(f"Workflow: {db.get_stage_prompt()}")
+        return False
+    return True

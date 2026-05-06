@@ -1,58 +1,30 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-
-from src.core.database import Database
-from src.core.workflow import ReviewStage
-from src.core.consensus import ConsensusEngine
+import sqlite3
 from src.core.analytics import prepare_kappa
+from src.core.workflow import ReviewStage
 
 
-def get_database():
-    review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
-
-
-def get_consensus_engine():
-    db = get_database()
-    return ConsensusEngine(db.db_path)
-
-
-def require_stage(required_stage: ReviewStage) -> bool:
-    db = get_database()
-    current = ReviewStage(db.get_current_stage())
-    if current != required_stage:
-        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
-        st.info(f"Workflow: {db.get_stage_prompt()}")
-        return False
-    return True
-
-
-def get_stats():
-    db = get_database()
-    conn = sqlite3.connect(db.db_path)
-    articles_df = pd.read_sql_query("SELECT * FROM articles", conn)
-    total_articles = len(articles_df)
-    decisions_df = pd.read_sql_query("SELECT * FROM screening_decisions", conn)
-    final_df = pd.read_sql_query("SELECT * FROM final_decisions", conn)
-    qa_df = pd.read_sql_query("SELECT * FROM quality_assessments", conn)
-    conn.close()
-    return {
-        "total_articles": total_articles,
-        "decisions": decisions_df,
-        "final": final_df,
-        "qa": qa_df
-    }
-
-
-def render_consensus():
+def render_consensus_view():
+    from src.core.database import Database
+    from src.core.consensus import ConsensusEngine
+    
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
+    
+    @st.cache_resource
+    def get_consensus_engine():
+        db = get_db()
+        return ConsensusEngine(db.db_path)
+    
+    db = get_db()
+    consensus_engine = get_consensus_engine()
+    
     st.header("Reliability & Resolution")
     st.caption("Inter-reviewer agreement and conflict resolution")
     
-    db = get_database()
-    consensus_engine = get_consensus_engine()
-    
-    if not require_stage(ReviewStage.CONSENSUS):
+    if not require_stage(ReviewStage.CONSENSUS, db):
         return
     
     stats = get_stats()
@@ -205,7 +177,7 @@ def render_consensus():
                                 db.save_final_decision(
                                     article_id,
                                     final_decision,
-                                    st.session_state.get("reviewer_id", "Reviewer_1"),
+                                    st.session_state.reviewer_id,
                                     resolution_notes
                                 )
                                 st.success("Conflict resolved! Final decision saved.")
@@ -261,3 +233,27 @@ def render_consensus():
             st.success("All unanimous decisions already finalized")
     
     st.caption("This automatically moves articles where ALL reviewers gave the SAME decision to the final decisions table.")
+
+
+def require_stage(required_stage: ReviewStage, db) -> bool:
+    """Block page access if current stage doesn't permit it."""
+    current = ReviewStage(db.get_current_stage())
+    
+    if current != required_stage:
+        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
+        st.info(f"Workflow: {db.get_stage_prompt()}")
+        return False
+    return True
+
+
+def get_stats():
+    """Get real-time statistics for the dashboard."""
+    from src.core.database import Database
+    
+    @st.cache_resource
+    def get_db():
+        return Database(review_id=st.session_state.get("review_id", 1))
+    
+    db = get_db()
+    review_id = st.session_state.get("review_id", 1)
+    return db.get_stats(review_id)

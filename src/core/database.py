@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import os
+import pandas as pd
 from contextlib import contextmanager
 from typing import Optional
 from functools import wraps
@@ -54,26 +55,18 @@ def retry_on_busy(max_retries: int = 3, base_delay: float = 0.1):
 
 class Database:
     def __init__(self, db_path="aims.db", review_id=None):
-        # STRICT ENFORCEMENT: review_id is mandatory
         if review_id is None:
             raise DatabaseError("review_id is REQUIRED. Database cannot operate without review-level isolation.")
         
         self.db_path = db_path
-        self._review_id = review_id  # Immutable per instance
         self._logger = get_logger("database")
         self._initialize_schema()
         
         self._bootstrap_mlr_defaults()
         
-        # Migration: ensure all existing rows have review_id
         self._migrate_review_id()
         
-        # Migration: ensure ingestion_notes column exists
         self._migrate_ingestion_notes()
-    
-    def get_review_id(self) -> int:
-        """Get current review_id - guaranteed to exist."""
-        return self._review_id
     
     def _migrate_review_id(self):
         """Migrate existing data to have default review_id=1."""
@@ -302,6 +295,52 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 role TEXT DEFAULT 'screener'
+            )
+            """)
+            
+            # -------------------------
+            # USERS (for multi-reviewer system)
+            # -------------------------
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE,
+                role TEXT DEFAULT 'reviewer',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            
+            # Create default user if not exists
+            cursor.execute("SELECT COUNT(*) FROM users")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                INSERT INTO users (user_id, name, email, role)
+                VALUES ('legacy_user', 'Legacy User', 'legacy@aims.org', 'reviewer')
+                """)
+            
+            # -------------------------
+            # ARTICLE ASSIGNMENTS
+            # -------------------------
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(article_id, user_id),
+                FOREIGN KEY (article_id) REFERENCES articles(id),
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+            """)
+            
+            # Migrate existing articles to default user (SAFE - no duplicates)
+            cursor.execute("""
+            INSERT INTO assignments (article_id, user_id)
+            SELECT id, 'legacy_user'
+            FROM articles
+            WHERE NOT EXISTS (
+                SELECT 1 FROM assignments WHERE article_id = articles.id
             )
             """)
             
@@ -755,7 +794,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             "gl_article_count": len(gl_abstracts) if gl_abstracts else 0
         }
     
-    def add_gl_article(self, title: str, url: str, ingestion_notes: str, abstract: str = None) -> int:
+    def add_gl_article(self, title: str, url: str, ingestion_notes: str, abstract: str = None, review_id: int = None) -> int:
         """
         Add a GL article to the database with status 'imported'.
         Only inserts if is_new was True from saturation check.
@@ -763,13 +802,15 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
         
         Returns the article ID, or None if duplicate.
         """
+        if review_id is None:
+            raise DatabaseError("review_id is required for add_gl_article")
         with self.connect() as conn:
             cursor = conn.cursor()
             
             cursor.execute("""
                 SELECT id FROM articles 
                 WHERE review_id = ? AND url = ?
-            """, (self._review_id, url))
+            """, (review_id, url))
             
             if cursor.fetchone():
                 self._logger.warning(f"Duplicate URL skipped: {url}")
@@ -778,7 +819,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             cursor.execute("""
                 INSERT INTO articles (title, url, abstract, literature_type, status, ingestion_notes, review_id)
                 VALUES (?, ?, ?, 'GL', 'imported', ?, ?)
-            """, (title, url, abstract, ingestion_notes, self._review_id))
+            """, (title, url, abstract, ingestion_notes, review_id))
             return cursor.lastrowid
     
     def add_research_question(self, rq_id: str, title: str, description: str = None, rq_type: str = 'quantitative') -> bool:
@@ -1127,7 +1168,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 'reason': str(e)
             }
     
-    def check_stage_readiness(self, current_stage: str, target_stage: str) -> dict:
+    def check_stage_readiness(self, current_stage: str, target_stage: str, review_id: int) -> dict:
         """
         Check if stage transition is allowed.
         Returns dict with is_ready, blockers, warnings.
@@ -1139,7 +1180,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             ('CALIBRATION', 'SCREENING'): [],
             ('SCREENING', 'CROSS_AUDIT'): [],
             ('CROSS_AUDIT', 'CONSENSUS'): [
-                lambda: len(self.get_conflicts_for_resolution()) == 0
+                lambda rid=review_id: len(self.get_conflicts_for_resolution(rid)) == 0
             ],
             ('CONSENSUS', 'EXTRACTION'): [
                 lambda: self.get_protocol_compliance_stats()['included_articles'] > 0
@@ -1411,6 +1452,15 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
     # =============================
 
     def save_decision(self, article_id, reviewer_id, decision, exclusion_reason=None, criteria=None):
+        import logging
+        logger = logging.getLogger("aims")
+        if not self.is_valid_user(reviewer_id):
+            logger.error(f"[SECURITY] Invalid user {reviewer_id} attempted decision on article {article_id}")
+            raise Exception("Unauthorized: invalid user")
+        if not self.is_article_assigned(article_id, reviewer_id):
+            logger.error(f"[SECURITY] User {reviewer_id} not assigned article {article_id}")
+            raise Exception("Unauthorized: article not assigned to user")
+        logger.info(f"[AUDIT] user={reviewer_id} article={article_id} action=SCREEN_DECISION decision={decision}")
         with self.connect() as conn:
             conn.execute("""
             INSERT OR REPLACE INTO screening_decisions
@@ -1424,22 +1474,27 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 json.dumps(criteria) if criteria else None
             ))
 
-    def get_pending_articles(self, reviewer_id):
-        with self.connect() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-            SELECT * FROM articles
-            WHERE id NOT IN (
-                SELECT article_id FROM screening_decisions WHERE reviewer_id = ?
-            )
-            """, (reviewer_id,))
-            return cursor.fetchall()
-
-    def get_all_screening_decisions(self):
+    def get_pending_articles(self, reviewer_id: str, review_id: int):
         with self.connect() as conn:
             return conn.execute("""
-            SELECT * FROM screening_decisions
-            """).fetchall()
+                SELECT *
+                FROM articles
+                WHERE review_id = ?
+                AND id NOT IN (
+                    SELECT article_id
+                    FROM screening_decisions
+                    WHERE reviewer_id = ?
+                    AND review_id = ?
+                )
+            """, (review_id, reviewer_id, review_id)).fetchall()
+
+    def get_all_screening_decisions(self, review_id: int):
+        with self.connect() as conn:
+            return conn.execute("""
+                SELECT *
+                FROM screening_decisions
+                WHERE review_id = ?
+            """, (review_id,)).fetchall()
 
     def save_final_decision(self, article_id, decision, reviewer_id, notes):
         with self.connect() as conn:
@@ -1449,11 +1504,14 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             VALUES (?, ?, ?, ?)
             """, (article_id, decision, reviewer_id, notes))
 
-    def get_final_decisions(self):
+    def get_final_decisions(self, review_id: int) -> list:
         with self.connect() as conn:
             return conn.execute("""
-            SELECT * FROM final_decisions
-            """).fetchall()
+                SELECT fd.*, a.title, a.authors, a.year, a.literature_type
+                FROM final_decisions fd
+                JOIN articles a ON fd.article_id = a.id
+                WHERE a.review_id = ?
+            """, (review_id,)).fetchall()
 
     def save_quality_assessment(self, article_id, reviewer_id, scores_dict, total_score, decision):
         with self.connect() as conn:
@@ -1486,38 +1544,55 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             df.to_csv(path, index=False)
 
     def import_decisions_csv(self, path):
+        import logging
+        logger = logging.getLogger("aims")
         import pandas as pd
         df = pd.read_csv(path)
+        imported = 0
+        skipped = 0
         with self.connect() as conn:
             for _, row in df.iterrows():
+                reviewer_id = row["reviewer_id"]
+                article_id = row["article_id"]
+                if not self.is_valid_user(reviewer_id):
+                    logger.warning(f"[SECURITY] Skipped import: invalid user {reviewer_id}")
+                    skipped += 1
+                    continue
+                if not self.is_article_assigned(article_id, reviewer_id):
+                    logger.warning(f"[SECURITY] Skipped import: article {article_id} not assigned to {reviewer_id}")
+                    skipped += 1
+                    continue
                 conn.execute("""
                 INSERT OR IGNORE INTO screening_decisions
                 (article_id, reviewer_id, decision, exclusion_reason, criteria_snapshot, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """, (
-                    row["article_id"],
-                    row["reviewer_id"],
+                    article_id,
+                    reviewer_id,
                     row["decision"],
                     row.get("exclusion_reason"),
                     row.get("criteria_snapshot"),
                     row.get("created_at")
                 ))
+                imported += 1
+        logger.info(f"[AUDIT] Imported {imported} decisions, skipped {skipped}")
+        return imported
 
-    def count_articles(self):
+    def count_articles(self, review_id: int):
         with self.connect() as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM articles WHERE review_id = ?",
-                (self._review_id,)
+                (review_id,)
             ).fetchone()[0]
     
-    def add_article(self, article_data: dict) -> int:
+    def add_article(self, article_data: dict, review_id: int) -> int:
         with self.connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT INTO articles (review_id, title, authors, year, abstract, doi, url, source, literature_type)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                self._review_id,
+                review_id,
                 article_data.get("title", ""),
                 article_data.get("authors", ""),
                 article_data.get("year"),
@@ -1547,11 +1622,11 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             SELECT * FROM articles WHERE id = ?
             """, conn, params=(article_id,)).iloc[0].to_dict() if article_id else None
 
-    def count_screened(self):
+    def count_screened(self, review_id: int):
         with self.connect() as conn:
             return conn.execute("""
-            SELECT COUNT(DISTINCT article_id) FROM screening_decisions
-            """).fetchone()[0]
+                SELECT COUNT(DISTINCT article_id) FROM screening_decisions WHERE review_id = ?
+            """, (review_id,)).fetchone()[0]
 
     # =============================
     # FRAGMENT EXTRACTION (Section 3.2.1)
@@ -1575,7 +1650,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             """, (article_id, rq_code, fragment_text, theme_category, reviewer_id, page_or_section))
             return cursor.lastrowid
 
-    def get_fragments_by_rq(self, rq_code: str):
+    def get_fragments_by_rq(self, rq_code: str, review_id: int) -> list:
         rq_code = rq_code.upper()
         self._validate_rq_code(rq_code)
         with self.connect() as conn:
@@ -1584,8 +1659,9 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 FROM fragments f
                 JOIN articles a ON f.article_id = a.id
                 WHERE f.rq_code = ?
+                AND a.review_id = ?
                 ORDER BY f.created_at
-            """, (rq_code,)).fetchall()
+            """, (rq_code, review_id)).fetchall()
 
     def get_fragments_by_article(self, article_id: int):
         with self.connect() as conn:
@@ -1595,15 +1671,16 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ORDER BY rq_code
             """, (article_id,)).fetchall()
 
-    def get_all_fragments_with_sources(self):
+    def get_all_fragments_with_sources(self, review_id: int) -> list:
         with self.connect() as conn:
             return conn.execute("""
                 SELECT f.id, f.fragment_text, f.rq_code, f.theme_category,
                        a.id as source_id, a.title as source_title, a.literature_type
                 FROM fragments f
                 JOIN articles a ON f.article_id = a.id
+                WHERE a.review_id = ?
                 ORDER BY f.rq_code, a.id
-            """).fetchall()
+            """, (review_id,)).fetchall()
 
     # =============================
     # THEMATIC CODING - CODES
@@ -1628,13 +1705,16 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 return cursor.fetchone()[0]
             return cursor.lastrowid
 
-    def get_codes_by_rq(self, rq_code: str):
+    def get_codes_by_rq(self, rq_code: str, review_id: int) -> list:
         rq_code = rq_code.upper()
         self._validate_rq_code(rq_code)
         with self.connect() as conn:
             return conn.execute("""
-                SELECT * FROM codes WHERE rq_code = ?
-            """, (rq_code,)).fetchall()
+                SELECT c.* FROM codes c
+                JOIN articles a ON c.reviewer_id = a.review_id
+                WHERE c.rq_code = ?
+                AND a.review_id = ?
+            """, (rq_code, review_id)).fetchall()
 
     def link_fragment_code(self, fragment_id: int, code_id: int, reviewer_id: str = "system"):
         with self.connect() as conn:
@@ -1692,13 +1772,15 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 return cursor.fetchone()[0]
             return cursor.lastrowid
 
-    def get_themes_by_rq(self, rq_code: str):
+    def get_themes_by_rq(self, rq_code: str, review_id: int) -> list:
         rq_code = rq_code.upper()
         self._validate_rq_code(rq_code)
         with self.connect() as conn:
             return conn.execute("""
-                SELECT * FROM themes WHERE rq_code = ?
-            """, (rq_code,)).fetchall()
+                SELECT t.* FROM themes t
+                WHERE t.rq_code = ?
+                AND EXISTS (SELECT 1 FROM articles a WHERE a.review_id = ?)
+            """, (rq_code, review_id)).fetchall()
 
     def link_code_theme(self, code_id: int, theme_id: int, reviewer_id: str = "system"):
         with self.connect() as conn:
@@ -1770,23 +1852,24 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
     # INTEGRATION HOOK FOR PIPELINE
     # =============================
 
-    def get_included_articles_for_extraction(self):
+    def get_included_articles_for_extraction(self, review_id: int) -> list:
         """Returns articles that have passed screening and QC - ready for extraction."""
         with self.connect() as conn:
             return conn.execute("""
-                SELECT a.id, a.title, a.abstract, a.literature_type
+                SELECT a.id, a.title, a.abstract, a.literature_type, a.year, a.authors
                 FROM articles a
                 JOIN final_decisions f ON a.id = f.article_id
                 WHERE f.final_decision = 'include'
+                AND a.review_id = ?
                 AND NOT EXISTS (
                     SELECT 1 FROM quality_assessments q
                     WHERE q.article_id = a.id AND q.decision = 'exclude'
                 )
-            """).fetchall()
+            """, (review_id,)).fetchall()
 
-    def get_articles_ready_for_extraction(self):
+    def get_articles_ready_for_extraction(self, review_id: int) -> list:
         """Alias for backward compatibility."""
-        return self.get_included_articles_for_extraction()
+        return self.get_included_articles_for_extraction(review_id)
 
     # =============================
     # =============================
@@ -2126,9 +2209,12 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             """, (name, description))
             return cursor.lastrowid
     
-    def advance_stage(self, target_stage: str, reviewer_id: str = None) -> bool:
+    def advance_stage(self, target_stage: str, reviewer_id: str = None, review_id: int = None) -> bool:
         """Advance to target stage if transition is valid and requirements met."""
         from src.core.workflow import ReviewStage, is_valid_transition
+        
+        if review_id is None:
+            raise DatabaseError("review_id is required for advance_stage")
         
         current = self.get_current_stage()
         
@@ -2142,22 +2228,22 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             return False
         
         if target_stage == "cross_audit":
-            if not self.all_sources_have_primary_decision():
+            if not self.all_sources_have_primary_decision(review_id):
                 return False
         
         if target_stage == "screening":
             if current == "calibration":
                 has_calibration = self.get_current_stage()
                 if has_calibration == "calibration":
-                    latest_result = self.get_calibration_results()
+                    latest_result = self.get_calibration_results(review_id)
                     if latest_result:
                         if latest_result[3] < 0.8:
                             return False
         
         if target_stage == "consensus":
-            if not self.all_sources_have_primary_decision():
+            if not self.all_sources_have_primary_decision(review_id):
                 return False
-            if not self.all_cross_audits_completed():
+            if not self.all_cross_audits_completed(review_id):
                 return False
         
         conn = sqlite3.connect(self.db_path)
@@ -2253,7 +2339,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                     WHERE caa.primary_reviewer = ? AND caa.status = 'pending'
                 """, (reviewer_id,)).fetchall()
     
-    def detect_screening_conflicts(self) -> list:
+    def detect_screening_conflicts(self, review_id: int) -> list:
         """Detect conflicting decisions between reviewers."""
         with self.connect() as conn:
             return conn.execute("""
@@ -2269,28 +2355,34 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 JOIN screening_decisions sd2 ON 
                     sd1.article_id = sd2.article_id AND 
                     sd1.reviewer_id < sd2.reviewer_id
-                WHERE sd1.decision != sd2.decision OR 
-                      ABS(COALESCE(sd1.qc_score, 0) - COALESCE(sd2.qc_score, 0)) > 0.3
-            """).fetchall()
+                WHERE (sd1.review_id = ? OR sd2.review_id = ?)
+                AND (sd1.decision != sd2.decision OR 
+                      ABS(COALESCE(sd1.qc_score, 0) - COALESCE(sd2.qc_score, 0)) > 0.3)
+            """, (review_id, review_id)).fetchall()
     
-    def all_sources_have_primary_decision(self) -> bool:
-        """Check if all articles have at least one screening decision."""
+    def all_sources_have_primary_decision(self, review_id: int) -> bool:
+        """Check if all articles have at least one screening decision for this review."""
+        if not review_id:
+            raise ValueError("review_id is required")
         with self.connect() as conn:
-            total_articles = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+            total_articles = conn.execute("SELECT COUNT(*) FROM articles WHERE review_id = ?", (review_id,)).fetchone()[0]
             with_decisions = conn.execute("""
-                SELECT COUNT(DISTINCT article_id) FROM screening_decisions
-            """).fetchone()[0]
+                SELECT COUNT(DISTINCT article_id) FROM screening_decisions WHERE review_id = ?
+            """, (review_id,)).fetchone()[0]
             return total_articles > 0 and with_decisions == total_articles
     
-    def all_cross_audits_completed(self) -> bool:
-        """Check if all cross-audit assignments are completed."""
+    def all_cross_audits_completed(self, review_id: int) -> bool:
+        """Check if all cross-audit assignments are completed for this review."""
         with self.connect() as conn:
             pending = conn.execute("""
-                SELECT COUNT(*) FROM cross_audit_assignments WHERE status = 'pending'
-            """).fetchone()[0]
+                SELECT COUNT(*) FROM cross_audit_assignments caa
+                JOIN articles a ON caa.article_id = a.id
+                WHERE caa.status = 'pending'
+                AND a.review_id = ?
+            """, (review_id,)).fetchone()[0]
             return pending == 0
     
-    def get_conflicts_for_resolution(self) -> list:
+    def get_conflicts_for_resolution(self, review_id: int) -> list:
         """Get unresolved conflicts for consensus UI."""
         with self.connect() as conn:
             return conn.execute("""
@@ -2298,7 +2390,8 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 FROM screening_conflicts sc
                 JOIN articles a ON sc.article_id = a.id
                 WHERE sc.resolved = 0
-            """).fetchall()
+                AND a.review_id = ?
+            """, (review_id,)).fetchall()
     
     def resolve_conflict(self, article_id: int, resolution_notes: str, resolved_by: str) -> bool:
         """Resolve a screening conflict."""
@@ -2366,11 +2459,20 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
     def save_calibration_decision(self, set_id: int, article_id: int, reviewer_id: str, 
                          decision: str, is_calibration: bool = True) -> bool:
         """Save a screening decision marked as calibration."""
+        import logging
+        logger = logging.getLogger("aims")
+        if not self.is_valid_user(reviewer_id):
+            logger.error(f"[SECURITY] Invalid user {reviewer_id} attempted calibration decision")
+            raise Exception("Unauthorized: invalid user")
+        if not self.is_article_assigned(article_id, reviewer_id):
+            logger.error(f"[SECURITY] User {reviewer_id} not assigned article {article_id} for calibration")
+            raise Exception("Unauthorized: article not assigned to user")
+        logger.info(f"[AUDIT] user={reviewer_id} article={article_id} action=CALIBRATION_DECISION decision={decision}")
         with self.connect() as conn:
             conn.execute("""
-                INSERT OR REPLACE INTO screening_decisions 
-                (article_id, reviewer_id, decision, is_blind, is_calibration)
-                VALUES (?, ?, ?, 1, ?)
+            INSERT OR REPLACE INTO screening_decisions 
+            (article_id, reviewer_id, decision, is_blind, is_calibration)
+            VALUES (?, ?, ?, 1, ?)
             """, (article_id, reviewer_id, decision, 1 if is_calibration else 0))
             return True
     
@@ -2459,13 +2561,15 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
         
         return status["kappa"] >= threshold
     
-    def get_calibration_results(self) -> list:
-        """Get latest calibration results."""
+    def get_calibration_results(self, review_id: int) -> list:
+        """Get latest calibration results for this review."""
         with self.connect() as conn:
             return conn.execute("""
-                SELECT * FROM calibration_results 
-                ORDER BY created_at DESC LIMIT 1
-            """).fetchall()
+                SELECT cr.* FROM calibration_results cr
+                JOIN calibration_sets cs ON cr.set_id = cs.id
+                WHERE cs.reviewer_id = ?
+                ORDER BY cr.created_at DESC LIMIT 1
+            """, (review_id,)).fetchall()
     
     # =============================
     # TRACEABILITY ENGINE
@@ -2779,7 +2883,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
         """Check if manual mode is enabled."""
         return getattr(self, '_manual_mode', False)
     
-    def track_stage_time(self, stage: str, reviewer_id: str) -> int:
+    def track_stage_time(self, stage: str, reviewer_id: str, review_id: int) -> int:
         """
         Start tracking time for a stage.
         Returns session_id for later use.
@@ -2789,7 +2893,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
             cursor.execute("""
             INSERT INTO evaluation_sessions (review_id, reviewer_id, stage, manual_mode)
             VALUES (?, ?, ?, ?)
-            """, (self._review_id, reviewer_id, stage, 1 if self._manual_mode else 0))
+            """, (review_id, reviewer_id, stage, 1 if self._manual_mode else 0))
             return cursor.lastrowid
     
     def end_stage_time(self, session_id: int) -> bool:
@@ -3137,4 +3241,191 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conn.execute("UPDATE concepts SET rq_code = ? WHERE id = ?", 
                           (f"theme_{theme_id}", concept_id))
                 return True
-        return False
+    
+    # =============================
+    # STATS & PRISMA METHODS
+    # =============================
+    
+    def get_stats(self, review_id: int) -> dict:
+        """Get real-time statistics for dashboard."""
+        with self.connect() as conn:
+            articles_count = conn.execute(
+                "SELECT COUNT(*) FROM articles WHERE review_id = ?", 
+                (review_id,)
+            ).fetchone()[0]
+            decisions = conn.execute(
+                "SELECT * FROM screening_decisions WHERE review_id = ?", 
+                (review_id,)
+            ).fetchall()
+            final_decisions = conn.execute("""
+                SELECT fd.* FROM final_decisions fd
+                JOIN articles a ON fd.article_id = a.id
+                WHERE a.review_id = ?
+            """, (review_id,)).fetchall()
+            quality_assessments = conn.execute("""
+                SELECT qa.* FROM quality_assessments qa
+                JOIN articles a ON qa.article_id = a.id
+                WHERE a.review_id = ?
+            """, (review_id,)).fetchall()
+            return {
+                "total_articles": articles_count,
+                "decisions": decisions,
+                "final": final_decisions,
+                "qa": quality_assessments
+            }
+    
+    def get_prisma_stats(self, review_id: int) -> dict:
+        """Calculate PRISMA Flow Diagram statistics."""
+        with self.connect() as conn:
+            total_imported = conn.execute(
+                "SELECT COUNT(*) FROM articles WHERE review_id = ?", 
+                (review_id,)
+            ).fetchone()[0]
+            screened = conn.execute(
+                "SELECT COUNT(DISTINCT article_id) FROM screening_decisions WHERE review_id = ?", 
+                (review_id,)
+            ).fetchone()[0]
+            included_screening = conn.execute(
+                "SELECT COUNT(DISTINCT article_id) FROM screening_decisions WHERE review_id = ? AND decision = 'include'", 
+                (review_id,)
+            ).fetchone()[0]
+            final_included = conn.execute("""
+                SELECT COUNT(*) FROM final_decisions fd
+                JOIN articles a ON fd.article_id = a.id
+                WHERE a.review_id = ? AND fd.final_decision = 'include'
+            """, (review_id,)).fetchone()[0]
+            qa_passed = conn.execute("""
+                SELECT COUNT(*) FROM quality_assessments qa
+                JOIN articles a ON qa.article_id = a.id
+                WHERE a.review_id = ? AND qa.decision = 'include'
+            """, (review_id,)).fetchone()[0]
+            qa_failed = conn.execute("""
+                SELECT COUNT(*) FROM quality_assessments qa
+                JOIN articles a ON qa.article_id = a.id
+                WHERE a.review_id = ? AND qa.decision = 'exclude'
+            """, (review_id,)).fetchone()[0]
+            qa_pending = conn.execute("""
+                SELECT COUNT(*) FROM final_decisions f 
+                JOIN articles a ON f.article_id = a.id
+                WHERE a.review_id = ? 
+                AND f.final_decision = 'include' 
+                AND NOT EXISTS (SELECT 1 FROM quality_assessments q WHERE q.article_id = f.article_id)
+            """, (review_id,)).fetchone()[0]
+            return {
+                "total_imported": total_imported,
+                "screened": screened,
+                "pending_screening": total_imported - screened,
+                "included_screening": included_screening,
+                "excluded_screening": screened - included_screening,
+                "final_included": final_included,
+                "qa_passed": qa_passed,
+                "qa_failed": qa_failed,
+                "qa_pending": qa_pending
+            }
+    
+    def get_gl_articles(self) -> pd.DataFrame:
+        """Get Grey Literature articles."""
+        with self.connect() as conn:
+            return pd.read_sql_query("SELECT title, url, ingestion_notes, status, created_at FROM articles WHERE literature_type = 'GL' ORDER BY id DESC", conn)
+    
+    # =============================
+    # USER MANAGEMENT
+    # =============================
+    
+    def is_valid_user(self, user_id: str) -> bool:
+        """Validate that user_id exists in users table."""
+        if not user_id:
+            return False
+        with self.connect() as conn:
+            result = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)).fetchone()
+            return result is not None
+    
+    def create_user(self, user_id: str, name: str, email: str = None, role: str = "reviewer") -> bool:
+        """Create a new user."""
+        import logging
+        logger = logging.getLogger("aims")
+        try:
+            with self.connect() as conn:
+                conn.execute("""
+                    INSERT INTO users (user_id, name, email, role)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, name, email, role))
+                logger.info(f"[DB] Created user: {user_id} role={role}")
+                return True
+        except Exception as e:
+            logger.error(f"[DB ERROR] create_user failed for {user_id}: {e}")
+            return False
+    
+    def get_users(self) -> list:
+        """Get all users."""
+        with self.connect() as conn:
+            return conn.execute("SELECT user_id, name, email, role FROM users ORDER BY name").fetchall()
+    
+    def assign_article(self, article_id: int, user_id: str) -> bool:
+        """Assign an article to a user."""
+        import logging
+        logger = logging.getLogger("aims")
+        try:
+            with self.connect() as conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO assignments (article_id, user_id)
+                    VALUES (?, ?)
+                """, (article_id, user_id))
+                logger.info(f"[DB] Assigned article {article_id} to user {user_id}")
+                return True
+        except Exception as e:
+            logger.error(f"[DB ERROR] assign_article failed: {e}")
+            return False
+    
+    def get_assigned_articles(self, user_id: str) -> list:
+        """Get all articles assigned to a user."""
+        with self.connect() as conn:
+            return conn.execute("""
+                SELECT a.id, a.title, a.abstract, a.literature_type, a.year, a.authors
+                FROM articles a
+                JOIN assignments ass ON a.id = ass.article_id
+                WHERE ass.user_id = ?
+                ORDER BY a.id
+            """, (user_id,)).fetchall()
+    
+    def is_article_assigned(self, article_id: int, user_id: str) -> bool:
+        """Check if article is assigned to user."""
+        with self.connect() as conn:
+            result = conn.execute("""
+                SELECT 1 FROM assignments 
+                WHERE article_id = ? AND user_id = ?
+            """, (article_id, user_id)).fetchone()
+            return result is not None
+    
+    def assign_all_articles_to_user(self, user_id: str) -> bool:
+        """Assign all existing articles to a user (for migration)."""
+        try:
+            with self.connect() as conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO assignments (article_id, user_id)
+                    SELECT id, ? FROM articles
+                """, (user_id,))
+                import logging
+                logger = logging.getLogger("aims")
+                logger.info(f"[DB] Bulk assigned all articles to user {user_id}")
+                return True
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("aims")
+            logger.error(f"[DB ERROR] assign_all_articles_to_user failed: {e}")
+            return False
+    
+    def get_pending_articles_for_user(self, user_id: str, review_id: int) -> list:
+        """Get articles assigned to user that haven't been screened yet by this user."""
+        with self.connect() as conn:
+            return conn.execute("""
+                SELECT a.id, a.title, a.abstract, a.literature_type, a.year, a.authors
+                FROM articles a
+                JOIN assignments ass ON a.id = ass.article_id
+                WHERE ass.user_id = ?
+                AND a.review_id = ?
+                AND a.id NOT IN (
+                    SELECT article_id FROM screening_decisions WHERE reviewer_id = ? AND review_id = ?
+                )
+                ORDER BY a.id
+            """, (user_id, review_id, user_id, review_id)).fetchall()

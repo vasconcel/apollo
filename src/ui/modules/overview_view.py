@@ -1,192 +1,145 @@
+"""
+APOLLO Overview Dashboard with LLM Rationale Inspection
+Simple status display for EC/IC/QC pipeline with decision auditing
+"""
 import streamlit as st
-import plotly.graph_objects as go
-from src.core.workflow import ReviewStage
 
-GAROUSI_STAGES = [
-    ("planning", "Planning", "Setup RQs and Criteria"),
-    ("search", "Search & Ingestion", "WL/GL Import"),
-    ("screening", "Screening", "Title/Abstract selection"),
-    ("quality", "Quality Assessment", "Scoring items"),
-    ("extraction", "Data Extraction", "Fragment retrieval"),
-    ("synthesis", "Synthesis", "Thematic coding"),
-]
 
-from src.core.services import (
-    get_settings,
-    get_prisma_flow,
-    get_gl_inventory,
-    format_research_questions,
-    format_exclusion_criteria,
-    get_protocol_stage_info,
-    advance_protocol_stage,
-    get_reviewer_id,
-)
-
-@st.cache_resource
 def get_database():
     from src.core.database import Database
-    review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
+    return Database(review_id=st.session_state.get("review_id", 1))
 
-def require_stage(required_stage: ReviewStage, db) -> bool:
-    current = ReviewStage(db.get_current_stage())
-    if current != required_stage:
-        st.error(f"[LOCKED] This section requires '{required_stage.value}' stage")
-        st.info(f"Workflow: {db.get_stage_prompt()}")
-        return False
-    return True
 
-def display_protocol_stepper(db):
-    progress = db.get_stage_progress()
-    current_stage = progress["current_stage"]
-    stage_index = progress["stage_index"]
+def render_overview():
+    """APOLLO Pipeline Status Dashboard with LLM Rationale Inspection."""
+    db = get_database()
     
-    stage_mapping = {
-        "calibration": 0, "planning": 0, "search": 1, "screening": 2,
-        "cross_audit": 3, "quality": 3, "consensus": 3, "extraction": 4, "synthesis": 5,
-    }
-    mapped_index = stage_mapping.get(current_stage.lower(), stage_index)
+    st.header("APOLLO Dashboard")
+    st.caption("Decision Support: EC → IC → QC + LLM Reasoning")
     
-    st.markdown("### Protocol Stepper")
-    cols = st.columns(len(GAROUSI_STAGES))
+    stats = db.get_stats()
     
-    for idx, (stage_key, stage_name, stage_desc) in enumerate(GAROUSI_STAGES):
-        with cols[idx]:
-            if idx < mapped_index:
-                status, color, bg_color = "[COMPLETED]", "#10B981", "rgba(16, 185, 129, 0.15)"
-            elif idx == mapped_index:
-                status, color, bg_color = "[CURRENT]", "#3B82F6", "rgba(59, 130, 246, 0.2)"
-            else:
-                status, color, bg_color = "[PENDING]", "#6B7280", "rgba(107, 114, 128, 0.1)"
+    st.subheader("Pipeline Progress")
+    
+    col_total, col_wl, col_gl = st.columns(3)
+    with col_total:
+        st.metric("Total Articles", stats["total_articles"])
+    with col_wl:
+        wl_count = len([a for a in db.get_articles() if a.get("literature_type") == "WL"])
+        st.metric("White Literature", wl_count)
+    with col_gl:
+        gl_count = len([a for a in db.get_articles() if a.get("literature_type") == "GL"])
+        st.metric("Grey Literature", gl_count)
+    
+    st.divider()
+    st.subheader("Eligibility Stage (EC → IC)")
+    
+    col_ec_in, col_ec_out, col_ic_in, col_ic_out = st.columns(4)
+    with col_ec_in:
+        st.metric("EC Passed", stats["ec_passed"])
+    with col_ec_out:
+        st.metric("EC Excluded", stats["ec_excluded"])
+    with col_ic_in:
+        st.metric("IC Passed", stats["ic_passed"])
+    with col_ic_out:
+        st.metric("IC Excluded", stats["ic_excluded"])
+    
+    ec_total = stats["ec_passed"] + stats["ec_excluded"]
+    if ec_total > 0:
+        ec_progress = stats["ec_passed"] / ec_total
+        st.progress(ec_progress)
+        st.caption(f"EC Progress: {stats['ec_passed']}/{ec_total} passed ({int(ec_progress*100)}%)")
+    
+    st.divider()
+    st.subheader("Quality Stage (QC)")
+    
+    col_qc_pass, col_qc_fail = st.columns(2)
+    with col_qc_pass:
+        st.metric("QC Passed", stats["qc_passed"], delta="Include")
+    with col_qc_fail:
+        st.metric("QC Failed", stats["qc_failed"], delta="Exclude", delta_color="inverse")
+    
+    ic_total = stats["ic_passed"]
+    if ic_total > 0:
+        qc_complete = stats["qc_passed"] + stats["qc_failed"]
+        if qc_complete > 0:
+            qc_pass_rate = stats["qc_passed"] / qc_complete
+            st.progress(qc_pass_rate)
+            st.caption(f"QC Completion: {stats['qc_passed']}/{qc_complete} passed ({int(qc_pass_rate*100)}%)")
+    
+    st.divider()
+    st.subheader("🤖 LLM Rationale Inspector")
+    st.caption("Audit and inspect LLM-generated reasoning for decisions")
+    
+    articles = db.get_articles()
+    if not articles:
+        st.info("No articles in database yet.")
+    else:
+        article_options = {f"{a['title'][:60]}... (ID: {a['id']})": a['id'] for a in articles}
+        selected_article = st.selectbox("Select Article to Inspect", list(article_options.keys()))
+        
+        if selected_article:
+            article_id = article_options[selected_article]
+            rationale = db.get_article_rationale(article_id)
             
-            st.markdown(f"""<div style="padding: 0.5rem; background: {bg_color}; border-left: 3px solid {color}; border-radius: 4px; margin-bottom: 0.5rem;">
-                <div style="color: {color}; font-weight: 600; font-size: 0.85rem;">{status}</div>
-                <div style="color: #E5E7EB; font-size: 0.9rem; font-weight: 500;">{stage_name}</div>
-                <div style="color: #9CA3AF; font-size: 0.75rem;">{stage_desc}</div>
-            </div>""", unsafe_allow_html=True)
-
-def render_overview_view():
-    db = get_database()
-    settings = get_settings()
-    proj_name = settings.get("project_name", "Research Project")
-    
-    st.markdown(f"""<div style="margin-bottom: 1.5rem;">
-        <h2 style="margin: 0; font-size: 1.75rem;">{proj_name}</h2>
-        <p style="color: var(--text-secondary); margin: 0.25rem 0 0 0;">Real-time pipeline statistics and PRISMA flow tracking</p>
-    </div>""", unsafe_allow_html=True)
-    
-    display_protocol_stepper(db)
-    
-    with st.expander("Protocol Planning", expanded=False):
-        col_rq, col_crit = st.columns([1, 1])
-        with col_rq:
-            st.markdown("**Research Questions**")
-            rqs = db.get_research_questions()
-            formatted_rqs = format_research_questions(rqs)
-            for rq in formatted_rqs:
-                st.caption(f"**{rq['id']}:** {rq['question']}...")
-        with col_crit:
-            st.markdown("**Exclusion Criteria**")
-            ec_list = db.get_eligibility_criteria('EC')
-            formatted_ec = format_exclusion_criteria(ec_list)
-            for ec in formatted_ec:
-                st.caption(f"**{ec['id']}:** {ec['description']}...")
-    
-    stage_info = get_protocol_stage_info(db)
-    current_stage = stage_info["current_stage"]
-    
-    with st.expander("🔧 Protocol Stage Control", expanded=False):
-        st.caption(f"Current Stage: **{current_stage.title()}**")
-        
-        col_status, col_action = st.columns([2, 1])
-        with col_status:
-            st.success(f"🟢 Active: {current_stage.title()}")
-        with col_action:
-            if stage_info["can_advance"]:
-                next_stage = stage_info["next_stage"]
-                next_label = stage_info["stage_labels"][stage_info["current_idx"] + 1]
-                if st.button(f"Advance to {next_label}", type="primary"):
-                    result = advance_protocol_stage(db, next_stage)
-                    if result.get('success'):
-                        st.success(f"Advanced to {next_stage.title()}!")
-                        st.rerun()
-                    else:
-                        blockers = result.get('blockers', result.get('reasons', []))
-                        st.error(f"Cannot advance: {blockers[0] if blockers else 'Requirements not met'}")
-
-    gl_articles = get_gl_inventory(db)
-    
-    with st.expander("📥 Grey Literature Inventory", expanded=False):
-        if gl_articles.empty:
-            st.info("No GL articles imported yet.")
-        else:
-            st.dataframe(gl_articles[['title', 'status']], use_container_width=True)
-    
-    prisma = get_prisma_flow(db)
-    has_data = prisma["total_imported"] > 0
-    
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    with c1: st.metric("Total Imported", prisma["total_imported"])
-    with c2: st.metric("Screened", prisma["screened"])
-    with c3: st.metric("Pending", prisma["pending_screening"])
-    with c4: st.metric("Included (Screening)", prisma["included_screening"])
-    with c5: st.metric("Final Included", prisma["final_included"])
-    with c6: st.metric("QA Pending", prisma["qa_pending"])
-    
-    st.divider()
-    
-    if has_data:
-        try:
-            fig = go.Figure(data=[go.Sankey(
-                node=dict(pad=15, thickness=20, line=dict(color="white", width=0.5),
-                    label=["Total Imported", "Screened", "Pending", "Excluded", "Included", "Final", "QA Passed", "QA Failed"]),
-                link=dict(source=[0,1,1,1,2,4,4,4], target=[1,2,3,4,5,6,7,5], value=[prisma["total_imported"], prisma["screened"], prisma["pending_screening"], prisma["excluded_screening"], prisma["included_screening"], prisma["final_included"], prisma["qa_passed"], prisma["qa_failed"]])
-            )])
-            fig.update_layout(title="PRISMA Flow", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"), height=350)
-            st.plotly_chart(fig, width=True)
-        except Exception as e:
-            st.warning(f"Sankey unavailable: {e}")
-    
-    rqs = settings.get("research_questions", [])
-    st.divider()
-    st.subheader("Research Questions")
-    for i, rq in enumerate(rqs, 1):
-        rq_stripped = rq.strip()
-        st.markdown(f"**{rq_stripped}**" if rq_stripped.upper().startswith("RQ") else f"**RQ{i}:** {rq}")
-    
-    st.divider()
-    st.subheader("Quick Actions")
-    if st.button("Refresh Statistics"):
-        st.rerun()
-    
-    with st.expander(" Calibration Phase (Required)", expanded=False):
-        st.caption("Protocol Step 1: Calibrate reviewers before screening (κ ≥ 0.8 required)")
-        c1, c2 = st.columns(2)
-        with c1:
-            reviewer_1 = st.text_input("Reviewer 1", value=get_reviewer_id())
-            sample_size = st.number_input("Sample size", min_value=5, max_value=50, value=20)
-        with c2:
-            reviewer_2 = st.text_input("Reviewer 2")
-        
-        if st.button("Create Calibration Set", width=True):
-            if reviewer_1 and reviewer_2:
-                set_id = db.create_calibration_set(reviewer_1, sample_size)
-                st.success(f"Calibration set #{set_id} created")
-                st.rerun()
-        
-        results = db.get_calibration_results(review_id)
-        if results:
-            latest = results[0]
-            st.metric("Latest Kappa", f"{latest[3]:.3f}" if latest[3] else "N/A")
-            if latest[3] and latest[3] >= 0.8:
-                st.success("[OK] Kappa threshold met (≥ 0.8)")
+            if rationale.get("stages"):
+                for stage, data in rationale["stages"].items():
+                    with st.expander(f"Stage: {stage} | Decision: {data.get('decision', 'N/A')}"):
+                        col_d, col_c = st.columns(2)
+                        with col_d:
+                            st.caption(f"**Decision:** {data.get('decision', 'N/A')}")
+                        with col_c:
+                            conf = data.get("confidence")
+                            if conf is not None:
+                                st.caption(f"**Confidence:** {conf:.2f}")
+                        
+                        st.caption(f"**Reason:** {data.get('reason', 'N/A')}")
+                        
+                        stage_rationale = data.get("rationale")
+                        if stage_rationale:
+                            st.markdown("**LLM Reasoning:**")
+                            
+                            if "reasoning_trace" in stage_rationale:
+                                st.markdown("*Reasoning Trace:*")
+                                for trace in stage_rationale.get("reasoning_trace", [])[:5]:
+                                    st.caption(f"  • {trace}")
+                            
+                            if "evidence_used" in stage_rationale and stage_rationale["evidence_used"]:
+                                st.markdown("*Evidence Used:*")
+                                for ev in stage_rationale["evidence_used"][:3]:
+                                    st.caption(f"  - {ev}")
+                            
+                            if stage == "QC":
+                                if stage_rationale.get("criteria_justification"):
+                                    st.markdown("*Per-Criteria Justification:*")
+                                    for crit, just in stage_rationale["criteria_justification"].items():
+                                        st.caption(f"**{crit}**: {just.get('reasoning', 'N/A')[:100]}")
+                                
+                                if stage_rationale.get("strengths"):
+                                    st.markdown("*Strengths:*")
+                                    for s in stage_rationale["strengths"]:
+                                        st.caption(f"  ✓ {s}")
+                                
+                                if stage_rationale.get("weaknesses"):
+                                    st.markdown("*Weaknesses:*")
+                                    for w in stage_rationale["weaknesses"]:
+                                        st.caption(f"  ✗ {w}")
+                        else:
+                            st.caption("No LLM rationale generated for this stage.")
             else:
-                st.warning("[WARN] Kappa below threshold")
-        else:
-            st.info("No calibration completed yet")
-
-def get_quick_stats():
-    """Get stats for sidebar."""
-    from src.core.services import get_dashboard_stats
-    db = get_database()
-    return get_dashboard_stats(db)
+                st.info("No decisions recorded for this article yet.")
+    
+    st.divider()
+    st.subheader("APOLLO Pipeline")
+    st.markdown("""
+    ```
+    ATLAS Excel (WL + GL) → Ingestion → EC (LLM) → IC (LLM) → QC (LLM) → Output
+    ```
+    - **Stage 1 (EC)**: Apply Exclusion Criteria (binary filter) + LLM rationale
+    - **Stage 2 (IC)**: Apply Inclusion Criteria (relevance to SE R&S) + LLM justification
+    - **Stage 3 (QC)**: Apply Quality Criteria (WL-Q1→Q4 or GL-Q1→Q4, threshold ≥2.0) + LLM justification
+    
+    Output: EC/IC/QC decisions + LLM-generated structured rationale
+    """)
+    
+    st.caption("APOLLO - Decision Intelligence Layer with LLM Reasoning")

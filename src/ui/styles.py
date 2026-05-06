@@ -1,4 +1,4 @@
-"""Professional CSS styles for AIMS - Slate & Azure Design System"""
+"""Professional CSS styles for APOLLO - Slate & Azure Design System"""
 
 def get_custom_css():
     return """<style>

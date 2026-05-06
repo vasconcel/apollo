@@ -1,5 +1,5 @@
 """
-Centralized Logger for AIMS Pipeline.
+Centralized Logger for APOLLO Pipeline.
 Provides structured logging to both console and file.
 """
 import logging
@@ -7,7 +7,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def setup_logger(name: str = "aims", log_file: str = "logs/aims_pipeline.log") -> logging.Logger:
+def setup_logger(name: str = "apollo", log_file: str = "logs/apollo_pipeline.log") -> logging.Logger:
     """
     Create and configure a logger with both console and file output.
     
@@ -71,5 +71,5 @@ def get_logger(name: str = None) -> logging.Logger:
         Logger instance
     """
     if name:
-        return logging.getLogger(f"aims.{name}")
+        return logging.getLogger(f"apollo.{name}")
     return logger

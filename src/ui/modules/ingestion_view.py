@@ -1,125 +1,124 @@
+"""
+APOLLO Data Ingestion - ATLAS Excel Input Only
+Strictly accepts: ATLAS Excel file with WL sheet and GL sheet
+"""
 import streamlit as st
 import pandas as pd
 from pathlib import Path
-import tempfile
-
-from src.core.database import Database
-from src.core.converter import convert_bibtex_to_df, convert_ris_to_df, convert_wos_txt_to_df
 
 
 def get_database():
-    """Returns a cached Database instance with current review_id."""
-    review_id = st.session_state.get("review_id", 1)
-    return Database(review_id=review_id)
+    return Database(review_id=st.session_state.get("review_id", 1))
 
 
 def render_ingestion():
-    """Data ingestion hub with WL and GL uploaders."""
+    """ATLAS Excel Ingestion Hub - WL and GL sheets only."""
+    from src.core.database import Database
+    
     db = get_database()
     
-    st.markdown("""
-    **Getting Started:**
-    1. Prepare your literature in CSV, BibTeX, RIS, or Excel format
-    2. Upload files below to import
+    st.header("ATLAS Data Import")
+    st.caption("Input: ATLAS Excel export with WL and GL sheets")
+    
+    st.info("""
+    **Input Format**: ATLAS Excel file (.xlsx)
+    - **WL sheet**: White Literature (academic publications)
+    - **GL sheet**: Grey Literature (reports, white papers, etc.)
+    
+    No other formats are accepted.
     """)
     
-    with st.expander("Data Ingestion Hub", expanded=True):
-        st.subheader("Upload Literature Files")
-        
-        col_src, col_file = st.columns([1, 2])
-        with col_src:
-            lit_type = st.radio("Literature Source Type", ["White Literature (WL)", "Grey Literature (GL)"], horizontal=True)
-        with col_file:
-            uploaded_files = st.file_uploader(
-                "Upload files (any format: .bib, .ris, .csv, .xlsx, .txt, or no extension)",
-                accept_multiple_files=True
-            )
-        
-        if uploaded_files:
-            st.caption(f"{len(uploaded_files)} file(s) selected")
+    uploaded_file = st.file_uploader(
+        "Upload ATLAS Excel File",
+        type=["xlsx"],
+        help="ATLAS export must contain 'WL' and 'GL' sheets"
+    )
+    
+    if uploaded_file:
+        try:
+            wl_df = pd.read_excel(uploaded_file, sheet_name="WL")
+            gl_df = pd.read_excel(uploaded_file, sheet_name="GL")
             
-            all_dfs = []
-            for uploaded in uploaded_files:
-                st.info(f"Processing: {uploaded.name}")
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
-                    tmp.write(uploaded.getvalue())
-                    tmp_path = tmp.name
-                
-                suffix = Path(uploaded.name).suffix.lower()
-                
-                if not suffix or suffix not in [".bib", ".ris", ".xlsx", ".csv", ".txt"]:
-                    suffix = ".bib"
-                
-                try:
-                    if suffix == ".bib":
-                        try:
-                            df = convert_bibtex_to_df(tmp_path)
-                        except Exception as bib_error:
-                            st.warning(f"Not BibTeX format, skipping: {bib_error}")
-                            df = pd.DataFrame()
-                    elif suffix == ".ris":
-                        df = convert_ris_to_df(tmp_path)
-                    elif suffix == ".xlsx":
-                        df = pd.read_excel(tmp_path)
-                    elif suffix == ".csv":
-                        df = pd.read_csv(tmp_path)
-                    elif suffix == ".txt":
-                        df = convert_wos_txt_to_df(tmp_path)
-                    else:
-                        df = pd.DataFrame()
-                    
-                    if not df.empty:
-                        df["literature_type"] = "WL" if "WL" in lit_type else "GL"
-                        all_dfs.append(df)
-                        st.success(f"Converted: {len(df)} records")
-                except Exception as conv_error:
-                    st.error(f"Conversion failed: {conv_error}")
+            st.success(f"Found sheets: WL ({len(wl_df)} records), GL ({len(gl_df)} records)")
             
-            if all_dfs:
-                combined = pd.concat(all_dfs, ignore_index=True)
-                
-                if st.button(f"Import {len(combined)} Records", type="primary"):
-                    imported = 0
-                    review_id = st.session_state.get("review_id", 1)
-                    for _, row in combined.iterrows():
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("White Literature Preview")
+                st.dataframe(wl_df.head(5), use_container_width=True)
+            with col2:
+                st.subheader("Grey Literature Preview")
+                st.dataframe(gl_df.head(5), use_container_width=True)
+            
+            st.divider()
+            
+            col_btn1, col_btn2 = st.columns(2)
+            
+            with col_btn1:
+                wl_import = st.button(f"Import WL ({len(wl_df)} records)", type="primary")
+            
+            with col_btn2:
+                gl_import = st.button(f"Import GL ({len(gl_df)} records)")
+            
+            imported_count = 0
+            
+            if wl_import:
+                with st.spinner("Importing White Literature..."):
+                    for _, row in wl_df.iterrows():
                         try:
-                            art_id = db.add_article(
-                                {
-                                    "title": row.get("title", "Untitled"),
-                                    "abstract": row.get("abstract"),
-                                    "doi": row.get("doi"),
-                                    "url": row.get("url"),
-                                    "source": row.get("source"),
-                                    "literature_type": row.get("literature_type", "WL"),
-                                    "authors": row.get("authors", ""),
-                                    "year": row.get("year")
-                                },
-                                review_id
-                            )
-                            if art_id:
-                                imported += 1
-                        except:
+                            db.add_article({
+                                "title": str(row.get("title", "Untitled")),
+                                "authors": str(row.get("authors", "")),
+                                "year": row.get("year"),
+                                "abstract": str(row.get("abstract", "")),
+                                "doi": str(row.get("doi", "")),
+                                "url": str(row.get("url", "")),
+                                "source": str(row.get("source", "ATLAS-WL")),
+                                "literature_type": "WL"
+                            })
+                            imported_count += 1
+                        except Exception:
                             pass
-                    st.success(f"{imported} records added!")
+                    st.success(f"Imported {imported_count} WL records")
                     st.rerun()
-    
-    st.subheader("Grey Literature Saturation")
-    
-    with st.expander("GL Saturation Check", expanded=False):
-        gl_file = st.file_uploader("Upload GL file for saturation check", type=["tsv", "csv"])
-        
-        if gl_file and st.button("Run Saturation Check"):
-            with st.spinner("Checking saturation..."):
-                try:
-                    if gl_file.name.endswith('.tsv'):
-                        gl_df = pd.read_csv(gl_file, sep='\t')
-                    else:
-                        gl_df = pd.read_csv(gl_file)
+            
+            if gl_import:
+                with st.spinner("Importing Grey Literature..."):
+                    for _, row in gl_df.iterrows():
+                        try:
+                            db.add_article({
+                                "title": str(row.get("title", "Untitled")),
+                                "authors": str(row.get("authors", "")),
+                                "year": row.get("year"),
+                                "abstract": str(row.get("abstract", "")),
+                                "doi": str(row.get("doi", "")),
+                                "url": str(row.get("url", "")),
+                                "source": str(row.get("source", "ATLAS-GL")),
+                                "literature_type": "GL"
+                            })
+                            imported_count += 1
+                        except Exception:
+                            pass
+                    st.success(f"Imported {imported_count} GL records")
+                    st.rerun()
                     
-                    from src.core.saturation import check_gl_saturation
-                    results = check_gl_saturation(gl_df, db)
-                    
-                    st.json(results)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+        except Exception as e:
+            st.error(f"Error reading ATLAS Excel: {e}")
+            st.warning("Ensure file contains 'WL' and 'GL' sheets")
+    
+    st.divider()
+    st.subheader("Current Database Status")
+    
+    stats = db.get_stats()
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Total Articles", stats["total_articles"])
+    with c2:
+        wl_count = len([a for a in db.get_articles() if a.get("literature_type") == "WL"])
+        st.metric("White Literature", wl_count)
+    with c3:
+        gl_count = len([a for a in db.get_articles() if a.get("literature_type") == "GL"])
+        st.metric("Grey Literature", gl_count)
+    with c4:
+        st.metric("EC Passed", stats["ec_passed"])
+    
+    st.caption("Next: Proceed to Eligibility Evaluation (EC → IC)")

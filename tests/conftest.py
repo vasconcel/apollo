@@ -1,5 +1,5 @@
 """
-Pytest Configuration and Shared Fixtures for AIMS Testing.
+Pytest Configuration and Shared Fixtures for APOLLO Testing.
 """
 import os
 import pytest

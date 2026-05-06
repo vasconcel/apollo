@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-E2E Validation Script for AIMS MLR Pipeline
+E2E Validation Script for APOLLO MLR Pipeline
 
 This script validates the complete workflow:
 Ingestion -> Screening -> Consensus -> Quality -> Extraction -> Synthesis
@@ -351,7 +351,7 @@ def step_6_traceability(db: Database) -> bool:
 def run_e2e_validation():
     """Run the complete E2E validation."""
     print("\n" + "="*60)
-    print("  AIMS MLR PIPELINE - E2E VALIDATION")
+    print("  APOLLO MLR PIPELINE - E2E VALIDATION")
     print("="*60)
     
     # Create a fresh test database

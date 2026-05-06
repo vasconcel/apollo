@@ -1,4 +1,4 @@
-# AIMS Contributing Guide
+# APOLLO Contributing Guide
 
 ## Developer Quickstart
 

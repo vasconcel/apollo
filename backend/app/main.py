@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AIMS API",
+    title="APOLLO API",
     description="Research Synthesis Platform API",
     version="1.0.0",
     lifespan=lifespan
@@ -52,7 +52,7 @@ app.include_router(extraction.router)
 @app.get("/")
 def root():
     return {
-        "service": "AIMS API",
+        "service": "APOLLO API",
         "version": "1.0.0",
         "status": "running"
     }

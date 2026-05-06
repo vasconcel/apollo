@@ -1,18 +1,18 @@
-# AIMS - AI-Powered Multivocal Literature Review Systematic Pipeline
+# APOLLO - AI-Powered Multivocal Literature Review Systematic Pipeline
 
 <div align="center">
 
-**AIMS** is a complete, end-to-end platform for conducting Systematic Literature Reviews (SLR) and Multivocal Literature Reviews (MLR) in Software Engineering and related fields, following the Garousi et al. (2019) methodology.
+**APOLLO** is a complete, end-to-end platform for conducting Systematic Literature Reviews (SLR) and Multivocal Literature Reviews (MLR) in Software Engineering and related fields, following the Garousi et al. (2019) methodology.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-Feature--Complete-brightgreen)
+![Status](https://img.shields.io/badge/Status-Active-Research-brightgreen)
 
 </div>
 
 ## 🚀 Overview
 
-AIMS is a **full-stack research platform** that operationalizes the complete multivocal literature review protocol:
+APOLLO is a **full-stack research platform** that operationalizes the complete multivocal literature review protocol:
 
 - **Data Ingestion**: Import White Literature (WL) and Grey Literature (GL) from multiple formats
 - **Formal Screening**: Criteria-driven decision making with explicit exclusions
@@ -21,10 +21,20 @@ AIMS is a **full-stack research platform** that operationalizes the complete mul
 - **AI-Powered Insights**: Comparative WL/GL synthesis using LLMs
 - **Publication-Ready Export**: Audit trails, traceability matrices, and research packages
 
+## 📊 Current Status
+
+- **Project**: SE R&S Multivocal Literature Review (Software Engineering Recruitment & Selection)
+- **Research Questions**: 5 defined (RQ1-RQ5 covering distribution, conceptualization, challenges, practices, WL/GL divergence)
+- **Inclusion Criteria**: IC1-IC5 defined
+- **Exclusion Criteria**: EC1-EC6 defined (language, availability, publication length, date, relevance, duplicates)
+- **Data Sources**: 5 imported (WoS, Scopus, Springer Nature, IEEE Xplore, ACM)
+
 ## 📊 Architecture vs Protocol Mapping
 
 | UI Page | Protocol Stage | Description |
 |--------|-------------|------------|
+| **Planning** | Step 1-2 | Research Questions, Inclusion/Exclusion Criteria |
+| **Ingestion** | Search | WL/GL Import from multiple sources |
 | **Overview** | Step 1-2: Planning | PRISMA Flow Diagram, Research Questions, Project Metrics |
 | **Screening** | Step 3.1.1: Title/Abstract Screening | Formal Eligibility Criteria Funnel (IC/EC selection) |
 | **Consensus** | Step 3.1.3: Conflict Resolution | Kappa calculation, Conflict Resolver, Auto-consensus |
@@ -32,6 +42,35 @@ AIMS is a **full-stack research platform** that operationalizes the complete mul
 | **Extraction** | Step 3.2.1: Data Extraction | Fragment extraction with RQ categorization |
 | **Synthesis** | Step 3.3: Thematic Synthesis | Open coding, Theme organization, Traceability |
 | **Export & Audit** | Step 4: Reporting | Audit Dashboard, Data Export, System Health |
+
+## 📊 Current Research Status
+
+### Active Project
+- **Topic**: SE R&S Multivocal Literature Review (Software Engineering Recruitment & Selection)
+- **Methodology**: Garousi et al. (2019)
+- **Database**: SQLite with full schema (aims.db)
+
+### Research Questions (RQ1-RQ5)
+1. Distribution, nature, and temporal evolution of academic and industry sources
+2. Conceptualization of SE R&S and pipeline stages
+3. Challenges and friction points across SE R&S pipeline
+4. Practices and design principles for effective SE R&S
+5. Alignment/divergence between WL and GL perspectives
+
+### Criteria
+- **IC1-IC5**: Inclusion criteria defined
+- **EC1-EC6**: Exclusion criteria (English, availability, publication length ≥2015, relevance, duplicates)
+
+### Imported Data Sources
+- Web of Science (WoS)
+- Scopus
+- Springer Nature
+- IEEE Xplore
+- ACM Digital Library
+
+### Testing
+- **Unit Tests**: ~127 tests covering core services
+- **Integration Tests**: Database, config management
 
 ## 🔑 Key Features
 
@@ -78,9 +117,8 @@ Generates:
 
 ## 🖥️ Usage
 
-### Starting AIMS
+### Starting APOLLO
 ```bash
-cd aims
 streamlit run app.py
 ```
 
@@ -95,25 +133,41 @@ pip install -r requirements.txt
 export GROQ_API_KEY=your_key_here
 ```
 
+### Environment Setup
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Configure (optional) Groq API key for AI features:
+```bash
+export GROQ_API_KEY=your_key_here
+```
+
 ### Workflow
-1. **Import Data** → Use Data Exchange page to import CSV/Excel files
-2. **Screen Articles** → Each reviewer performs formal screening
-3. **Resolve Conflicts** → Use Consensus page to mediate disagreements
-4. **Quality Assessment** → Score included articles
-5. **Extract Evidence** → Create fragments for analysis
-6. **Code & Thematize** → Use Synthesis pages
-7. **Generate AI Insights** → Run comparative synthesis
-8. **Audit & Export** → Validate and export
+1. **Plan** → Define RQs and criteria in Planning page
+2. **Import Data** → Use Ingestion page to import CSV/Excel files (WoS, Scopus, Springer, IEEE, ACM)
+3. **Screen Articles** → Each reviewer performs formal screening
+4. **Resolve Conflicts** → Use Consensus page to mediate disagreements
+5. **Quality Assessment** → Score included articles
+6. **Extract Evidence** → Create fragments for analysis
+7. **Code & Thematize** → Use Synthesis pages
+8. **Generate AI Insights** → Run comparative synthesis
+9. **Audit & Export** → Validate and export
 
 ## 📁 Project Structure
 
 ```
-aims/
-├── app.py                      # Main Streamlit application
-├── database.py                 # SQLite database with full schema
-├── requirements.txt           # Python dependencies
-├── project_config.json         # Research configuration
-├── research_export/         # Generated export files
+rs-se-mlr-pipeline/
+├── app/main.py                 # Main Streamlit application (v2)
+├── src/                      # Core modules
+│   ├── core/                # Business logic (database, services, ingestion, etc.)
+│   └── ui/modules/          # UI views (screening, consensus, synthesis, etc.)
+├── backend/                 # FastAPI backend (optional)
+├── data/raw/wl/             # White literature imports
+├── data/raw/gl/             # Grey literature imports
+├── tests/                   # Unit and integration tests
+├── aims.db                 # SQLite database
 └── README.md
 ```
 
@@ -130,7 +184,7 @@ The system calculates and reports:
 
 ## 🤖 AI Integration
 
-AIMS integrates with Groq LLMs for:
+APOLLO integrates with Groq LLMs for:
 - **Screening Recommendations**: AI suggests include/exclude with confidence
 - **Comparative Synthesis**: WL vs GL analysis
 
@@ -161,6 +215,6 @@ Built following the Garousi et al. (2019) methodology for multivocal literature 
 
 <div align="center">
 
-**AIMS** - From Raw Data to publishable insights with full traceability 🔬
+**APOLLO** - From Raw Data to publishable insights with full traceability 🔬
 
 </div>

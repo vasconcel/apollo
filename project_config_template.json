@@ -1,6 +1,6 @@
 {
   "project_name": "My MLR Project",
-  "description": "Multivocal Literature Review project using AIMS pipeline",
+  "description": "Multivocal Literature Review project using APOLLO pipeline",
 
   "research_questions": [
     "RQ1: What are the relevant studies on [TOPIC]?",

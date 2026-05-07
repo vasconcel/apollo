@@ -1,6 +1,10 @@
 """
 APOLLO Decision Engine - ATLAS Excel Processor
 Processes WL and GL data from ATLAS, applies EC/IC/QC decisions, exports to Excel
+
+SUPPORTS TWO MODES:
+1. Deterministic (Legacy): Automatic decisions - for regression compatibility
+2. Human-in-the-Loop: Orchestrates workflow, researcher makes final decisions
 """
 import pandas as pd
 import os
@@ -125,7 +129,7 @@ class ATLASLoader:
         try:
             wl_df = pd.read_excel(file_path, sheet_name="WL")
             gl_df = pd.read_excel(file_path, sheet_name="GL")
-        except:
+        except Exception:
             try:
                 wl_df = pd.read_excel(file_path, sheet_name="White Literature")
                 gl_df = pd.read_excel(file_path, sheet_name="Grey Literature")
@@ -983,3 +987,84 @@ def export_apollo_selection_criteria(
     print(f"{'='*50}")
     
     return output_path
+
+
+def create_screening_session(
+    input_path: str,
+    protocol: Dict = None,
+    enable_llm_suggestions: bool = True,
+    researcher_id: str = "researcher_1"
+) -> Tuple["ScreeningSession", "ReviewerState", List["ArticleRecord"], List["ArticleRecord"]]:
+    """
+    Create screening session for human-in-the-loop review.
+    
+    This initiates a review session where:
+    1. Articles are loaded from ATLAS file
+    2. Researcher reviews each article with LLM suggestions
+    3. Researcher makes final explicit decisions
+    4. All decisions are auditable
+    
+    Returns:
+        (session, reviewer_state, wl_records, gl_records)
+    """
+    from src.core.screening_session import ScreeningSession, create_session
+    from src.core.reviewer_state import ReviewerState
+    
+    wl_df, gl_df = ATLASLoader.load_atlas_file(input_path)
+    wl_df = ATLASLoader.normalize_wl_columns(wl_df)
+    gl_df = ATLASLoader.normalize_gl_columns(gl_df)
+    
+    engine = APOLLODecisionEngine(enable_llm_reasoning=False, protocol=protocol)
+    
+    wl_results = engine.process_wl_articles(wl_df)
+    gl_results = engine.process_gl_articles(gl_df)
+    
+    all_records = wl_results + gl_results
+    
+    session = create_session(
+        article_records=all_records,
+        protocol_version=protocol.get("protocol_version", "1.0") if protocol else "1.0"
+    )
+    
+    reviewer_state = ReviewerState(
+        researcher_id=researcher_id,
+        session_id=session.session_id,
+        stage="ec"
+    )
+    
+    return session, reviewer_state, wl_results, gl_results
+
+
+def process_deterministic(
+    input_path: str,
+    output_path: str,
+    enable_llm: bool = True
+) -> Tuple[List["ArticleRecord"], List["ArticleRecord"]]:
+    """
+    Process ATLAS file in deterministic (automatic) mode.
+    
+    This is the legacy mode for regression compatibility.
+    All decisions are made automatically by the engine.
+    """
+    import time
+    start_time = time.time()
+    
+    wl_df, gl_df = ATLASLoader.load_atlas_file(input_path)
+    wl_df = ATLASLoader.normalize_wl_columns(wl_df)
+    gl_df = ATLASLoader.normalize_gl_columns(gl_df)
+    
+    engine = APOLLODecisionEngine(enable_llm_reasoning=enable_llm)
+    
+    wl_results = engine.process_wl_articles(wl_df)
+    gl_results = engine.process_gl_articles(gl_df)
+    
+    engine.export_to_excel(output_path, wl_results, gl_results)
+    
+    execution_time_ms = int((time.time() - start_time) * 1000)
+    try:
+        from src.core.audit_logger import log_apollo_run
+        log_path = log_apollo_run(input_path, None, wl_results, gl_results, execution_time_ms)
+    except ImportError:
+        pass
+    
+    return wl_results, gl_results

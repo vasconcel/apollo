@@ -1,4 +1,59 @@
-*.db
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-logs/
+Thumbs.db
+
+# APOLLO Generated Artifacts
+*.db
+logs/apollo_run_*.json
+logs/apollo_*.log
+
+# Test outputs (regenerated each run)
+tests/apollo_actual_output.xlsx
+tests/apollo_run1_output.xlsx
+tests/apollo_run2_output.xlsx
+
+# Generated exports (regenerated on each run)
+APOLLO_*.xlsx
+
+# Streamlit
+.streamlit/
+.streamlit/secrets.toml
+
+# Legacy databases (not used by APOLLO)
+data/aims_project.db
+
+# Temporary files
+*.tmp
+*.bak
+*.backup

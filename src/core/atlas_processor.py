@@ -3,11 +3,9 @@ APOLLO Decision Engine - ATLAS Excel Processor
 Processes WL and GL data from ATLAS, applies EC/IC/QC decisions, exports to Excel
 """
 import pandas as pd
-import json
 import os
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, asdict
-from datetime import datetime
 
 
 @dataclass
@@ -72,6 +70,45 @@ class ArticleRecord:
 class ATLASLoader:
     """Load and parse ATLAS Excel exports."""
     
+    WL_REQUIRED_COLUMNS = {"Library", "Global_ID", "Local_ID", "Title", "Abstract", "Keywords"}
+    GL_REQUIRED_COLUMNS = {"Posicao", "Title", "URL", "Source_File"}
+    
+    @staticmethod
+    def validate_wl_schema(df: pd.DataFrame) -> None:
+        """
+        Validate WL DataFrame has required columns.
+        Raises exception if missing columns detected.
+        
+        Args:
+            df: White Literature DataFrame
+        Raises:
+            ValueError: If required columns are missing
+        """
+        missing = ATLASLoader.WL_REQUIRED_COLUMNS - set(df.columns)
+        if missing:
+            raise ValueError(
+                f"Missing required WL columns: {sorted(missing)}. "
+                f"Required: {sorted(ATLASLoader.WL_REQUIRED_COLUMNS)}"
+            )
+    
+    @staticmethod
+    def validate_gl_schema(df: pd.DataFrame) -> None:
+        """
+        Validate GL DataFrame has required columns.
+        Raises exception if missing columns detected.
+        
+        Args:
+            df: Grey Literature DataFrame
+        Raises:
+            ValueError: If required columns are missing
+        """
+        missing = ATLASLoader.GL_REQUIRED_COLUMNS - set(df.columns)
+        if missing:
+            raise ValueError(
+                f"Missing required GL columns: {sorted(missing)}. "
+                f"Required: {sorted(ATLASLoader.GL_REQUIRED_COLUMNS)}"
+            )
+    
     @staticmethod
     def load_atlas_file(file_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -80,6 +117,9 @@ class ATLASLoader:
         
         Returns:
             (wl_df, gl_df)
+        
+        Raises:
+            ValueError: If required sheets or columns are missing
         """
         # Try standard names first, then ATLAS names
         try:
@@ -91,6 +131,10 @@ class ATLASLoader:
                 gl_df = pd.read_excel(file_path, sheet_name="Grey Literature")
             except Exception as e:
                 raise ValueError(f"Cannot find WL/GL sheets in {file_path}: {e}")
+        
+        # Validate schema - fail FAST with clear error messages
+        ATLASLoader.validate_wl_schema(wl_df)
+        ATLASLoader.validate_gl_schema(gl_df)
         
         return wl_df, gl_df
     
@@ -428,10 +472,31 @@ class APOLLODecisionEngine:
     
     Design: Pure functional behavior - no persistent state for evaluation.
     Duplicate detection is computed at batch level before iteration.
+    
+    Protocol Support:
+    - Optional protocol parameter for configurable EC/IC/QC criteria
+    - If protocol=None (default), uses hardcoded default behavior
+    - If protocol provided, uses ProtocolEngine for evaluation
+    - Maintains full backward compatibility
     """
     
-    def __init__(self, enable_llm_reasoning: bool = True):
+    def __init__(self, enable_llm_reasoning: bool = True, protocol: Dict = None):
+        """
+        Initialize APOLLO decision engine.
+        
+        Args:
+            enable_llm_reasoning: Whether to generate internal LLM reasoning
+            protocol: Optional protocol definition for configurable criteria.
+                     If None, uses default APOLLO behavior (backward compatible).
+        """
         self.enable_llm_reasoning = enable_llm_reasoning
+        self.protocol = protocol
+        
+        # Protocol engine - lazy loaded only when protocol provided
+        self._protocol_engine = None
+        if protocol:
+            from src.core.protocol_engine import ProtocolEngine
+            self._protocol_engine = ProtocolEngine(protocol)
     
     def _precompute_duplicate_global_ids(self, wl_df: pd.DataFrame) -> set:
         """
@@ -483,13 +548,32 @@ class APOLLODecisionEngine:
                            record.global_id in seen_ids_this_run)
             
             # Step 1: EC
-            ec_result = ExclusionCriteria.evaluate(
-                title=record.title,
-                abstract=record.abstract,
-                year=year,
-                is_wl=True,
-                is_duplicate=is_duplicate  # Pass pre-computed duplicate flag
-            )
+            if self._protocol_engine:
+                # Protocol-driven evaluation
+                data = {
+                    "title": record.title,
+                    "abstract": record.abstract,
+                    "year": year,
+                    "global_id": record.global_id,
+                    "text_combined": f"{record.title} {record.abstract}".lower()
+                }
+                decision, criterion, reason = self._protocol_engine.evaluate_ec(
+                    data, "WL", is_duplicate
+                )
+                ec_result = EligibilityDecision(
+                    decision=decision,
+                    criterion=criterion,
+                    reason=reason
+                )
+            else:
+                # Default behavior (backward compatible)
+                ec_result = ExclusionCriteria.evaluate(
+                    title=record.title,
+                    abstract=record.abstract,
+                    year=year,
+                    is_wl=True,
+                    is_duplicate=is_duplicate
+                )
             record.ec_decision = ec_result.to_display()
             
             # Mark this Global_ID as seen for this run
@@ -506,10 +590,23 @@ class APOLLODecisionEngine:
             
             # Step 2: IC (only if EC passed)
             if ec_result.decision == "include":
-                ic_result = InclusionCriteria.evaluate(
-                    title=record.title,
-                    abstract=record.abstract
-                )
+                if self._protocol_engine:
+                    data = {
+                        "title": record.title,
+                        "abstract": record.abstract,
+                        "text_combined": f"{record.title} {record.abstract}".lower()
+                    }
+                    decision, criterion, reason = self._protocol_engine.evaluate_ic(data, "WL")
+                    ic_result = EligibilityDecision(
+                        decision=decision,
+                        criterion=criterion,
+                        reason=reason
+                    )
+                else:
+                    ic_result = InclusionCriteria.evaluate(
+                        title=record.title,
+                        abstract=record.abstract
+                    )
                 record.ic_decision = ic_result.to_display()
                 
                 if self.enable_llm_reasoning:
@@ -519,11 +616,25 @@ class APOLLODecisionEngine:
                 
                 # Step 3: QC (only if IC passed)
                 if ic_result.decision == "include":
-                    qc_result = QualityCriteria.evaluate(
-                        title=record.title,
-                        abstract=record.abstract,
-                        literature_type="WL"
-                    )
+                    if self._protocol_engine:
+                        data = {
+                            "title": record.title,
+                            "abstract": record.abstract,
+                            "text_combined": f"{record.title} {record.abstract}".lower()
+                        }
+                        decision, scores, total = self._protocol_engine.evaluate_qc(data, "WL")
+                        qc_result = QualityDecision(
+                            scores=scores,
+                            total_score=total,
+                            decision=decision,
+                            literature_type="WL"
+                        )
+                    else:
+                        qc_result = QualityCriteria.evaluate(
+                            title=record.title,
+                            abstract=record.abstract,
+                            literature_type="WL"
+                        )
                     record.qc_score = qc_result.to_display()
                     
                     if self.enable_llm_reasoning:
@@ -575,13 +686,30 @@ class APOLLODecisionEngine:
             title = record.title
             
             # Step 1: EC (simplified for GL - no peer review check)
-            ec_result = ExclusionCriteria.evaluate(
-                title=title,
-                abstract=abstract,
-                year=None,
-                is_wl=False,
-                is_duplicate=False  # GL duplicates handled differently if needed
-            )
+            if self._protocol_engine:
+                data = {
+                    "title": title,
+                    "abstract": abstract,
+                    "year": None,
+                    "global_id": "",
+                    "text_combined": title.lower()
+                }
+                decision, criterion, reason = self._protocol_engine.evaluate_ec(
+                    data, "GL", False
+                )
+                ec_result = EligibilityDecision(
+                    decision=decision,
+                    criterion=criterion,
+                    reason=reason
+                )
+            else:
+                ec_result = ExclusionCriteria.evaluate(
+                    title=title,
+                    abstract=abstract,
+                    year=None,
+                    is_wl=False,
+                    is_duplicate=False
+                )
             record.ec_decision = ec_result.to_display()
             
             # Internal LLM reasoning
@@ -636,7 +764,11 @@ class APOLLODecisionEngine:
         WL Sheet: Library, Global_ID, Local_ID, Title, Abstract, Keywords, 
                   CIs1, CEs1, Revisor 1, CIs2, CEs2, Revisor 2, Decision
         GL Sheet: Posicao, Title, URL, Source_File, Revisor 1 EC, Revisor 1 IC, Decision
-        WL Snowball: Same as WL
+        WL Seeds (HERMES): Same as WL - PREPARATION LAYER ONLY
+        
+        NOTE: APOLLO does NOT execute snowballing. This sheet exports selected WL
+        papers as candidate seeds for future HERMES system to process. APOLLO scope
+        ends at EC/IC/QC evaluation and selection/export.
         """
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
             
@@ -683,7 +815,9 @@ class APOLLODecisionEngine:
             gl_df = pd.DataFrame(gl_data, columns=gl_columns)
             gl_df.to_excel(writer, sheet_name="GL", index=False)
             
-            # WL Snowball Sheet - Same as WL
+            # WL Seeds (HERMES Preparation) - Empty placeholder for future HERMES system
+            # APOLLO does NOT execute snowballing. Only exports selected WL papers as seeds.
+            # This sheet should remain empty in current APOLLO version.
             if wl_snowball:
                 sb_data = []
                 for r in wl_snowball:
@@ -704,9 +838,9 @@ class APOLLODecisionEngine:
                     })
                 sb_df = pd.DataFrame(sb_data, columns=wl_columns)
             else:
-                # Empty structure ready
+                # Empty structure ready for HERMES
                 sb_df = pd.DataFrame(columns=wl_columns)
-            sb_df.to_excel(writer, sheet_name="WL Snowballing", index=False)
+            sb_df.to_excel(writer, sheet_name="WL Seeds for HERMES", index=False)
 
 
 def process_atlas_file(input_path: str, output_path: str, enable_llm: bool = True):
@@ -718,9 +852,12 @@ def process_atlas_file(input_path: str, output_path: str, enable_llm: bool = Tru
         output_path: Path for output Excel file
         enable_llm: Whether to enable LLM reasoning (default True)
     """
+    import time
+    start_time = time.time()
+    
     print(f"Loading ATLAS file: {input_path}")
     
-    # Load ATLAS data
+    # Load ATLAS data (includes schema validation)
     wl_df, gl_df = ATLASLoader.load_atlas_file(input_path)
     wl_df = ATLASLoader.normalize_wl_columns(wl_df)
     gl_df = ATLASLoader.normalize_gl_columns(gl_df)
@@ -739,6 +876,15 @@ def process_atlas_file(input_path: str, output_path: str, enable_llm: bool = Tru
     # Export
     print(f"Exporting to: {output_path}")
     engine.export_to_excel(output_path, wl_results, gl_results)
+    
+    # Audit logging
+    execution_time_ms = int((time.time() - start_time) * 1000)
+    try:
+        from src.core.audit_logger import log_apollo_run
+        log_path = log_apollo_run(input_path, None, wl_results, gl_results, execution_time_ms)
+        print(f"Audit log: {log_path}")
+    except ImportError:
+        pass  # Audit logging is optional
     
     # Summary
     wl_included = sum(1 for r in wl_results if r.final_decision == "INCLUDE")
@@ -765,7 +911,10 @@ def export_apollo_selection_criteria(
     Generates exactly one Excel file with 3 sheets:
     - WL: Library, Global_ID, Local_ID, Title, Abstract, Keywords, CIs1, CEs1, Revisor 1, CIs2, CEs2, Revisor 2, Decision
     - GL: Posicao, Title, URL, Source_File, Revisor 1 EC, Revisor 1 IC, Decision
-    - WL Snowballing: Same as WL
+    - WL Seeds for HERMES: Empty placeholder for future HERMES system (APOLLO does NOT execute snowballing)
+    
+    NOTE: APOLLO does NOT execute snowballing. It only prepares export structure.
+    Snowballing will be handled by the future HERMES system.
     
     Args:
         input_path: Path to ATLAS Excel file (with WL and GL sheets)
@@ -800,6 +949,8 @@ def export_apollo_selection_criteria(
     print(f"APOLLO: Loaded {len(wl_df)} WL, {len(gl_df)} GL articles")
     
     # Process through EC -> IC -> QC pipeline
+    import time
+    start_time = time.time()
     engine = APOLLODecisionEngine(enable_llm_reasoning=enable_llm)
     
     print("APOLLO: Running EC/IC/QC pipeline...")
@@ -809,6 +960,15 @@ def export_apollo_selection_criteria(
     # Export to single clean Excel file
     print(f"APOLLO: Exporting to {output_path}")
     engine.export_to_excel(output_path, wl_results, gl_results)
+    
+    # Audit logging
+    execution_time_ms = int((time.time() - start_time) * 1000)
+    try:
+        from src.core.audit_logger import log_apollo_run
+        log_path = log_apollo_run(input_path, None, wl_results, gl_results, execution_time_ms)
+        print(f"APOLLO: Audit log saved to {log_path}")
+    except ImportError:
+        pass  # Audit logging is optional
     
     # Summary stats
     wl_inc = sum(1 for r in wl_results if r.final_decision == "INCLUDE")

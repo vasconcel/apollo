@@ -14,14 +14,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.atlas_processor import export_apollo_selection_criteria
 
+__version__ = "1.0.0"
+__protocol_version__ = "1.0"
+
 
 def main():
     parser = argparse.ArgumentParser(description="APOLLO - EC/IC/QC Decision Engine")
     parser.add_argument("input", nargs="?", help="Input ATLAS Excel file (default: ATLAS_Master_Initial_Search.xlsx)")
     parser.add_argument("--no-llm", action="store_true", help="Disable LLM reasoning")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--version", action="store_true", help="Show version information")
     
     args = parser.parse_args()
+    
+    if args.version:
+        print(f"APOLLO {__version__}")
+        print(f"Protocol {__protocol_version__}")
+        sys.exit(0)
     
     # Default input file
     input_file = args.input if args.input else "ATLAS_Master_Initial_Search.xlsx"

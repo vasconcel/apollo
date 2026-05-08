@@ -15,29 +15,47 @@ from pathlib import Path
 
 def render_protocol_info():
     """Display protocol information in the sidebar."""
-    from src.core.protocol_engine import get_default_protocol
-    
-    protocol = get_default_protocol()
-    
-    with st.sidebar:
-        st.divider()
-        st.caption("PROTOCOL")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.caption(f"**Version**: {protocol.get('protocol_version', '1.0')}")
-        with col2:
-            st.caption(f"**Threshold**: {protocol.get('quality_criteria', {}).get('threshold', 2.0)}")
-        
-        ec_count = len(protocol.get('exclusion_criteria', {}))
-        ic_count = len(protocol.get('inclusion_criteria', {}))
-        qc_wl = len(protocol.get('quality_criteria', {}).get('WL', {}))
-        qc_gl = len(protocol.get('quality_criteria', {}).get('GL', {}))
-        
-        st.caption(f"**EC Rules**: {ec_count}")
-        st.caption(f"**IC Rules**: {ic_count}")
-        st.caption(f"**QC (WL)**: {qc_wl}")
-        st.caption(f"**QC (GL)**: {qc_gl}")
+    from src.core.dynamic_protocol import DynamicProtocol, ProtocolState
+
+    st.divider()
+
+    if "research_protocol" not in st.session_state or st.session_state.research_protocol is None:
+        st.caption("**PROTOCOL**: Not configured")
+        return
+
+    protocol = st.session_state.research_protocol
+    summary = protocol.get_summary()
+
+    st.caption("**RESEARCH PROTOCOL**")
+
+    state_icons = {
+        ProtocolState.DRAFT.value: "⚠️",
+        ProtocolState.LOCKED.value: "🔒",
+        ProtocolState.ACTIVE_SESSION.value: "▶️"
+    }
+
+    state_labels = {
+        ProtocolState.DRAFT.value: "DRAFT",
+        ProtocolState.LOCKED.value: "LOCKED",
+        ProtocolState.ACTIVE_SESSION.value: "ACTIVE"
+    }
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption(f"**Version**: v{summary['version']}")
+    with col2:
+        st.caption(f"{state_icons.get(protocol.state, '')} {state_labels.get(protocol.state, 'UNKNOWN')}")
+
+    col3, col4, col5 = st.columns(3)
+    with col3:
+        st.caption(f"EC: {summary['ec_enabled']}/{summary['ec_count']}")
+    with col4:
+        st.caption(f"IC: {summary['ic_enabled']}/{summary['ic_count']}")
+    with col5:
+        st.caption(f"QC: {summary['qc_enabled']}/{summary['qc_count']}")
+
+    if summary['hash']:
+        st.caption(f"Hash: `{summary['hash']}`")
 
 
 def render_execution_dashboard(wl_results, gl_results):
@@ -179,55 +197,63 @@ def render_atlas_processor():
     """ATLAS Excel Processor Interface - Main entry point."""
     from src.core.atlas_processor import process_atlas_file
     from src.core.audit_logger import AuditLogger
-    
-    st.header("🔬 APOLLO - Systematic Literature Review Screening")
-    st.caption("Deterministic EC/IC/QC evaluation for Software Engineering research")
-    
-    # Display protocol info
+    from src.core.dynamic_protocol import ProtocolState
+
+    st.header("Upload & Process")
+    st.caption("Upload ATLAS Excel file to begin screening")
+
     render_protocol_info()
-    
+
+    protocol_ready, message = check_protocol_status()
+    if not protocol_ready:
+        st.warning(f"⚠️ {message}")
+        st.info("Please configure and lock your Research Protocol before uploading papers.")
+        return
+
     st.divider()
-    
+
     st.subheader("📁 Input Data")
     st.info("""
     **Required ATLAS Excel Format**:
     - **WL sheet**: Library, Global_ID, Local_ID, Title, Abstract, Keywords
     - **GL sheet**: Posicao, Title, URL, Source_File
-    
+
     Output includes deterministic EC/IC/QC decisions with full audit trail.
     """)
-    
+
     uploaded_file = st.file_uploader("Upload ATLAS Excel File", type=["xlsx"], help="Upload your ATLAS export with WL and GL sheets")
-    
+
     if uploaded_file:
         temp_input = f"temp_atlas_{uploaded_file.name}"
-        
-        # Save uploaded file temporarily
+
         with open(temp_input, "wb") as f:
             f.write(uploaded_file.getvalue())
-        
+
         st.success(f"✅ Loaded: {uploaded_file.name}")
-        
-        # Processing options
+
         st.subheader("⚙️ Processing Options")
-        
+
         col_llm, col_protocol = st.columns([2, 1])
-        
+
         with col_llm:
             enable_llm = st.checkbox(
                 "🤖 Internal LLM Reasoning",
                 value=False,
                 help="Generate internal reasoning for debugging (NOT exported - decisions remain deterministic)"
             )
-        
+
         with col_protocol:
-            st.caption("Protocol: Default APOLLO v1.0")
-        
+            if "research_protocol" in st.session_state and st.session_state.research_protocol:
+                p = st.session_state.research_protocol
+                st.caption(f"Protocol: v{p.protocol_version}")
+            else:
+                st.caption("Protocol: Default")
+
         process_btn = st.button("🚀 Run Screening Pipeline", type="primary", use_container_width=True)
-        
+
         if process_btn:
             output_file = temp_input.replace(".xlsx", "_decisions.xlsx")
-            
+
             with st.spinner("Processing articles through EC → IC → QC pipeline..."):
                 try:
                     wl_results, gl_results = process_atlas_file(
@@ -235,31 +261,26 @@ def render_atlas_processor():
                         output_path=output_file,
                         enable_llm=enable_llm
                     )
-                    
+
                     st.success("✅ Processing complete!")
-                    
-                    # Execution dashboard
+
                     render_execution_dashboard(wl_results, gl_results)
-                    
-                    # Exclusion reasons
+
                     with st.expander("🚫 View Exclusion Reasons", expanded=True):
                         render_exclusion_reasons(wl_results)
-                    
-                    # QC distribution
+
                     with st.expander("📈 View QC Distribution", expanded=True):
                         render_qc_distribution(wl_results)
-                    
-                    # Decision transparency
+
                     with st.expander("🔍 View All Decisions", expanded=False):
                         render_decision_transparency(wl_results, gl_results)
-                    
+
                     st.divider()
-                    
-                    # Downloads
+
                     st.subheader("📥 Download Results")
-                    
+
                     col_dl1, col_dl2 = st.columns(2)
-                    
+
                     with col_dl1:
                         with open(output_file, "rb") as f:
                             st.download_button(
@@ -269,22 +290,19 @@ def render_atlas_processor():
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 use_container_width=True
                             )
-                    
+
                     with col_dl2:
                         render_audit_download(output_file)
-                    
-                    # Determinism verification
+
                     st.caption("✅ Deterministic processing verified - same input produces same output")
-                    
-                    # Clean up temp file
+
                     os.remove(temp_input)
-                    
+
                 except Exception as e:
                     st.error(f"❌ Processing error: {e}")
                     if os.path.exists(temp_input):
                         os.remove(temp_input)
-    
-    # Footer with deterministic guarantee
+
     st.divider()
     st.caption("""
     📋 **APOLLO Guarantees**:
@@ -293,6 +311,27 @@ def render_atlas_processor():
     • Protocol-based: Configurable EC/IC/QC criteria via protocol system
     • Transparent: All decisions visible and traceable
     """)
+
+
+def check_protocol_status():
+    """Check if research protocol is ready for screening."""
+    from src.core.dynamic_protocol import ProtocolState
+
+    if "research_protocol" not in st.session_state or st.session_state.research_protocol is None:
+        return (False, "No protocol configured. Please configure your Research Protocol first.")
+
+    protocol = st.session_state.research_protocol
+
+    if protocol.state == ProtocolState.DRAFT.value:
+        return (False, "Protocol must be locked before screening begins. Go to 'Protocol Configuration' to lock your protocol.")
+
+    if protocol.state == ProtocolState.LOCKED.value:
+        return (True, "Protocol ready for screening.")
+
+    if protocol.state == ProtocolState.ACTIVE_SESSION.value:
+        return (True, "Protocol has active session.")
+
+    return (False, "Unknown protocol state.")
 
 
 def render_atlas_processor_legacy():

@@ -411,6 +411,14 @@ class ScreeningSession:
             ArticleReview(**a) for a in data.get("articles", [])
         ]
         
+        if "dynamic_protocol" in data and isinstance(data["dynamic_protocol"], dict):
+            try:
+                from src.core.dynamic_protocol import DynamicProtocol
+                DynamicProtocol.from_dict(data["dynamic_protocol"])
+                session.dynamic_protocol = data["dynamic_protocol"]
+            except (TypeError, ValueError):
+                session.dynamic_protocol = None
+        
         return session
 
 

@@ -160,12 +160,21 @@ def render_protocol_info():
 
 def render_protocol_config_panel(session, current_stage: str):
     """Render protocol configuration panel in sidebar."""
-    from src.core.dynamic_protocol import DynamicProtocol
+    import logging
+    from src.core.dynamic_protocol import DynamicProtocol, Criterion
+    
+    logger = logging.getLogger(__name__)
     
     if not session.dynamic_protocol:
         session.dynamic_protocol = DynamicProtocol().to_dict()
     
-    protocol = DynamicProtocol.from_dict(session.dynamic_protocol)
+    try:
+        protocol = DynamicProtocol.from_dict(session.dynamic_protocol)
+    except (TypeError, ValueError) as e:
+        logger.warning(f"Failed to load dynamic protocol: {e}. Rebuilding default.")
+        st.warning("Protocol state was corrupted. Resetting to default.")
+        session.dynamic_protocol = DynamicProtocol().to_dict()
+        protocol = DynamicProtocol.from_dict(session.dynamic_protocol)
     stage_protocol = protocol.get_stage_protocol(current_stage)
     
     if not stage_protocol:
@@ -194,7 +203,6 @@ def render_protocol_config_panel(session, current_stage: str):
                     "id": criterion_id,
                     "description": new_desc,
                     "enabled": enabled,
-                    "keywords": criterion.keywords,
                     "weight": criterion.weight
                 }
             idx += 1
@@ -216,11 +224,18 @@ def render_protocol_config_panel(session, current_stage: str):
                 st.success(f"Added {new_criterion_id}")
                 st.rerun()
         
-        criterion_class = type(stage_protocol.criteria)
         for criterion_id, criterion_data in new_criteria.items():
-            stage_protocol.criteria[criterion_id] = type("Criterion", (), criterion_data)()
+            try:
+                stage_protocol.criteria[criterion_id] = Criterion.from_dict(criterion_data)
+            except (TypeError, ValueError) as e:
+                logger.error(f"Failed to deserialize criterion {criterion_id}: {e}")
+                st.error(f"Failed to save criterion {criterion_id}. Please refresh.")
         
-        session.dynamic_protocol = protocol.to_dict()
+        try:
+            session.dynamic_protocol = protocol.to_dict()
+        except Exception as e:
+            logger.error(f"Failed to serialize protocol: {e}")
+            st.error("Failed to save protocol changes. Please refresh.")
 
 
 def render_article_card(article):

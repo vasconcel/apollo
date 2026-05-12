@@ -53,9 +53,13 @@ class APOLLODecisionEngine:
             row_metadata = row.to_dict()
             row_metadata["year_source"] = year_source
             row_metadata["metadata_completeness"] = compute_metadata_completeness(row_metadata)
+            row_metadata["literature_provenance"] = "WL"
+            row_metadata["source_sheet"] = "White Literature"
+            row_metadata["authors"] = str(row.get("Authors", ""))
             
             record = ArticleRecord(
                 literature_type="WL",
+                source_sheet="White Literature",
                 library=str(row.get("Library", "")),
                 global_id=str(row.get("Global_ID", "")),
                 local_id=str(row.get("Local_ID", "")),
@@ -107,10 +111,12 @@ class APOLLODecisionEngine:
             row_metadata["year_source"] = "missing"
             row_metadata["metadata_completeness"] = compute_metadata_completeness(row_metadata)
             row_metadata["literature_provenance"] = "GL"
+            row_metadata["source_sheet"] = "Grey Literature"
             
             record = ArticleRecord(
                 literature_type="GL",
-                posicao=str(row.get("Posicao", "")),
+                source_sheet="Grey Literature",
+                posicao=str(row.get("Posicao", "") or row.get("#", "")),
                 title=str(row.get("Title", "")),
                 url=str(row.get("URL", "")),
                 source_file=str(row.get("Source_File", "")),

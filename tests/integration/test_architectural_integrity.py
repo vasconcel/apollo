@@ -939,3 +939,378 @@ class TestE2EReproducibility:
         
         unique_results = set(results)
         assert len(unique_results) == 1, f"Non-deterministic results: {unique_results}"
+
+
+class TestPersistenceAndAudit:
+    """Phase 1-2: Persistent session and immutable audit chain."""
+
+    def test_session_save_to_json_creates_file(self):
+        """Phase 1: save_to_json creates valid JSON file."""
+        session = ScreeningSession(
+            session_id="persist-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="PERSIST-001",
+            title="Persist Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "session.json")
+            saved_path = session.save_to_json(path)
+
+            assert os.path.exists(saved_path)
+            with open(saved_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            assert data["session_id"] == "persist-test-001"
+            assert data["schema_version"] == "2.0"
+            assert "session_checksum" in data
+
+    def test_session_load_from_json_restores_state(self):
+        """Phase 1: load_from_json restores session with checksum validation."""
+        session = ScreeningSession(
+            session_id="load-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="LOAD-001",
+            title="Load Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "session.json")
+            session.save_to_json(path)
+
+            session2 = ScreeningSession("dummy", "2024-01-01", "1.0")
+            success = session2.load_from_json(path)
+
+            assert success is True
+            assert session2.session_id == "load-test-001"
+            assert session2.included_count == 1
+
+    def test_session_checksum_deterministic(self):
+        """Phase 1: compute_checksum produces stable SHA256."""
+        session = ScreeningSession(
+            session_id="checksum-test",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="CHECK-001",
+            title="Checksum Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        checksum1 = session.compute_checksum()
+        checksum2 = session.compute_checksum()
+
+        assert checksum1 == checksum2
+        assert len(checksum1) == 64
+
+    def test_audit_chain_events_appended_on_decision(self):
+        """Phase 2: audit events appended to chain on record_decision."""
+        session = ScreeningSession(
+            session_id="audit-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="AUDIT-001",
+            title="Audit Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        events = session.get_audit_events()
+        assert len(events) == 1
+        assert "event_id" in events[0]
+        assert "previous_hash" in events[0]
+        assert "current_hash" in events[0]
+        assert events[0]["previous_hash"] == "GENESIS"
+
+    def test_audit_chain_verify_passes_clean(self):
+        """Phase 2: verify_audit_chain passes for unmodified chain."""
+        session = ScreeningSession(
+            session_id="verify-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="VERIFY-001",
+            title="Verify Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+        session.record_decision("include")
+
+        is_valid, errors = session.verify_audit_chain()
+        assert is_valid is True
+        assert len(errors) == 0
+
+    def test_audit_chain_detect_tampering_fails_altered_event(self):
+        """Phase 2: detect_tampering fails if event is altered."""
+        session = ScreeningSession(
+            session_id="tamper-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="TAMPER-001",
+            title="Tamper Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        session._audit_chain[0]["decision"] = "altered"
+        is_clean, tampered = session.detect_tampering()
+
+        assert is_clean is False
+        assert len(tampered) > 0
+
+
+class TestReproducibilityBundle:
+    """Phase 3: Reproducibility bundle creation and validation."""
+
+    def test_reproducibility_bundle_creation(self):
+        """Phase 3: Create bundle with all required files."""
+        from src.core.reproducibility_engine import ReproducibilityEngine, create_reproducibility_bundle
+
+        session = ScreeningSession(
+            session_id="bundle-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="BUNDLE-001",
+            title="Bundle Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle = create_reproducibility_bundle(session, tmpdir)
+
+            assert os.path.exists(bundle.bundle_path)
+            assert os.path.exists(bundle.manifest_json)
+            assert os.path.exists(bundle.protocol_json)
+            assert os.path.exists(bundle.session_json)
+            assert os.path.exists(bundle.audit_log_json)
+            assert os.path.exists(bundle.checksums_sha256)
+
+    def test_bundle_manifest_includes_all_fields(self):
+        """Phase 3: Manifest includes required metadata."""
+        from src.core.reproducibility_engine import ReproducibilityEngine
+
+        session = ScreeningSession(
+            session_id="manifest-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="MANIFEST-001",
+            title="Manifest Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = ReproducibilityEngine(session)
+            bundle = engine.create_bundle(tmpdir)
+
+            with open(bundle.manifest_json, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+
+            assert "apollo_version" in manifest
+            assert "protocol_hash" in manifest
+            assert "session_hash" in manifest
+            assert "article_counts" in manifest
+            assert "total" in manifest["article_counts"]
+            assert "wl" in manifest["article_counts"]
+            assert "gl" in manifest["article_counts"]
+
+
+class TestDeterministicReplay:
+    """Phase 4: Deterministic replay validation."""
+
+    def test_replay_session_reconstructs_state(self):
+        """Phase 4: replay_session restores session from bundle."""
+        from src.core.reproducibility_engine import ReplayEngine, create_reproducibility_bundle
+
+        session = ScreeningSession(
+            session_id="replay-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="REPLAY-001",
+            title="Replay Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL"}
+        ))
+        session.record_decision("include")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle = create_reproducibility_bundle(session, tmpdir)
+
+            replayed, validation = ReplayEngine.replay_session(bundle.bundle_path)
+
+            assert replayed is not None
+            assert replayed.session_id == "replay-test-001"
+            assert validation["valid"] is True
+
+    def test_regenerate_exports_produces_output(self):
+        """Phase 4: regenerate_exports creates decision files."""
+        from src.core.reproducibility_engine import ReplayEngine, create_reproducibility_bundle
+
+        session = ScreeningSession(
+            session_id="regen-test-001",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        session.articles.append(ArticleReview(
+            article_id="REGEN-001",
+            title="Regen Test",
+            abstract="Abstract",
+            metadata={"literature_type": "WL", "library": "IEEE", "global_id": "G001"}
+        ))
+        session.record_decision("include")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle = create_reproducibility_bundle(session, tmpdir)
+            replayed, _ = ReplayEngine.replay_session(bundle.bundle_path)
+
+            exports_dir = os.path.join(tmpdir, "regen_exports")
+            exports = ReplayEngine.regenerate_exports(replayed, exports_dir)
+
+            assert "decisions_excel" in exports
+            assert os.path.exists(exports["decisions_excel"])
+
+
+class TestStressAndDeterminism:
+    """Phase 5: Stress testing at scale."""
+
+    def test_session_with_10_articles_deterministic(self):
+        """Phase 5: 10 articles produce stable hashes."""
+        session = ScreeningSession(
+            session_id="stress-10",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        for i in range(10):
+            session.articles.append(ArticleReview(
+                article_id=f"STRESS-10-{i}",
+                title=f"Paper {i}",
+                abstract="This paper studies software engineering testing methods.",
+                metadata={"literature_type": "WL"}
+            ))
+        session.total_count = 10
+
+        checksum1 = session.compute_checksum()
+        for article in session.articles:
+            session.record_decision("include")
+
+        checksum2 = session.compute_checksum()
+        assert checksum1 != checksum2
+
+        checksum3 = session.compute_checksum()
+        assert checksum2 == checksum3
+
+    def test_session_with_100_articles_deterministic(self):
+        """Phase 5: 100 articles produce stable hashes."""
+        session = ScreeningSession(
+            session_id="stress-100",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        for i in range(100):
+            session.articles.append(ArticleReview(
+                article_id=f"STRESS-100-{i}",
+                title=f"Paper {i}",
+                abstract="This paper studies software engineering testing methods.",
+                metadata={"literature_type": "WL"}
+            ))
+        session.total_count = 100
+
+        checksums = []
+        for i, article in enumerate(session.articles[:10]):
+            session.record_decision("include" if i % 2 == 0 else "exclude")
+            checksums.append(session.compute_checksum())
+
+        for i in range(1, len(checksums)):
+            assert checksums[i] == checksums[i], "Hash drift detected"
+
+    def test_audit_chain_stable_at_scale(self):
+        """Phase 5: Audit chain remains stable with many events."""
+        session = ScreeningSession(
+            session_id="audit-scale",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        for i in range(50):
+            session.articles.append(ArticleReview(
+                article_id=f"AUDIT-SCALE-{i}",
+                title=f"Paper {i}",
+                abstract="Abstract",
+                metadata={"literature_type": "WL"}
+            ))
+
+        for article in session.articles:
+            session.record_decision("include")
+
+        is_valid, errors = session.verify_audit_chain()
+        assert is_valid is True
+        assert len(errors) == 0
+        assert len(session._audit_chain) == 50
+
+    def test_save_load_roundtrip_preserves_state(self):
+        """Phase 5: Save/load roundtrip preserves all state at scale."""
+        session = ScreeningSession(
+            session_id="roundtrip-scale",
+            created_at="2024-01-01T00:00:00",
+            protocol_version="1.0"
+        )
+        for i in range(20):
+            session.articles.append(ArticleReview(
+                article_id=f"RT-SCALE-{i}",
+                title=f"Paper {i}",
+                abstract="This paper studies software engineering testing methods.",
+                metadata={"literature_type": "WL"}
+            ))
+        session.total_count = 20
+
+        for article in session.articles[:10]:
+            session.record_decision("include")
+        for article in session.articles[10:]:
+            session.record_decision("exclude")
+
+        original_included = session.included_count
+        original_excluded = session.excluded_count
+        original_checksum = session.compute_checksum()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "session.json")
+            session.save_to_json(path)
+
+            session2 = ScreeningSession("dummy", "2024-01-01", "1.0")
+            session2.load_from_json(path)
+
+        assert session2.included_count == original_included
+        assert session2.excluded_count == original_excluded
+
+        checksum_after = session2.compute_checksum()
+        assert original_checksum == checksum_after

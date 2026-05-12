@@ -120,9 +120,14 @@ def render_upload_section(session):
 
 
 def render_screening_workspace(session):
-    """Render the main EC screening workspace."""
+    """Render the main EC screening workspace with WL/GL visual separation."""
     from src.core.screening_session import ArticleReview
 
+    wl_progress = session.get_wl_progress()
+    gl_progress = session.get_gl_progress()
+    
+    render_literature_type_filter(session)
+    
     articles = session.articles
     current_idx = session.current_index
     total = len(articles)
@@ -142,9 +147,30 @@ def render_screening_workspace(session):
             st.rerun()
 
     divider()
+    
+    wl_stats, gl_stats = st.columns(2)
+    with wl_stats:
+        st.markdown(f'''
+        <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.75rem;border-left:3px solid {COLORS['cyan']};">
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['cyan']};letter-spacing:0.1em;">WHITE LITERATURE (ACADEMIC PRIMES)</div>
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:1.2rem;color:{COLORS['text_primary']};margin-top:0.25rem;">{wl_progress['completed']}/{wl_progress['total']}</div>
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};">INCLUDED: {wl_progress['included']} | EXCLUDED: {wl_progress['excluded']}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    with gl_stats:
+        st.markdown(f'''
+        <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.75rem;border-left:3px solid {COLORS['warning']};">
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['warning']};letter-spacing:0.1em;">GREY LITERATURE (PRACTITIONER SOURCES)</div>
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:1.2rem;color:{COLORS['text_primary']};margin-top:0.25rem;">{gl_progress['completed']}/{gl_progress['total']}</div>
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};">INCLUDED: {gl_progress['included']} | EXCLUDED: {gl_progress['excluded']}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    divider()
 
     if articles and 0 <= current_idx < total:
         article = articles[current_idx]
+        render_literature_status_header(article)
         render_article_card(article, current_idx)
         render_ai_advisory_panel(article, current_idx)
 
@@ -191,6 +217,50 @@ def render_screening_workspace(session):
 
     if st.button("EXPORT EC RESULTS", type="primary"):
         export_ec_results(session)
+
+
+def render_literature_type_filter(session):
+    """Render literature type filter controls."""
+    wl_progress = session.get_wl_progress()
+    gl_progress = session.get_gl_progress()
+    
+    st.markdown(f'''
+    <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.75rem;margin-bottom:0.5rem;">
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};letter-spacing:0.1em;margin-bottom:0.5rem;">LITERATURE TYPE FILTER</div>
+        <div style="display:flex;gap:1rem;align-items:center;">
+            <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['cyan']};">WL: {wl_progress['total']} articles</span>
+            <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['warning']};">GL: {gl_progress['total']} articles</span>
+            <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['text_secondary']};">| TOTAL: {len(session.articles)}</span>
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+
+def render_literature_status_header(article):
+    """Render prominent literature type status header."""
+    from src.core.screening_session import ArticleReview
+    
+    if isinstance(article, ArticleReview):
+        lit_type = article.get_literature_type()
+        url = article.metadata.get("url", "")
+    else:
+        lit_type = article.get("literature_type", "WL")
+        url = article.get("url", "")
+    
+    if lit_type == "WL":
+        header_bg = COLORS['cyan']
+        header_text = "[SYSTEM STATUS: SCREENING WHITE LITERATURE (ACADEMIC PRIMES)]"
+        accent_color = COLORS['cyan']
+    else:
+        header_bg = COLORS['warning']
+        header_text = "[SYSTEM STATUS: SCREENING GREY LITERATURE (PRACTITIONER SOURCES)]"
+        accent_color = COLORS['warning']
+    
+    st.markdown(f'''
+    <div style="background:{header_bg};color:#000;padding:0.5rem 1rem;margin-bottom:1rem;font-family:{TYPOGRAPHY['mono']};font-size:0.8rem;font-weight:700;text-align:center;border-radius:2px;">
+        {header_text}
+    </div>
+    ''', unsafe_allow_html=True)
 
 
 def render_article_card(article, index: int):
@@ -278,7 +348,7 @@ def render_ai_advisory_panel(article, current_idx: int):
     divider()
     section_header("AI ADVISORY PANEL", "Optional cognitive assistance - researcher makes final decision")
 
-    cache_key = f"ec_advice_{current_idx}"
+    cache_key = f"ec_advice_{article.article_id}" if hasattr(article, 'article_id') else f"ec_advice_{current_idx}"
     cached_advice = st.session_state.get(cache_key, None)
 
     with st.expander("REQUEST AI ANALYSIS"):
@@ -303,6 +373,9 @@ def render_ai_advisory_panel(article, current_idx: int):
                 st.caption("No analysis generated yet for this article")
 
         if request_suggestion:
+            if cache_key in st.session_state:
+                del st.session_state[cache_key]
+            
             with st.spinner("Generating AI analysis..."):
                 suggestion = get_llm_ec_suggestion(article)
 
@@ -319,7 +392,9 @@ def render_ai_advisory_panel(article, current_idx: int):
 
 
 def get_llm_ec_suggestion(article) -> Optional[Dict]:
-    """Get LLM advisory suggestion for EC screening with metadata robustness."""
+    """
+    Get LLM advisory suggestion for EC screening with metadata robustness.
+    """
     from src.core.screening_session import ArticleReview
     try:
         from src.core.llm_assistant import LLMAssistant
@@ -332,14 +407,14 @@ def get_llm_ec_suggestion(article) -> Optional[Dict]:
             title = article.title
             abstract = article.abstract
             literature_type = article.get_literature_type()
-            year = article.metadata.get("year", "")
             metadata = article.metadata
+            year = _extract_year_robust(article)
         else:
             title = article.get("title", "")
             abstract = article.get("abstract", "")
             literature_type = article.get("literature_type", "WL")
-            year = article.get("year")
             metadata = article
+            year = _extract_year_robust(metadata)
 
         has_title = bool(title and title != "nan" and len(title.strip()) > 0)
         has_abstract = bool(abstract and abstract != "nan" and len(abstract.strip()) > 10)
@@ -368,12 +443,59 @@ def get_llm_ec_suggestion(article) -> Optional[Dict]:
             title=title,
             abstract=abstract,
             literature_type=literature_type,
-            protocol_criteria=protocol_criteria
+            year=year,
+            protocol_criteria=protocol_criteria,
+            metadata=metadata
         )
 
         return suggestion.to_dict()
     except Exception:
         return None
+
+
+def _extract_year_robust(source) -> Optional[int]:
+    """
+    Robust year extraction with multiple fallback sources.
+    
+    SPRINT 7.12 FIX: The ATLAS export stores the original Year
+    in article.metadata['raw_data']['Year'], NOT in article.metadata['Year'].
+    """
+    raw_year = None
+    
+    if hasattr(source, 'metadata') and isinstance(source.metadata, dict):
+        m = source.metadata
+        raw = m.get("raw_data", {})
+        
+        raw_year = raw.get("Year") or raw.get("year") or raw.get("Publication_Year")
+        if raw_year is None:
+            raw_year = m.get("Year") or m.get("year") or m.get("publication_year")
+    
+    if hasattr(source, 'year') and raw_year is None:
+        raw_year = getattr(source, 'year', None)
+    
+    if isinstance(source, dict) and raw_year is None:
+        raw_year = source.get("Year") or source.get("year") or source.get("raw_data", {}).get("Year")
+    
+    if raw_year is None:
+        return None
+    
+    if isinstance(raw_year, int) and 1900 <= raw_year <= 2030:
+        return raw_year
+    
+    if isinstance(raw_year, float) and 1900 <= raw_year <= 2030:
+        return int(raw_year)
+    
+    if isinstance(raw_year, str):
+        cleaned = raw_year.strip()
+        if cleaned and cleaned.lower() not in ['', 'none', 'nan', 'n/a', '#na']:
+            try:
+                result = int(float(cleaned))
+                if 1900 <= result <= 2030:
+                    return result
+            except (ValueError, TypeError):
+                pass
+    
+    return None
 
 
 def get_protocol_ec_criteria() -> Dict[str, str]:
@@ -388,16 +510,28 @@ def get_protocol_ec_criteria() -> Dict[str, str]:
     return {
         "EC1": "Not empirical SE research",
         "EC2": "Published before 2015",
-        "EC3": "Not peer-reviewed (WL only)",
+        "EC3": "Not peer-reviewed - WL sources must be peer-reviewed academic publications",
         "EC4": "Duplicate publication"
     }
 
 
 def render_suggestion_details(suggestion: Dict):
-    """Render detailed LLM suggestion in terminal style."""
+    """Render detailed LLM suggestion in terminal style with criterion-by-criterion view."""
     decision = suggestion.get("decision", "").upper()
     confidence = suggestion.get("confidence", 0)
     confidence_pct = int(confidence * 100)
+    is_fallback = suggestion.get("is_fallback", False)
+
+    if is_fallback:
+        st.warning("⚠ STRUCTURED ADVISORY UNAVAILABLE — LLM service unavailable. Manual review required.")
+    else:
+        metadata_grounding = suggestion.get("metadata_grounding", {})
+        if metadata_grounding:
+            st.markdown(f'''
+            <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};border-left:2px solid {COLORS['success']};padding:0.5rem;margin-bottom:0.75rem;">
+                METADATA GROUNDING: title={metadata_grounding.get("title_used", False)} | year={metadata_grounding.get("year_used", False)} | abstract={metadata_grounding.get("abstract_used", False)}
+            </div>
+            ''', unsafe_allow_html=True)
 
     col_dec, col_conf = st.columns([1, 1])
 
@@ -407,6 +541,9 @@ def render_suggestion_details(suggestion: Dict):
     elif decision == "INCLUDE":
         with col_dec:
             status_badge("INCLUDED")
+    elif decision == "UNAVAILABLE":
+        with col_dec:
+            status_badge("FALLBACK")
     elif decision == "UNCERTAIN":
         with col_dec:
             status_badge("PENDING")
@@ -417,24 +554,64 @@ def render_suggestion_details(suggestion: Dict):
     with col_conf:
         metric_tile("CONFIDENCE", f"{confidence_pct}%")
 
-    st.markdown(f"**Reasoning:** {suggestion.get('justification', 'N/A')}")
+    reasoning_summary = suggestion.get("reasoning_summary", "")
+    if reasoning_summary:
+        st.markdown(f"**Reasoning:** {reasoning_summary}")
+    else:
+        st.markdown(f"**Justification:** {suggestion.get('justification', 'N/A')}")
 
-    triggered = suggestion.get("triggered_criteria", {})
-    if triggered and any(v for v in triggered.values()):
-        criteria_panel({k: v for k, v in triggered.items() if v}, title="TRIGGERED CRITERIA")
+    criterion_evals = suggestion.get("criterion_evaluations", {})
+    triggered_list = suggestion.get("triggered_criteria", [])
 
-    evidence = suggestion.get("evidence", [])
+    if isinstance(triggered_list, dict):
+        triggered_dict = {k: v for k, v in triggered_list.items() if v}
+    else:
+        triggered_dict = {}
+        for cid in triggered_list:
+            eval_data = criterion_evals.get(cid, {})
+            if eval_data.get("triggered"):
+                triggered_dict[cid] = eval_data.get("justification", "")
+
+    if triggered_dict:
+        criteria_panel(triggered_dict, title="TRIGGERED CRITERIA")
+
+    if criterion_evals:
+        with st.expander("CRITERION EVALUATIONS"):
+            for cid, eval_data in criterion_evals.items():
+                triggered = eval_data.get("triggered", False)
+                eval_justification = eval_data.get("justification", "")
+                eval_evidence = eval_data.get("evidence", [])
+                ambiguity = eval_data.get("ambiguity_detected", False)
+
+                eval_confidence = "✓" if triggered else "✗"
+                eval_color = COLORS["error"] if triggered else COLORS["text_muted"]
+
+                st.markdown(f"**{eval_confidence} {cid}**")
+                if eval_justification:
+                    st.markdown(f"  └ {eval_justification}")
+                if eval_evidence:
+                    with st.expander(f"  Evidence ({len(eval_evidence)} extracts)"):
+                        for ev in eval_evidence:
+                            st.markdown(f"  - \"{ev}\"")
+                if ambiguity:
+                    st.markdown(f"  ⚠ ambiguity detected")
+
+    evidence = suggestion.get("evidence_extracts", suggestion.get("evidence", []))
     if evidence:
-        with st.expander("EVIDENCE EXTRACTED"):
+        with st.expander(f"EVIDENCE EXTRACTS ({len(evidence)})"):
             for phrase in evidence:
                 st.markdown(f"  - \"{phrase}\"")
 
     ambiguity = suggestion.get("ambiguity_flags", [])
-    if ambiguity and any(ambiguity):
+    if ambiguity and any(flag for flag in ambiguity if flag):
         with st.expander("AMBIGUITY FLAGS"):
             for flag in ambiguity:
                 if flag:
                     st.markdown(f"  - {flag}")
+
+    advisory_hash = suggestion.get("advisory_hash", "")
+    if advisory_hash:
+        st.caption(f"advisory: {advisory_hash}")
 
 
 def export_ec_results(session):

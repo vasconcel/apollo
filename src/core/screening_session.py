@@ -19,6 +19,35 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 
 
+LITERATURE_TYPE_MAP = {
+    "WL": "WL", "wl": "WL", "Wl": "WL",
+    "WHITE LITERATURE": "WL", "White Literature": "WL", "white literature": "WL",
+    "GL": "GL", "gl": "GL", "Gl": "GL",
+    "GREY LITERATURE": "GL", "Grey Literature": "GL", "grey literature": "GL",
+}
+
+
+def normalize_literature_type(raw_value: str) -> str:
+    """Normalize literature type to canonical WL/GL value."""
+    if not raw_value:
+        return "WL"
+    normalized = raw_value.strip()
+    return LITERATURE_TYPE_MAP.get(normalized, LITERATURE_TYPE_MAP.get(normalized.upper(), "WL"))
+
+
+def compute_csv_metadata_completeness(row: dict) -> str:
+    """Compute metadata completeness for CSV rows."""
+    has_title = bool(row.get("Title"))
+    has_abstract = bool(row.get("Abstract"))
+    has_year = bool(row.get("Year"))
+
+    if has_title and has_abstract and has_year:
+        return "complete"
+    elif has_title:
+        return "partial"
+    return "minimal"
+
+
 class SessionStage(Enum):
     """Screening stages."""
     EC = "ec"  # Exclusion Criteria
@@ -217,6 +246,10 @@ class ScreeningSession:
     researcher_id: str = "researcher_1"
     last_saved: str = ""
     
+    schema_version: str = "2.0"
+    autosave_enabled: bool = False
+    _audit_chain: List[Dict] = field(default_factory=list)
+    
     def add_articles(self, article_records: List) -> None:
         """Add articles to session."""
         self.articles = [ArticleReview.from_article_record(r) for r in article_records]
@@ -258,9 +291,8 @@ class ScreeningSession:
                 articles = []
                 for _, row in df.iterrows():
                     row_dict = row.to_dict()
-                    lit_type = str(row_dict.get("Literature_Type", "WL")).upper()
-                    if lit_type not in ("WL", "GL"):
-                        lit_type = "WL"
+                    lit_type = normalize_literature_type(str(row_dict.get("Literature_Type", "WL")))
+                    completeness = compute_csv_metadata_completeness(row_dict)
                     metadata = {
                         "year": str(row_dict.get("Year", "")),
                         "authors": str(row_dict.get("Authors", "")),
@@ -268,6 +300,8 @@ class ScreeningSession:
                         "title": str(row_dict.get("Title", "")),
                         "abstract": str(row_dict.get("Abstract", "")),
                         "global_id": str(row_dict.get("global_id", str(uuid.uuid4())[:8])),
+                        "year_source": "csv",
+                        "metadata_completeness": completeness
                     }
                     review_article = ArticleReview(
                         article_id=metadata["global_id"],
@@ -417,7 +451,89 @@ class ScreeningSession:
         
         self.last_saved = timestamp
         self._save_stage_snapshot(stage)
+        self._append_audit_event(article, decision, notes, stage)
         return True
+    
+    def _append_audit_event(self, article: ArticleReview, decision: str, notes: str, stage: str) -> None:
+        """Append immutable audit event to chain."""
+        previous_hash = self._audit_chain[-1]["current_hash"] if self._audit_chain else "GENESIS"
+        
+        event_payload = {
+            "event_id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "article_id": article.article_id,
+            "reviewer_id": self.researcher_id,
+            "stage": stage,
+            "decision": decision,
+            "notes": notes,
+        }
+        
+        payload_json = json.dumps(event_payload, sort_keys=True, ensure_ascii=False)
+        current_hash = hashlib.sha256(
+            (payload_json + previous_hash).encode()
+        ).hexdigest()
+        
+        event = {
+            **event_payload,
+            "previous_hash": previous_hash,
+            "current_hash": current_hash
+        }
+        
+        self._audit_chain.append(event)
+    
+    def verify_audit_chain(self) -> tuple:
+        """
+        Verify audit chain integrity. Phase 2: Immutable Audit Chain.
+        
+        Returns:
+            Tuple of (is_valid: bool, errors: list)
+        """
+        if not self._audit_chain:
+            return True, []
+        
+        errors = []
+        
+        expected_previous = "GENESIS"
+        for i, event in enumerate(self._audit_chain):
+            if event.get("previous_hash") != expected_previous:
+                errors.append(f"Event {i}: Chain broken at {event.get('event_id', 'UNKNOWN')}")
+            
+            payload = {k: v for k, v in event.items() if k not in ("previous_hash", "current_hash")}
+            payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+            computed_hash = hashlib.sha256(
+                (payload_json + event.get("previous_hash", "")).encode()
+            ).hexdigest()
+            
+            if computed_hash != event.get("current_hash"):
+                errors.append(f"Event {i}: Hash mismatch for {event.get('event_id', 'UNKNOWN')}")
+            
+            expected_previous = event.get("current_hash", "")
+        
+        return len(errors) == 0, errors
+    
+    def detect_tampering(self) -> tuple:
+        """
+        Detect tampering in audit chain. Phase 2: Immutable Audit Chain.
+        
+        Returns:
+            Tuple of (is_clean: bool, tampered_events: list)
+        """
+        is_valid, errors = self.verify_audit_chain()
+        
+        if is_valid:
+            return True, []
+        
+        tampered = []
+        for error in errors:
+            if "Hash mismatch" in error:
+                event_id = error.split("for ")[-1] if "for " in error else "UNKNOWN"
+                tampered.append(event_id)
+        
+        return False, tampered
+    
+    def get_audit_events(self) -> List[Dict]:
+        """Get all audit events in order."""
+        return list(self._audit_chain)
     
     def _save_stage_snapshot(self, stage: str) -> None:
         """Create protocol snapshot on stage transition."""
@@ -511,6 +627,91 @@ class ScreeningSession:
         """Get articles that passed IC."""
         return [a for a in self.articles if a.is_ic_included]
     
+    def get_wl_articles(self) -> List[ArticleReview]:
+        """
+        Get White Literature articles only.
+        WL articles are identified by literature_type="WL" or source_sheet="White Literature".
+        Used for filtered WL-only screening and export separation.
+        """
+        return [
+            a for a in self.articles 
+            if a.get_literature_type() == "WL" or 
+               a.metadata.get("source_sheet", "").lower() in ["white literature", "wl"]
+        ]
+    
+    def get_gl_articles(self) -> List[ArticleReview]:
+        """
+        Get Grey Literature articles only.
+        GL articles are identified by literature_type="GL" or source_sheet="Grey Literature".
+        Used for filtered GL-only screening and export separation.
+        GL articles require manual URL review for IC stage.
+        """
+        return [
+            a for a in self.articles 
+            if a.get_literature_type() == "GL" or 
+               a.metadata.get("source_sheet", "").lower() in ["grey literature", "gl"]
+        ]
+    
+    def filter_articles(self, literature_type: Optional[str] = None, 
+                        stage_decision: Optional[str] = None) -> List[ArticleReview]:
+        """
+        Filter articles by literature type and/or stage decision.
+        
+        Args:
+            literature_type: "WL" or "GL" or None for all
+            stage_decision: "include", "exclude", "skip", "pending", or None for all
+            
+        Returns:
+            Filtered list of ArticleReview objects
+        """
+        filtered = self.articles
+        
+        if literature_type:
+            if literature_type == "WL":
+                filtered = self.get_wl_articles()
+            elif literature_type == "GL":
+                filtered = self.get_gl_articles()
+        
+        if stage_decision:
+            stage_field = self._get_stage_field(self.stage)
+            filtered = [a for a in filtered if getattr(a, stage_field, "") == stage_decision]
+        
+        return filtered
+    
+    def get_wl_progress(self) -> Dict:
+        """Get WL-specific progress statistics."""
+        wl_articles = self.get_wl_articles()
+        wl_total = len(wl_articles)
+        wl_completed = sum(1 for a in wl_articles if a.ec_stage in ["include", "exclude", "skip"])
+        wl_included = sum(1 for a in wl_articles if a.ec_stage == "include")
+        wl_excluded = sum(1 for a in wl_articles if a.ec_stage == "exclude")
+        
+        return {
+            "total": wl_total,
+            "completed": wl_completed,
+            "pending": wl_total - wl_completed,
+            "included": wl_included,
+            "excluded": wl_excluded,
+            "progress_pct": int((wl_completed / wl_total * 100) if wl_total > 0 else 0)
+        }
+    
+    def get_gl_progress(self) -> Dict:
+        """Get GL-specific progress statistics."""
+        gl_articles = self.get_gl_articles()
+        gl_total = len(gl_articles)
+        gl_completed = sum(1 for a in gl_articles if a.ec_stage in ["include", "exclude", "skip"])
+        gl_included = sum(1 for a in gl_articles if a.ec_stage == "include")
+        gl_excluded = sum(1 for a in gl_articles if a.ec_stage == "exclude")
+        
+        return {
+            "total": gl_total,
+            "completed": gl_completed,
+            "pending": gl_total - gl_completed,
+            "included": gl_included,
+            "excluded": gl_excluded,
+            "progress_pct": int((gl_completed / gl_total * 100) if gl_total > 0 else 0)
+        }
+    
     def get_pending_for_stage(self, stage: str) -> int:
         """Get count of pending articles for stage."""
         if stage == "ec":
@@ -571,6 +772,170 @@ class ScreeningSession:
         self.last_saved = datetime.now().isoformat()
         return path
     
+    def save_to_json(self, path: str) -> str:
+        """
+        Deterministic JSON persistence with full audit chain.
+        
+        Phase 1: Persistent Screening Session implementation.
+        Preserves: articles, decisions, snapshots, protocol hash, timestamps,
+        audit chain, metadata lineage, schema_version.
+        
+        Args:
+            path: Full path to save JSON file
+            
+        Returns:
+            Path to saved file
+        """
+        data = self._to_dict_full()
+        
+        data["schema_version"] = self.schema_version
+        
+        fields_for_checksum = [
+            "session_id", "created_at", "protocol_version", "stage",
+            "current_index", "total_count", "ec_completed", "ic_completed",
+            "qc_completed", "included_count", "excluded_count", "skip_count",
+            "discussion_count", "researcher_id", "last_saved", "schema_version",
+            "articles", "dynamic_protocol"
+        ]
+        data_for_check = {k: data.get(k) for k in fields_for_checksum if k in data}
+        
+        canonical_json = json.dumps(data_for_check, sort_keys=True, ensure_ascii=False)
+        checksum = hashlib.sha256(canonical_json.encode()).hexdigest()
+        data["session_checksum"] = checksum
+        
+        if self.dynamic_protocol:
+            from src.core.dynamic_protocol import DynamicProtocol
+            try:
+                protocol = DynamicProtocol.from_dict(self.dynamic_protocol)
+                data["protocol_hash"] = protocol.protocol_hash
+            except Exception:
+                data["protocol_hash"] = ""
+        
+        data["audit_chain"] = self._audit_chain
+        data["autosave_enabled"] = self.autosave_enabled
+        
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        self.last_saved = datetime.now().isoformat()
+        return path
+    
+    def load_from_json(self, path: str) -> bool:
+        """
+        Load session from deterministic JSON with validation.
+        
+        Phase 1: Persistent Screening Session implementation.
+        Verifies checksum and restores full state including audit chain.
+        
+        Args:
+            path: Full path to JSON file
+            
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        if not os.path.exists(path):
+            return False
+        
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return False
+        
+        expected_checksum = data.get("session_checksum", "")
+        
+        fields_for_checksum = [
+            "session_id", "created_at", "protocol_version", "stage",
+            "current_index", "total_count", "ec_completed", "ic_completed",
+            "qc_completed", "included_count", "excluded_count", "skip_count",
+            "discussion_count", "researcher_id", "last_saved", "schema_version",
+            "articles", "dynamic_protocol"
+        ]
+        data_for_check = {k: data.get(k) for k in fields_for_checksum if k in data}
+        
+        actual_checksum = hashlib.sha256(
+            json.dumps(data_for_check, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+        
+        self.session_id = data.get("session_id", "")
+        self.created_at = data.get("created_at", "")
+        self.protocol_version = data.get("protocol_version", "1.0")
+        self.stage = data.get("stage", SessionStage.EC.value)
+        self.current_index = data.get("current_index", 0)
+        self.total_count = data.get("total_count", 0)
+        self.ec_completed = data.get("ec_completed", 0)
+        self.ic_completed = data.get("ic_completed", 0)
+        self.qc_completed = data.get("qc_completed", 0)
+        self.included_count = data.get("included_count", 0)
+        self.excluded_count = data.get("excluded_count", 0)
+        self.skip_count = data.get("skip_count", 0)
+        self.discussion_count = data.get("discussion_count", 0)
+        self.researcher_id = data.get("researcher_id", "researcher_1")
+        self.last_saved = data.get("last_saved", "")
+        self.schema_version = data.get("schema_version", "2.0")
+        self.autosave_enabled = data.get("autosave_enabled", False)
+        
+        self.articles = [ArticleReview(**a) for a in data.get("articles", [])]
+        
+        if "dynamic_protocol" in data and isinstance(data["dynamic_protocol"], dict):
+            try:
+                from src.core.dynamic_protocol import DynamicProtocol
+                DynamicProtocol.from_dict(data["dynamic_protocol"])
+                self.dynamic_protocol = data["dynamic_protocol"]
+            except (TypeError, ValueError):
+                self.dynamic_protocol = None
+        
+        self._audit_chain = data.get("audit_chain", [])
+        
+        return True
+    
+    def compute_checksum(self) -> str:
+        """
+        Compute SHA256 checksum of session canonical JSON.
+        
+        Phase 1: Persistent Screening Session implementation.
+        Used for integrity verification and replay validation.
+        
+        Returns:
+            SHA256 hex digest of canonical JSON representation
+        """
+        data = self._to_dict_full()
+        
+        fields_for_checksum = [
+            "session_id", "created_at", "protocol_version", "stage",
+            "current_index", "total_count", "ec_completed", "ic_completed",
+            "qc_completed", "included_count", "excluded_count", "skip_count",
+            "discussion_count", "researcher_id", "last_saved", "schema_version",
+            "articles", "dynamic_protocol"
+        ]
+        data_for_check = {k: data.get(k) for k in fields_for_checksum if k in data}
+        
+        canonical_json = json.dumps(data_for_check, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(canonical_json.encode()).hexdigest()
+    
+    def _to_dict_full(self) -> Dict:
+        """Convert to dictionary with full metadata lineage."""
+        return {
+            "session_id": self.session_id,
+            "created_at": self.created_at,
+            "protocol_version": self.protocol_version,
+            "stage": self.stage,
+            "current_index": self.current_index,
+            "total_count": self.total_count,
+            "ec_completed": self.ec_completed,
+            "ic_completed": self.ic_completed,
+            "qc_completed": self.qc_completed,
+            "included_count": self.included_count,
+            "excluded_count": self.excluded_count,
+            "skip_count": self.skip_count,
+            "discussion_count": self.discussion_count,
+            "researcher_id": self.researcher_id,
+            "last_saved": self.last_saved,
+            "schema_version": self.schema_version,
+            "articles": [a.to_dict() for a in self.articles],
+            "dynamic_protocol": self.dynamic_protocol,
+        }
+    
     def _to_dict(self) -> Dict:
         """Convert to dictionary."""
         return {
@@ -621,7 +986,9 @@ class ScreeningSession:
             skip_count=data.get("skip_count", 0),
             discussion_count=data.get("discussion_count", 0),
             researcher_id=data.get("researcher_id", "researcher_1"),
-            last_saved=data.get("last_saved", "")
+            last_saved=data.get("last_saved", ""),
+            schema_version=data.get("schema_version", "2.0"),
+            autosave_enabled=data.get("autosave_enabled", False)
         )
         
         session.articles = [
@@ -635,6 +1002,8 @@ class ScreeningSession:
                 session.dynamic_protocol = data["dynamic_protocol"]
             except (TypeError, ValueError):
                 session.dynamic_protocol = None
+        
+        session._audit_chain = data.get("audit_chain", [])
         
         return session
 

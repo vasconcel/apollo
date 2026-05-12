@@ -47,7 +47,7 @@ INDUSTRY_KEYWORDS: List[str] = [
 EC_DESCRIPTIONS: Dict[str, str] = {
     "EC1": "Not empirical software engineering research",
     "EC2": "Published before 2015",
-    "EC3": "Not peer-reviewed (for WL)",
+    "EC3": "Not peer-reviewed - WL sources must be peer-reviewed academic publications",
     "EC4": "Duplicate publication (by Global_ID)"
 }
 

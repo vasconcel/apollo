@@ -81,56 +81,64 @@ class ExportEngine:
         session,
         output_path: str
     ) -> str:
-        """Export decisions to Excel (legacy format compatible)."""
+        """
+        Export decisions to Excel with STRICT WL/GL separation.
+        PRISMA-compliant schema with exact column structure.
+        
+        WL Sheet: Academic literature with full metadata
+        GL Sheet: Grey literature requiring URL review for IC
+        WL Seeds for HERMES: Empty placeholder for downstream operations
+        """
         wl_data = []
         gl_data = []
         
-        for article in session.articles:
+        wl_articles = session.get_wl_articles()
+        gl_articles = session.get_gl_articles()
+        
+        for article in wl_articles:
             meta = article.metadata
+            final_dec = article.final_decision if article.final_decision else self._compute_decision(article)
             
-            if meta.get("literature_type") == "GL":
-                gl_data.append({
-                    "Posicao": meta.get("posicao", ""),
-                    "Title": article.title,
-                    "URL": meta.get("url", ""),
-                    "Source_File": meta.get("source_file", ""),
-                    "Revisor 1 EC": article.ec_stage,
-                    "Revisor 1 IC": article.ic_stage,
-                    "Decision": article.final_decision or self._compute_decision(article)
-                })
-            else:
-                wl_data.append({
-                    "Library": meta.get("library", ""),
-                    "Global_ID": meta.get("global_id", ""),
-                    "Local_ID": meta.get("local_id", ""),
-                    "Title": article.title,
-                    "Abstract": article.abstract,
-                    "Keywords": meta.get("keywords", ""),
-                    "CIs1": article.ic_stage,
-                    "CEs1": article.ec_stage,
-                    "Revisor 1": session.researcher_id,
-                    "CIs2": "",
-                    "CEs2": "",
-                    "Revisor 2": "",
-                    "Decision": article.final_decision or self._compute_decision(article)
-                })
+            wl_data.append({
+                "Library": meta.get("library", ""),
+                "Global_ID": meta.get("global_id", ""),
+                "Local_ID": meta.get("local_id", ""),
+                "Title": article.title,
+                "Abstract": article.abstract if article.abstract else "",
+                "Keywords": meta.get("keywords", ""),
+                "CIs1": article.ic_stage if article.ic_stage else "PENDING",
+                "CEs1": article.ec_stage if article.ec_stage else "PENDING",
+                "Revisor 1": session.researcher_id,
+                "CIs2": "",
+                "CEs2": "",
+                "Revisor 2": "",
+                "Decision": final_dec
+            })
+        
+        for article in gl_articles:
+            meta = article.metadata
+            final_dec = article.final_decision if article.final_decision else self._compute_decision(article)
+            
+            gl_data.append({
+                "Posicao": meta.get("posicao", meta.get("#", "")),
+                "Title": article.title,
+                "URL": meta.get("url", ""),
+                "Source_File": meta.get("source_file", ""),
+                "Revisor 1 EC": article.ec_stage if article.ec_stage else "PENDING",
+                "Revisor 1 IC": article.ic_stage if article.ic_stage else "PENDING",
+                "Decision": final_dec
+            })
+        
+        wl_columns = ["Library", "Global_ID", "Local_ID", "Title", "Abstract", "Keywords",
+                      "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision"]
+        gl_columns = ["Posicao", "Title", "URL", "Source_File", "Revisor 1 EC", "Revisor 1 IC", "Decision"]
         
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            if wl_data:
-                pd.DataFrame(wl_data).to_excel(writer, sheet_name="WL", index=False)
-            else:
-                pd.DataFrame(columns=["Library", "Global_ID", "Local_ID", "Title", "Abstract", 
-                                   "Keywords", "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision"])\
-                    .to_excel(writer, sheet_name="WL", index=False)
+            pd.DataFrame(wl_data, columns=wl_columns).to_excel(writer, sheet_name="WL", index=False)
             
-            if gl_data:
-                pd.DataFrame(gl_data).to_excel(writer, sheet_name="GL", index=False)
-            else:
-                pd.DataFrame(columns=["Posicao", "Title", "URL", "Source_File", 
-                                   "Revisor 1 EC", "Revisor 1 IC", "Decision"])\
-                    .to_excel(writer, sheet_name="GL", index=False)
+            pd.DataFrame(gl_data, columns=gl_columns).to_excel(writer, sheet_name="GL", index=False)
             
-            pd.DataFrame(columns=[]).to_excel(writer, sheet_name="WL Seeds for HERMES", index=False)
+            pd.DataFrame(columns=wl_columns).to_excel(writer, sheet_name="WL Seeds for HERMES", index=False)
         
         return output_path
     

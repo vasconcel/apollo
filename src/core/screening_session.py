@@ -60,10 +60,53 @@ class ArticleReview:
     
     final_decision: str = ""
     
+    def get_year_source(self) -> str:
+        """Get year source provenance flag."""
+        return self.metadata.get("year_source", "unknown")
+
+    def get_metadata_completeness(self) -> str:
+        """Get metadata completeness level."""
+        return self.metadata.get("metadata_completeness", "unknown")
+
+    def get_literature_type(self) -> str:
+        """Get literature type ('WL' or 'GL')."""
+        return self.metadata.get("literature_type", "WL")
+
+    def has_complete_metadata(self) -> bool:
+        """Check if article has complete metadata lineage."""
+        required_fields = ["title", "literature_type"]
+        for field in required_fields:
+            if field not in self.metadata or not self.metadata[field]:
+                return False
+        return self.get_metadata_completeness() in ("complete", "partial")
+
+    def to_review_dict(self) -> Dict:
+        """Export as review-ready dict with explicit metadata fields."""
+        return {
+            "article_id": self.article_id,
+            "title": self.title,
+            "abstract": self.abstract,
+            "year": self.metadata.get("year"),
+            "year_source": self.get_year_source(),
+            "authors": self.metadata.get("authors", ""),
+            "literature_type": self.get_literature_type(),
+            "metadata_completeness": self.get_metadata_completeness(),
+            "url": self.metadata.get("url", ""),
+            "library": self.metadata.get("library", ""),
+            "source_file": self.metadata.get("source_file", ""),
+            "ec_decision": self.metadata.get("ec_decision", ""),
+            "ic_decision": self.metadata.get("ic_decision", ""),
+            "qc_score": self.metadata.get("qc_score", ""),
+            "final_decision": self.final_decision,
+            "ec_stage": self.ec_stage,
+            "ic_stage": self.ic_stage,
+            "qc_stage": self.qc_stage,
+        }
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for export."""
         return asdict(self)
-    
+
     @property
     def is_ec_included(self) -> bool:
         """Check if passed EC stage."""
@@ -118,20 +161,32 @@ class ArticleReview:
     
     @classmethod
     def from_article_record(cls, record) -> "ArticleReview":
-        """Create from ArticleRecord."""
+        """Create from ArticleRecord with full metadata propagation."""
+        base_metadata = {
+            "library": record.library,
+            "global_id": record.global_id,
+            "local_id": record.local_id,
+            "keywords": record.keywords,
+            "literature_type": record.literature_type,
+            "url": record.url,
+            "source_file": record.source_file,
+            "year": record.year,
+            "authors": record.authors,
+            "posicao": record.posicao,
+            "ec_decision": record.ec_decision,
+            "ic_decision": record.ic_decision,
+            "qc_score": record.qc_score,
+            "final_decision": record.final_decision
+        }
+        
+        if record.metadata:
+            base_metadata.update(record.metadata)
+        
         return cls(
             article_id=record.global_id or record.local_id or record.posicao or str(uuid.uuid4())[:8],
             title=record.title,
             abstract=record.abstract,
-            metadata={
-                "library": record.library,
-                "global_id": record.global_id,
-                "local_id": record.local_id,
-                "keywords": record.keywords,
-                "literature_type": record.literature_type,
-                "url": record.url,
-                "source_file": record.source_file
-            }
+            metadata=base_metadata
         )
 
 
@@ -166,6 +221,135 @@ class ScreeningSession:
         """Add articles to session."""
         self.articles = [ArticleReview.from_article_record(r) for r in article_records]
         self.total_count = len(self.articles)
+
+    def ingest_from_upload(
+        self,
+        uploaded_file,
+        stage: str = "ec"
+    ) -> List[ArticleReview]:
+        """
+        Canonical ingestion: load ATLAS Excel file and convert to ArticleReview objects.
+
+        This is the single canonical entry point for file loading. All DataFrame operations
+        occur HERE, not in the UI layer. Preserves full metadata lineage.
+
+        Args:
+            uploaded_file: Streamlit UploadedFile object
+            stage: Current screening stage ("ec", "ic", "qc")
+
+        Returns:
+            List of ArticleReview objects with full metadata
+        """
+        import tempfile
+        import pandas as pd
+        import json
+        from src.core.article_metadata import (
+            normalize_wl_metadata, normalize_gl_metadata, article_to_dict
+        )
+
+        temp_path = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
+
+        try:
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
+
+            if uploaded_file.name.endswith(".csv"):
+                df = pd.read_csv(temp_path)
+                articles = []
+                for _, row in df.iterrows():
+                    row_dict = row.to_dict()
+                    lit_type = str(row_dict.get("Literature_Type", "WL")).upper()
+                    if lit_type not in ("WL", "GL"):
+                        lit_type = "WL"
+                    metadata = {
+                        "year": str(row_dict.get("Year", "")),
+                        "authors": str(row_dict.get("Authors", "")),
+                        "literature_type": lit_type,
+                        "title": str(row_dict.get("Title", "")),
+                        "abstract": str(row_dict.get("Abstract", "")),
+                        "global_id": str(row_dict.get("global_id", str(uuid.uuid4())[:8])),
+                    }
+                    review_article = ArticleReview(
+                        article_id=metadata["global_id"],
+                        title=metadata["title"],
+                        abstract=metadata["abstract"],
+                        metadata=metadata
+                    )
+                    if stage == "ic":
+                        review_article.ec_stage = str(row_dict.get("EC_Decision", "INCLUDE"))
+                    elif stage == "qc":
+                        review_article.ec_stage = str(row_dict.get("EC_Decision", "INCLUDE"))
+                        review_article.ic_stage = str(row_dict.get("IC_Decision", "INCLUDE"))
+                    articles.append(review_article)
+                self.articles = articles
+                self.total_count = len(articles)
+                return articles
+            else:
+                wl_df = pd.read_excel(temp_path, sheet_name="White Literature")
+                gl_df = pd.read_excel(temp_path, sheet_name="Grey Literature")
+
+            articles = []
+            for _, row in wl_df.iterrows():
+                row_dict = row.to_dict()
+                article = normalize_wl_metadata(row_dict)
+                article_dict = article_to_dict(article)
+                metadata = {
+                    "year": str(article.year) if article.year else "",
+                    "authors": article.authors,
+                    "literature_type": article.literature_type,
+                    "doi": article.doi,
+                    "source": article.source,
+                    "keywords": article.keywords,
+                    "library": article.library,
+                    "global_id": article.global_id,
+                    "local_id": article.local_id,
+                    "url": article.url,
+                    "completeness": article.completeness_score,
+                    "year_source": "atlas",
+                    "metadata_completeness": article.metadata_completeness,
+                    "raw_data": article.raw_data
+                }
+                review_article = ArticleReview(
+                    article_id=article.global_id or article.local_id or str(uuid.uuid4())[:8],
+                    title=article.title,
+                    abstract=article.abstract,
+                    metadata=metadata
+                )
+                articles.append(review_article)
+
+            for _, row in gl_df.iterrows():
+                row_dict = row.to_dict()
+                article = normalize_gl_metadata(row_dict)
+                article_dict = article_to_dict(article)
+                metadata = {
+                    "year": str(article.year) if article.year else "",
+                    "authors": article.authors,
+                    "literature_type": article.literature_type,
+                    "url": article.url,
+                    "source": article.source,
+                    "keywords": article.keywords,
+                    "global_id": article.global_id,
+                    "local_id": article.local_id,
+                    "completeness": article.completeness_score,
+                    "year_source": "atlas",
+                    "metadata_completeness": article.metadata_completeness,
+                    "raw_data": article.raw_data
+                }
+                review_article = ArticleReview(
+                    article_id=article.global_id or article.local_id or str(uuid.uuid4())[:8],
+                    title=article.title,
+                    abstract=article.abstract,
+                    metadata=metadata
+                )
+                articles.append(review_article)
+
+            self.articles = articles
+            self.total_count = len(articles)
+            return articles
+
+        finally:
+            import os
+            os.unlink(temp_path)
     
     def get_current_article(self) -> Optional[ArticleReview]:
         """Get current article for review."""
@@ -272,6 +456,39 @@ class ScreeningSession:
                 break
             
             self.current_index += 1
+    
+    def apply_decision(
+        self,
+        article_id: str,
+        stage: str,
+        decision: str,
+        notes: str = "",
+        llm_suggestion: Optional[Dict] = None
+    ) -> bool:
+        """
+        Apply a decision to a specific article by article_id.
+        
+        This method exists for UI compatibility — it locates the article
+        by ID and records the decision at the specified stage.
+        
+        Args:
+            article_id: The article's article_id (from ArticleReview.article_id)
+            stage: The stage at which to record ("ec", "ic", "qc")
+            decision: The decision ("include", "exclude", "skip", "needs_discussion")
+            notes: Researcher notes/reasoning
+            llm_suggestion: Optional LLM advisory snapshot
+            
+        Returns:
+            True if decision was recorded, False otherwise
+        """
+        for idx, article in enumerate(self.articles):
+            if article.article_id == article_id:
+                saved_index = self.current_index
+                self.current_index = idx
+                result = self.record_decision(decision, notes, llm_suggestion)
+                self.current_index = saved_index
+                return result
+        return False
     
     def get_discussion_articles(self) -> List[ArticleReview]:
         """Get all articles needing discussion."""

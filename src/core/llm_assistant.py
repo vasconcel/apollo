@@ -8,6 +8,8 @@ import os
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
 
+from src.core.criteria_registry import EC_DESCRIPTIONS, IC_DESCRIPTIONS
+
 
 @dataclass
 class AdvisorySuggestion:
@@ -84,13 +86,53 @@ class LLMAssistant:
         """Check if LLM is available."""
         return self._client is not None
     
+    def suggest(
+        self,
+        title: str,
+        abstract: str,
+        literature_type: str,
+        stage: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> AdvisorySuggestion:
+        """
+        Main suggestion entry point that uses metadata.
+        
+        Args:
+            title: Article title
+            abstract: Article abstract
+            literature_type: "WL" or "GL"
+            stage: "ec", "ic", or "qc"
+            metadata: Full article metadata dict with provenance info
+        """
+        year = metadata.get("year") if metadata else None
+        year_source = metadata.get("year_source", "unknown") if metadata else "unknown"
+        metadata_completeness = metadata.get("metadata_completeness", "unknown") if metadata else "unknown"
+        
+        if stage == "ec":
+            return self.suggest_ec(
+                title, abstract, literature_type, year,
+                literature_type=literature_type
+            )
+        elif stage == "ic":
+            return self.suggest_ic(
+                title, abstract, literature_type,
+                literature_type=literature_type
+            )
+        elif stage == "qc":
+            return self.suggest_qc(
+                title, abstract, literature_type,
+                literature_type=literature_type
+            )
+        return self._fallback_suggestion(stage, "Invalid stage")
+    
     def suggest_ec(
         self,
         title: str,
         abstract: str,
         literature_type: str = "WL",
         year: Optional[int] = None,
-        protocol_criteria: Optional[Dict[str, str]] = None
+        protocol_criteria: Optional[Dict[str, str]] = None,
+        metadata: Optional[Dict[str, Any]] = None
     ) -> AdvisorySuggestion:
         """
         Get EC stage advisory suggestion.
@@ -101,21 +143,21 @@ class LLMAssistant:
             literature_type: "WL" or "GL"
             year: Publication year
             protocol_criteria: Researcher-defined EC criteria (uses defaults if None)
+            metadata: Full article metadata for provenance context
         
         Returns suggestion with trigger criteria for researcher review.
         """
-        criteria = protocol_criteria or {
-            "EC1": "Not empirical software engineering research",
-            "EC2": "Published before 2015",
-            "EC3": "Not peer-reviewed (for WL)",
-            "EC4": "Duplicate publication (by Global_ID)"
-        }
+        criteria = protocol_criteria if protocol_criteria else EC_DESCRIPTIONS
+        
+        year_source = metadata.get("year_source", "unknown") if metadata else "unknown"
+        metadata_completeness = metadata.get("metadata_completeness", "unknown") if metadata else "unknown"
         
         prompt = f"""You are an expert systematic review assistant. Analyze this article for EXCLUSION CRITERIA (EC).
 
 Article Title: {title}
-Year: {year or 'Unknown'}
+Year: {year or 'Unknown'} (source: {year_source})
 Type: {literature_type}
+Metadata Completeness: {metadata_completeness}
 Abstract: {abstract[:800] if abstract else 'No abstract available'}
 
 ACTIVE EC CRITERIA:
@@ -152,11 +194,7 @@ Return ONLY valid JSON."""
             literature_type: "WL" or "GL"
             protocol_criteria: Researcher-defined IC criteria (uses defaults if None)
         """
-        criteria = protocol_criteria or {
-            "IC1": "Addresses recruitment/selection practices in software organizations",
-            "IC2": "Reports empirical findings (qualitative or quantitative)",
-            "IC3": "Focuses on software industry context"
-        }
+        criteria = protocol_criteria if protocol_criteria else IC_DESCRIPTIONS
         
         prompt = f"""You are an expert systematic review assistant. Analyze this article for INCLUSION CRITERIA (IC).
 

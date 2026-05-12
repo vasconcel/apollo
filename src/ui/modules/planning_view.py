@@ -13,8 +13,9 @@ def get_database():
 
 def render_planning():
     """Criteria configuration for EC, IC, QC."""
+    st.warning("DEPRECATED: This view is not routed by app.py. Use the Protocol Configuration view instead. Will be removed in a future release.")
     from src.core.database import Database
-    
+
     db = get_database()
     
     st.header("Protocol Configuration")

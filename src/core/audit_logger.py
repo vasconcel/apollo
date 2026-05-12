@@ -8,6 +8,10 @@ STRICT RULES:
 - No LLM reasoning leakage
 - No article full text dumps
 - No nondeterministic timestamps in reproducibility hash
+
+V1.0.0 UPDATES:
+- Determinism hash now uses the physical file's content checksum, not its file path.
+- Updated to track PENDING states for Grey Literature (HITL methodology).
 """
 import json
 import hashlib
@@ -40,8 +44,8 @@ class ProcessingStats:
     qc_scores_2: int = 0
     qc_scores_below: int = 0
     
-    gl_skipped_ic: int = 0
-    gl_skipped_qc: int = 0
+    gl_pending_ic: int = 0  # Changed from skipped to pending (HITL support)
+    gl_pending_qc: int = 0  # Changed from skipped to pending (HITL support)
 
 
 @dataclass
@@ -62,15 +66,36 @@ class AuditLogger:
     LOG_DIR = "logs"
     
     @staticmethod
+    def _compute_file_checksum(file_path: str) -> str:
+        """
+        Compute SHA256 checksum of the actual input file content.
+        This guarantees that identical datasets processed in different 
+        folders/computers generate the same hash.
+        """
+        if not os.path.exists(file_path):
+            # Fallback for mocked tests where the file might not physically exist
+            return hashlib.sha256(file_path.encode()).hexdigest()[:16]
+            
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            # Read in 4K chunks to handle large Excel files safely
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()[:16]
+    
+    @staticmethod
     def _compute_determinism_hash(input_file: str, protocol_info: ProtocolInfo, 
                                    stats: ProcessingStats) -> str:
         """
         Compute deterministic hash for reproducibility verification.
         
-        Combines input metadata + protocol checksum + output stats.
+        Combines file content checksum + protocol checksum + output stats.
         No actual article content - just structural information.
         """
-        hash_input = f"{input_file}|{protocol_info.checksum}|{stats.wl_included}|{stats.wl_excluded}|{stats.gl_included}|{stats.gl_excluded}"
+        # CRITICAL FIX: Use file content hash instead of string path
+        file_content_hash = AuditLogger._compute_file_checksum(input_file)
+        
+        hash_input = f"{file_content_hash}|{protocol_info.checksum}|{stats.wl_included}|{stats.wl_excluded}|{stats.gl_included}|{stats.gl_excluded}"
         return hashlib.sha256(hash_input.encode()).hexdigest()[:16]
     
     @staticmethod
@@ -99,7 +124,7 @@ class AuditLogger:
         # GL stats
         stats.gl_total = len(gl_results)
         stats.gl_included = sum(1 for r in gl_results if r.final_decision == "INCLUDE")
-        stats.gl_excluded = stats.gl_total - stats.gl_included
+        stats.gl_excluded = sum(1 for r in gl_results if r.final_decision == "EXCLUDE")
         
         # EC/IC failure counts
         for r in wl_results:
@@ -123,7 +148,7 @@ class AuditLogger:
         # QC scores distribution (WL only)
         for r in wl_results:
             qc = r.qc_score
-            if qc == "N/A":
+            if qc in ["N/A", "PENDING"]:
                 continue
             try:
                 score = float(qc.split("/")[0])
@@ -138,12 +163,12 @@ class AuditLogger:
             except:
                 pass
         
-        # GL skipped counts
+        # GL PENDING counts (Support for new HITL methodology)
         for r in gl_results:
-            if r.ic_decision == "SKIPPED":
-                stats.gl_skipped_ic += 1
-            if r.qc_score == "SKIPPED":
-                stats.gl_skipped_qc += 1
+            if r.ic_decision == "PENDING":
+                stats.gl_pending_ic += 1
+            if r.qc_score == "PENDING":
+                stats.gl_pending_qc += 1
         
         # EC4 duplicates
         stats.duplicates_detected = stats.ec4_failures
@@ -153,6 +178,7 @@ class AuditLogger:
     @staticmethod
     def get_protocol_info(protocol: Optional[Dict]) -> ProtocolInfo:
         """Extract protocol information for logging."""
+        # Using late import to prevent circular dependencies
         from src.core.protocol_engine import get_default_protocol
         
         if protocol is None:
@@ -202,7 +228,7 @@ class AuditLogger:
         log_entry = {
             "run_id": run_id,
             "timestamp": datetime.now().isoformat(),
-            "input_file": input_file,
+            "input_file_name": os.path.basename(input_file),  # Store only the name for readability
             "protocol": asdict(protocol_info),
             "processing_stats": asdict(stats),
             "execution_time_ms": execution_time_ms,
@@ -230,7 +256,7 @@ class AuditLogger:
             return None
         
         latest = sorted(log_files)[-1]
-        with open(os.path.join(AuditLogger.LOG_DIR, latest), 'r') as f:
+        with open(os.path.join(AuditLogger.LOG_DIR, latest), 'r', encoding='utf-8') as f:
             return json.load(f)
 
 

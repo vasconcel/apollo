@@ -195,6 +195,7 @@ def render_audit_download(output_file):
 
 def render_atlas_processor():
     """ATLAS Excel Processor Interface - Main entry point."""
+    st.warning("DEPRECATED: This view is not routed by app.py. Canonical workflow uses EC Screening view with ATLAS file upload. Will be removed in a future release.")
     from src.core.atlas_processor import process_atlas_file
     from src.core.audit_logger import AuditLogger
     from src.core.dynamic_protocol import ProtocolState

@@ -1,6 +1,35 @@
 """
-APOLLO Database - Minimal Schema for EC/IC/QC Decision Support
-Only supports: Eligibility (EC/IC) + Quality (QC) decisions
+APOLLO Database - ORPHANED RUNTIME MODULE
+==========================================
+
+DEPRECATED as of 2026-05-12.
+
+This module is ORPHANED and is NOT part of the canonical APOLLO execution path.
+
+CANONICAL PATH:
+  - Session management: src.core.screening_session.ScreeningSession (JSON-based)
+  - Article records: src.core.atlas_processor.ArticleRecord
+  - Export: src.core.export_engine.ExportEngine
+
+WHY ORPHANED:
+  1. The canonical path uses ScreeningSession (JSON, file-persisted) for state
+  2. This module uses SQLite for persistence — separate persistence layer
+  3. Only used by orphaned UI modules (eligibility_view, quality_view, etc.)
+  4. No canonical module imports it
+
+REMAINING CONSUMERS (ORPHANED):
+  - src/ui/modules/overview_view.py (ORPHANED)
+  - src/ui/modules/eligibility_view.py (ORPHANED)
+  - src/ui/modules/quality_view.py (ORPHANED)
+  - src/ui/modules/planning_view.py (ORPHANED)
+
+FUTURE USE CASE:
+  This module may be useful for future multi-user features or persistent
+  database requirements. For now, it is preserved but not extended.
+
+This module will be reviewed when multi-user features are planned.
+
+AVOID: Do not use for new features without architectural review.
 """
 import sqlite3
 import json

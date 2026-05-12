@@ -1,20 +1,21 @@
 """
-APOLLO Human-in-the-Loop Review Interface
+APOLLO Human-in-the-Loop Review Interface - Forensic Terminal Aesthetic
 Streamlit UI for researcher-driven screening
 
-KEYBOARD SHORTCUTS:
-- I: Include
-- E: Exclude  
-- D: Needs Discussion
-- S: Skip
-- N: Next (after decision)
-- Esc: Save and exit
+V1.0.0 UPDATES:
+- Specialized rendering for Grey Literature (GL) with source URL prominence.
+- Improved decision persistence and audit note capturing.
+- Strict stage blocking logic (EC -> IC -> QC).
 """
 import streamlit as st
 import os
 import pandas as pd
 from datetime import datetime
+import logging
+from typing import Optional
 
+from src.ui.theme import COLORS, TYPOGRAPHY
+from src.ui.components import section_header, divider, terminal_header
 from src.core.atlas_processor import ATLASLoader, APOLLODecisionEngine
 from src.core.screening_session import (
     ScreeningSession, SessionStage, 
@@ -23,880 +24,298 @@ from src.core.screening_session import (
 from src.core.reviewer_state import ReviewerState
 from src.core.llm_assistant import LLMAssistant
 from src.core.export_engine import ExportEngine
-from src.core.calibration_engine import CalibrationEngine
 
+logger = logging.getLogger(__name__)
 
-st.session_state.setdefault("session", None)
-st.session_state.setdefault("reviewer_state", None)
-st.session_state.setdefault("last_action", "")
+# ==============================================================================
+# 1. SESSION MANAGEMENT HELPERS
+# ==============================================================================
 
+def save_session_state():
+    """Silently persists session to disk."""
+    if "session" in st.session_state and st.session_state.session:
+        st.session_state.session.save("sessions")
 
-def render_progress_bar(session: ScreeningSession):
-    """Render compact progress bar."""
-    progress = session.get_progress()
-    
-    total = progress["total"]
-    current = progress["current"]
-    pct = int((current / total * 100)) if total > 0 else 0
-    
-    # Compact progress bar
-    st.progress(pct, text=f"{current}/{total} papers reviewed ({pct}%)")
-    
-    # Compact stage counters
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("EC", f"{progress['ec_completed']}")
-    with c2:
-        ic_total = len(session.get_ec_included_articles())
-        st.metric("IC passed", f"{ic_total}")
-    with c3:
-        included = progress.get("included", 0)
-        st.metric("Included", included)
+def handle_load_session(session_id: str):
+    """Loads a specific session and updates UI state."""
+    loaded = load_screening_session(session_id)
+    if loaded:
+        st.session_state.session = loaded
+        # Reconstruct reviewer state from session metadata if possible
+        st.session_state.reviewer_state = ReviewerState(
+            researcher_id="researcher_1",
+            session_id=loaded.session_id,
+            stage=loaded.stage
+        )
+        st.rerun()
 
-
-def render_decision_summary(session: ScreeningSession):
-    """Render compact decision summary."""
-    progress = session.get_progress()
-    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Include", progress["included"], delta_color="normal")
-    with c2:
-        st.metric("Exclude", progress["excluded"], delta_color="inverse")
-    with c3:
-        st.metric("Discuss", progress["discussion"])
-    with c4:
-        pending = progress.get(f"{session.stage}_pending", 0)
-        st.metric("Pending", pending)
-
+# ==============================================================================
+# 2. SIDEBAR COMPONENTS
+# ==============================================================================
 
 def render_review_sidebar():
-    """Render compact sidebar for long review sessions."""
+    """Compact sidebar for session management and protocol configuration."""
     with st.sidebar:
-        st.markdown("**APOLLO**")
-        st.caption("Scientific Screening Assistant")
-        st.divider()
-        
-        # Keyboard shortcuts compact
-        st.caption("**Shortcuts:** I Incl | E Excl | S Skip")
-        
-        st.divider()
+        st.markdown(f"<div style='{TYPOGRAPHY['mono']}; font-size: 0.8rem; color: {COLORS['cyan']};'>● SESSION CONTROL</div>", unsafe_allow_html=True)
         
         if "session" in st.session_state and st.session_state.session:
             session = st.session_state.session
+            st.caption(f"ID: {session.session_id[:12]}...")
+            st.caption(f"Stage: {session.stage.upper()}")
             
-            st.caption(f"Session: {session.session_id[:12]}...")
-            st.caption(f"Protocol: {session.protocol_version}")
-            
-            current_stage = session.stage
-            render_protocol_config_panel(session, current_stage)
-            
-            st.divider()
-            
+            # Progress & Stats
             progress = session.get_progress()
-            render_progress_bar(session)
+            st.progress(progress["current"] / progress["total"] if progress["total"] > 0 else 0)
+            st.caption(f"{progress['current']}/{progress['total']} papers reviewed")
             
-            st.divider()
-            render_decision_summary(session)
+            c1, c2 = st.columns(2)
+            c1.metric("INC", progress["included"])
+            c2.metric("EXC", progress["excluded"])
             
-            st.divider()
+            divider()
             
-            if st.button("Save Session", use_container_width=True):
+            # Dynamic Protocol Config
+            from src.ui.modules.protocol_view import render_protocol_config_panel
+            render_protocol_config_panel(session, session.stage)
+            
+            if st.button("💾 SAVE SESSION", use_container_width=True):
                 save_session_state()
-                st.success("Saved!")
+                st.toast("Progress persisted to disk", icon="💾")
+                
+        else:
+            st.info("No active session loaded")
             
-            if st.button("Recover Session"):
-                recovered = recover_session()
-                if recovered:
-                    st.session_state.session = recovered
-                    st.rerun()
-                else:
-                    st.warning("No sessions to recover")
-        else:
-            st.info("No active session")
+        divider()
         
-        st.divider()
-        
-        if st.button("Load Session"):
+        # Session Loading Logic
+        with st.expander("📂 LOAD PREVIOUS SESSION"):
             from src.core.screening_session import list_sessions
             sessions = list_sessions()
             if sessions:
-                session_ids = [s["session_id"] for s in sessions]
-                selected = st.selectbox("Select session", session_ids)
-                if selected:
-                    loaded = load_screening_session(selected)
-                    if loaded:
-                        st.session_state.session = loaded
-                        st.rerun()
-                recovered = recover_session()
-                if recovered:
-                    st.session_state.session = recovered
-                    st.rerun()
-                else:
-                    st.warning("No sessions to recover")
-        else:
-            st.info("No active session")
-        
-        st.divider()
-        
-        if st.button("📂 Load Session"):
-            from src.core.screening_session import list_sessions
-            sessions = list_sessions()
-            if sessions:
-                session_ids = [s["session_id"] for s in sessions]
-                selected = st.selectbox("Select session", session_ids)
-                if selected:
-                    loaded = load_screening_session(selected)
-                    if loaded:
-                        st.session_state.session = loaded
-                        st.rerun()
+                # Get unique sessions sorted by date
+                session_options = {f"{s['session_id'][:8]} ({s['date']})": s['session_id'] for s in sessions}
+                selected_label = st.selectbox("Select Session", options=list(session_options.keys()))
+                if st.button("CONFIRM LOAD"):
+                    handle_load_session(session_options[selected_label])
+            else:
+                st.caption("No sessions found in /sessions")
 
-
-def render_protocol_info():
-    """Render active protocol info."""
-    
-    return
-
-
-def render_protocol_config_panel(session, current_stage: str):
-    """Render protocol configuration panel in sidebar."""
-    import logging
-    from src.core.dynamic_protocol import DynamicProtocol, Criterion
-    
-    logger = logging.getLogger(__name__)
-    
-    if not session.dynamic_protocol:
-        session.dynamic_protocol = DynamicProtocol().to_dict()
-    
-    try:
-        protocol = DynamicProtocol.from_dict(session.dynamic_protocol)
-    except (TypeError, ValueError) as e:
-        logger.warning(f"Failed to load dynamic protocol: {e}. Rebuilding default.")
-        st.warning("Protocol state was corrupted. Resetting to default.")
-        session.dynamic_protocol = DynamicProtocol().to_dict()
-        protocol = DynamicProtocol.from_dict(session.dynamic_protocol)
-    stage_protocol = protocol.get_stage_protocol(current_stage)
-    
-    if not stage_protocol:
-        return
-    
-    with st.expander(f"⚙️ {current_stage.upper()} Criteria Configuration", expanded=False):
-        st.caption(f"Edit {current_stage.upper()} criteria - changes apply immediately")
-        
-        new_criteria = {}
-        col1, col2 = st.columns([1, 1])
-        
-        idx = 0
-        for criterion_id, criterion in stage_protocol.criteria.items():
-            with (col1 if idx % 2 == 0 else col2):
-                enabled = st.checkbox(
-                    f"Enable {criterion_id}",
-                    value=criterion.enabled,
-                    key=f"enable_{criterion_id}"
-                )
-                new_desc = st.text_input(
-                    f"{criterion_id} description",
-                    value=criterion.description,
-                    key=f"desc_{criterion_id}"
-                )
-                new_criteria[criterion_id] = {
-                    "id": criterion_id,
-                    "description": new_desc,
-                    "enabled": enabled,
-                    "weight": criterion.weight
-                }
-            idx += 1
-        
-        st.divider()
-        
-        new_criterion_id = st.text_input("New criterion ID (e.g., EC5)", key="new_criterion_id")
-        new_criterion_desc = st.text_input("New criterion description", key="new_criterion_desc")
-        
-        if st.button("➕ Add Criterion", key="add_criterion"):
-            if new_criterion_id and new_criterion_desc:
-                new_criteria[new_criterion_id] = {
-                    "id": new_criterion_id,
-                    "description": new_criterion_desc,
-                    "enabled": True,
-                    "keywords": [],
-                    "weight": 1.0
-                }
-                st.success(f"Added {new_criterion_id}")
-                st.rerun()
-        
-        for criterion_id, criterion_data in new_criteria.items():
-            try:
-                stage_protocol.criteria[criterion_id] = Criterion.from_dict(criterion_data)
-            except (TypeError, ValueError) as e:
-                logger.error(f"Failed to deserialize criterion {criterion_id}: {e}")
-                st.error(f"Failed to save criterion {criterion_id}. Please refresh.")
-        
-        try:
-            session.dynamic_protocol = protocol.to_dict()
-        except Exception as e:
-            logger.error(f"Failed to serialize protocol: {e}")
-            st.error("Failed to save protocol changes. Please refresh.")
-
+# ==============================================================================
+# 3. ARTICLE RENDERING (THE CORE CARD)
+# ==============================================================================
 
 def render_article_card(article):
-    """Render article as a modern research-focused card."""
+    """Renders article with forensic focus on metadata and GL URLs."""
+    lit_type = article.metadata.get('literature_type', 'WL')
+    
     with st.container():
-        # Title - large and prominent
-        st.markdown(f"### {article.title}")
+        if lit_type == "WL":
+            st.markdown(f"""
+                <div style="background:{COLORS['cyan']}15; border:1px solid {COLORS['cyan']}44; border-radius:4px; padding:8px 12px; margin-bottom:12px;">
+                    <span style="color:{COLORS['cyan']}; font-family:{TYPOGRAPHY['mono']}; font-size:0.85rem; font-weight:bold;">▸ WHITE LITERATURE SCREENING</span>
+                    <span style="color:{COLORS['text_muted']}; font-family:{TYPOGRAPHY['mono']}; font-size:0.75rem; margin-left:12px;">Peer-reviewed academic corpus</span>
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+                <div style="background:{COLORS['warning']}15; border:1px solid {COLORS['warning']}44; border-radius:4px; padding:8px 12px; margin-bottom:12px;">
+                    <span style="color:{COLORS['warning']}; font-family:{TYPOGRAPHY['mono']}; font-size:0.85rem; font-weight:bold;">▸ GREY LITERATURE SCREENING</span>
+                    <span style="color:{COLORS['text_muted']}; font-family:{TYPOGRAPHY['mono']}; font-size:0.75rem; margin-left:12px;">Non-peer-reviewed source inspection required</span>
+                </div>
+            """, unsafe_allow_html=True)
         
-        # Metadata row - compact and readable
-        metadata = article.metadata
+        st.markdown(f"## {article.title}")
         
-        md_cols = st.columns(4)
-        with md_cols[0]:
-            st.caption(f"**Type:** {metadata.get('literature_type', 'WL')}")
-        with md_cols[1]:
-            gid = metadata.get('global_id', '')
-            st.caption(f"**ID:** {gid[:16] if gid else 'N/A'}...")
-        with md_cols[2]:
-            st.caption(f"**Library:** {metadata.get('library', 'N/A')}")
-        with md_cols[3]:
-            keywords = metadata.get('keywords', '')
-            if keywords:
-                kw_preview = keywords[:40] + "..." if len(keywords) > 40 else keywords
-                st.caption(f"**Keywords:** {kw_preview}")
+        meta = article.metadata
+        year_value = meta.get('year', 'N/A')
+        year_source = meta.get('year_source', 'unknown')
         
-        st.markdown("---")
+        if year_source == "structured":
+            year_label = f"{year_value} [STRUCTURED]"
+        elif year_source == "regex":
+            year_label = f"{year_value} [INFERRED]"
+        else:
+            year_label = str(year_value) if year_value else "N/A"
         
-        # Abstract with clean typography
+        cols = st.columns([1, 1, 1, 1])
+        cols[0].caption(f"**ID:** {article.article_id[:8]}")
+        cols[1].caption(f"**Year:** {year_label}")
+        cols[2].caption(f"**Source:** {meta.get('library', meta.get('source_file', 'ATLAS Import'))}")
+        
+        url = meta.get('url', '')
+        if url:
+            cols[3].markdown(f"[🔗 OPEN SOURCE URL]({url})")
+        
+        divider()
+        
         abstract = article.abstract
-        if abstract:
-            st.markdown(f"<div style='line-height: 1.7; color: #C9D1D9; padding: 0.5rem; background: #161B22; border-radius: 6px;'>{abstract}</div>", unsafe_allow_html=True)
-        else:
-            st.warning("No abstract available for this paper")
-
-
-def render_llm_suggestion_panel(suggestion, stage: str):
-    """Render LLM suggestion as advisory panel."""
-    if not suggestion:
-        st.info("AI suggestions not available - review manually")
-        return
-    
-    st.markdown("---")
-    st.markdown("**AI Advisory Suggestion (Non-binding)**")
-    
-    cols = st.columns([1, 1])
-    
-    with cols[0]:
-        decision = suggestion.get("decision", "skip").upper()
-        confidence = suggestion.get("confidence", 0.0)
         
-        if decision == "INCLUDE":
-            st.success(f"**{decision}** ({int(confidence*100)}% confidence)")
-        elif decision == "EXCLUDE":
-            st.error(f"**{decision}** ({int(confidence*100)}% confidence)")
-        else:
-            st.warning(f"**{decision}** ({int(confidence*100)}% confidence)")
-    
-    with cols[1]:
-        criteria = suggestion.get("triggered_criteria", {})
-        if criteria:
-            st.caption("**Criteria Analysis:**")
-            for criterion, reason in criteria.items():
-                if reason:
-                    st.caption(f"- {criterion}: {reason[:60]}...")
-    
-    justification = suggestion.get("justification", "")
-    if justification:
-        st.caption(f"_{justification}_")
-    
-    evidence = suggestion.get("evidence", [])
-    if evidence:
-        with st.expander("Evidence"):
-            for e in evidence[:5]:
-                st.caption(f"- {e}")
-
-
-def render_decision_buttons(stage: str):
-    """Render researcher decision buttons."""
-    st.subheader("🎯 Your Decision")
-    
-    cols = st.columns(4)
-    
-    with cols[0]:
-        include_btn = st.button(
-            "✅ Include",
-            type="primary",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    with cols[1]:
-        exclude_btn = st.button(
-            "❌ Exclude",
-            type="primary",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    with cols[2]:
-        discuss_btn = st.button(
-            "💬 Needs Discussion",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    with cols[3]:
-        skip_btn = st.button(
-            "⏭️ Skip",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    notes = ""
-    if include_btn or exclude_btn or discuss_btn:
-        notes = st.text_area(
-            "Notes (optional)",
-            placeholder="Add notes about this decision...",
-            key="decision_notes"
-        )
-    
-    choice = None
-    if include_btn:
-        choice = "include"
-    elif exclude_btn:
-        choice = "exclude"
-    elif discuss_btn:
-        choice = "needs_discussion"
-    elif skip_btn:
-        choice = "skip"
-    
-    return choice, notes
-
-
-def save_session_state():
-    """Save current session state."""
-    if "session" in st.session_state and st.session_state.session:
-        session = st.session_state.session
-        session.save("sessions")
-
-
-def load_atlas_and_start_session(uploaded_file, stage: str = "ec"):
-    """Load ATLAS file and start review session."""
-    import uuid
-    
-    temp_path = f"temp_session_{uuid.uuid4().hex[:8]}.xlsx"
-    
-    with open(temp_path, "wb") as f:
-        f.write(uploaded_file.getvalue())
-    
-    try:
-        wl_df, gl_df = ATLASLoader.load_atlas_file(temp_path)
-        wl_df = ATLASLoader.normalize_wl_columns(wl_df)
-        gl_df = ATLASLoader.normalize_gl_columns(gl_df)
+        if lit_type == "GL" and ("[MANUAL REVIEW REQUIRED]" in abstract or not abstract):
+            st.warning("⚠️ **METHODOLOGICAL NOTICE:** Grey Literature abstract is unavailable in ATLAS export. Please perform evaluation by visiting the Source URL provided above.")
         
-        engine = APOLLODecisionEngine(enable_llm_reasoning=False)
+        if not abstract or "[ABSTRACT MISSING" in abstract:
+            st.markdown(f"""
+                <div style="background:{COLORS['warning']}22; padding:1rem; border-radius:8px; border:1px solid {COLORS['warning']}44; margin-bottom:1rem;">
+                    <span style="color:{COLORS['warning']}; font-family:{TYPOGRAPHY['mono']}; font-size:0.8rem;">⚠️ No abstract available. Manual source inspection required.</span>
+                </div>
+            """, unsafe_allow_html=True)
         
-        wl_results = engine.process_wl_articles(wl_df)
-        gl_results = engine.process_gl_articles(gl_df)
-        
-        from src.core.screening_session import create_session
-        session = create_session(wl_results + gl_results, "1.0")
-        session.stage = stage
-        
-        reviewer_state = ReviewerState(
-            researcher_id="researcher_1",
-            session_id=session.session_id,
-            stage=stage
-        )
-        
-        st.session_state.session = session
-        st.session_state.reviewer_state = reviewer_state
-        st.session_state.wl_results = wl_results
-        st.session_state.gl_results = gl_results
-        st.session_state.temp_path = temp_path
-        
-        return True
-    
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        return False
-
-
-def render_stage_selector_with_indicator() -> str:
-    """Render stage selector with prominent modern indicator."""
-    session = st.session_state.session
-    
-    stage_names = {
-        "ec": "Exclusion Criteria",
-        "ic": "Inclusion Criteria", 
-        "qc": "Quality Assessment"
-    }
-    stage_descriptions = {
-        "ec": "Filter out: Not SE research | Before 2015 | Not peer-reviewed | Duplicates",
-        "ic": "Filter in: Addresses SE recruitment/selection | Empirical findings",
-        "qc": "Assess quality: Methodology | Findings | Limitations"
-    }
-    
-    # Stage selector with cleaner layout
-    stage_options = ["ec", "ic", "qc"]
-    stage_index = stage_options.index(session.stage) if session.stage in stage_options else 0
-    
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        selected_stage = st.selectbox(
-            "Stage",
-            options=stage_options,
-            index=stage_index,
-            format_func=lambda x: stage_names[x],
-            key="stage_selector"
-        )
-    
-    if selected_stage != session.stage:
-        session.stage = selected_stage
-        st.session_state.reviewer_state.stage = selected_stage
-    
-    # Prominent stage indicator - styled for long sessions
-    with col2:
         st.markdown(f"""
-        <div style='padding: 0.75rem; background: #1F2937; border-radius: 6px; border-left: 3px solid #2563EB;'>
-            <strong style='font-size: 1.1rem;'>{stage_names.get(session.stage, session.stage)}</strong><br>
-            <span style='color: #9CA3AF; font-size: 0.85rem;'>{stage_descriptions.get(session.stage, '')}</span>
-        </div>
+            <div style="background:{COLORS['bg_card']}; padding:1.5rem; border-radius:8px; border:1px solid {COLORS['border_light']}; line-height:1.6; color:#E5E5E5;">
+                {abstract if abstract and not "[ABSTRACT MISSING" in abstract else "<i>No abstract available for this record.</i>"}
+            </div>
         """, unsafe_allow_html=True)
-    
-    return session.stage
 
+# ==============================================================================
+# 4. DECISION CONTROLS
+# ==============================================================================
 
-def render_blocked_message(article, stage: str) -> bool:
-    """Render explicit blocked-paper message. Returns True if blocked."""
-    if article.can_proceed_to_stage(stage):
-        return False
+def render_decision_controls(session: ScreeningSession, article):
+    """Render ergonomic buttons and captures reasoning."""
+    st.markdown(f"<div style='{TYPOGRAPHY['mono']}; font-size: 0.8rem; color: {COLORS['text_muted']}; margin-top:2rem;'>▸ DECISION CONSOLE</div>", unsafe_allow_html=True)
     
-    if stage == "ic" and not article.is_ec_included:
-        st.error("BLOCKED: This article was excluded at EC stage and cannot proceed to IC stage.")
-        st.caption("Reason: " + (article.ec_notes or "EC exclusion decision"))
-        return True
+    is_blocked = False
+    lit_type = article.metadata.get('literature_type', 'WL')
     
-    if stage == "qc" and not article.is_ic_included:
-        st.error("BLOCKED: This article was excluded at IC stage and cannot proceed to QC stage.")
-        st.caption("Reason: " + (article.ic_notes or "IC exclusion decision"))
-        return True
-    
-    return False
+    if session.stage == "ic":
+        if article.ec_stage == "exclude":
+            st.error("🚫 ARTICLE BLOCKED: Failed Exclusion Criteria (EC).")
+            is_blocked = True
+        elif lit_type == "GL" and article.metadata.get('ic_decision') == "PENDING":
+            st.warning("⚠️ **GL METHODOLOGICAL BLOCK:** Grey Literature that passed EC requires manual source inspection. Please visit the Source URL to complete evaluation.")
+            st.info("📋 Use DISCUSS button to mark this for manual review, or EXCLUDE if the source is inaccessible.")
+            is_blocked = False
+    elif session.stage == "qc":
+        if article.ec_stage == "exclude" or article.ic_stage == "exclude":
+            st.error("🚫 ARTICLE BLOCKED: Failed Previous Screening Stage.")
+            is_blocked = True
 
+    c1, c2, c3, c4 = st.columns(4)
+    
+    # Logic for button states
+    btn_disabled = is_blocked
+    
+    with c1:
+        inc = st.button("✅ INCLUDE", use_container_width=True, type="primary", disabled=btn_disabled)
+    with c2:
+        exc = st.button("❌ EXCLUDE", use_container_width=True, disabled=btn_disabled)
+    with c3:
+        dis = st.button("💬 DISCUSS", use_container_width=True, disabled=btn_disabled)
+    with c4:
+        skp = st.button("⏭️ SKIP", use_container_width=True)
 
-def render_decision_controls_with_notes(stage: str) -> tuple:
-    """Render decision buttons with notes - modern ergonic layout."""
-    st.markdown("#### Your Decision")
-    
-    # Decision buttons in a row - prominent and distinct
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        include_btn = st.button(
-            "Include",
-            type="primary",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    with col2:
-        exclude_btn = st.button(
-            "Exclude", 
-            type="primary",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    with col3:
-        discuss_btn = st.button(
-            "Needs Discussion",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    with col4:
-        skip_btn = st.button(
-            "Skip",
-            use_container_width=True,
-            disabled=stage not in ["ec", "ic", "qc"]
-        )
-    
-    # Notes field - always visible for audit trail
-    notes = st.text_area(
-        "Reviewer Notes (optional)",
-        placeholder="Document your reasoning for audit trail...",
-        key="decision_notes",
-        label_visibility="collapsed"
-    )
-    
-    choice = None
-    if include_btn:
-        choice = "include"
-    elif exclude_btn:
-        choice = "exclude"
-    elif discuss_btn:
-        choice = "needs_discussion"
-    elif skip_btn:
-        choice = "skip"
-    
-    return choice, notes
+    notes = st.text_area("Audit Notes / Reasoning:", placeholder="Enter justification for this decision...", key=f"note_{article.article_id}")
 
-
-def render_export_section():
-    """Render export options."""
-    st.divider()
-    st.subheader("📥 Export Results")
+    # Process Decision
+    decision = None
+    if inc: decision = "include"
+    if exc: decision = "exclude"
+    if dis: decision = "needs_discussion"
     
-    cols = st.columns(4)
-    
-    with cols[0]:
-        if st.button("📊 Excel", use_container_width=True):
-            export_to_excel()
-    
-    with cols[1]:
-        if st.button("📄 Session JSON", use_container_width=True):
-            export_session_json()
-    
-    with cols[2]:
-        if st.button("📋 Audit Log", use_container_width=True):
-            export_audit_log()
-    
-    with cols[3]:
-        if st.button("📊 Calibration CSV", use_container_width=True):
-            export_calibration_matrix()
-    
-    st.caption("**For Inter-Rater Reliability**:")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("⚠️ Disagreement Report", use_container_width=True):
-            export_disagreement_report()
-    
-    with col2:
-        if st.button("📊 Cohen's Kappa CSV", use_container_width=True):
-            export_calibration_matrix()
-
-
-def export_to_excel():
-    """Export decisions to Excel."""
-    session = st.session_state.session
-    reviewer = st.session_state.reviewer_state
-    
-    engine = ExportEngine(protocol_version=session.protocol_version)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = f"exports/decisions_{session.session_id}_{timestamp}.xlsx"
-    
-    os.makedirs("exports", exist_ok=True)
-    
-    engine.export_decisions_excel(session, output_path)
-    
-    with open(output_path, "rb") as f:
-        st.download_button(
-            "📊 Download Excel",
-            data=f.read(),
-            file_name=f"APOLLO_decisions_{timestamp}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-
-def export_session_json():
-    """Export session JSON."""
-    session = st.session_state.session
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = f"exports/session_{session.session_id}_{timestamp}.json"
-    
-    os.makedirs("exports", exist_ok=True)
-    
-    session.save("exports")
-    
-    with open(session.save("exports"), "r") as f:
-        content = f.read()
-    
-    st.download_button(
-        "📄 Download Session",
-        data=content,
-        file_name=f"APOLLO_session_{timestamp}.json",
-        mime="application/json"
-    )
-
-
-def export_audit_log():
-    """Export audit log."""
-    session = st.session_state.session
-    reviewer = st.session_state.reviewer_state
-    
-    engine = ExportEngine(protocol_version=session.protocol_version)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = f"exports/audit_{session.session_id}_{timestamp}.json"
-    
-    os.makedirs("exports", exist_ok=True)
-    
-    engine.export_audit_log(reviewer, output_path)
-    
-    with open(output_path, "r") as f:
-        content = f.read()
-    
-    st.download_button(
-        "📋 Download Audit",
-        data=content,
-        file_name=f"APOLLO_audit_{timestamp}.json",
-        mime="application/json"
-    )
-
-
-def export_calibration_matrix():
-    """Export calibration-ready decision matrix."""
-    session = st.session_state.session
-    reviewer = st.session_state.reviewer_state
-    
-    if not reviewer.decisions:
-        st.warning("No decisions recorded")
-        return
-    
-    decision_data = []
-    for d in reviewer.decisions:
-        decision_data.append({
-            "article_id": d.article_id,
-            "stage": d.stage,
-            "researcher": d.researcher_id,
-            "decision": d.decision,
-            "ai_suggestion": d.ai_suggestion or "",
-            "ai_confidence": d.ai_confidence or 0.0,
-            "notes": d.notes,
-            "timestamp": d.timestamp,
-            "did_override_ai": d.did_override_ai
-        })
-    
-    df = pd.DataFrame(decision_data)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = f"exports/calibration_{session.session_id}_{timestamp}.csv"
-    
-    os.makedirs("exports", exist_ok=True)
-    df.to_csv(output_path, index=False)
-    
-    with open(output_path, "r") as f:
-        content = f.read()
-    
-    st.download_button(
-        "📊 Download Calibration CSV",
-        data=content,
-        file_name=f"APOLLO_calibration_{timestamp}.csv",
-        mime="text/csv"
-    )
-
-
-def export_disagreement_report():
-    """Export disagreement report for calibration."""
-    session = st.session_state.session
-    reviewer = st.session_state.reviewer_state
-    
-    overrides = reviewer.get_ai_overrides()
-    
-    if not overrides:
-        st.info("No AI overrides - perfect agreement!")
-        return
-    
-    data = []
-    for o in overrides:
-        data.append({
-            "article_id": o.article_id,
-            "stage": o.stage,
-            "human_decision": o.decision,
-            "ai_suggestion": o.ai_suggestion,
-            "ai_confidence": o.ai_confidence,
-            "reason": o.notes or "Human overrode AI",
-            "timestamp": o.timestamp
-        })
-    
-    df = pd.DataFrame(data)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = f"exports/disagreements_{session.session_id}_{timestamp}.csv"
-    
-    os.makedirs("exports", exist_ok=True)
-    df.to_csv(output_path, index=False)
-    
-    with open(output_path, "r") as f:
-        content = f.read()
-    
-    st.download_button(
-        "⚠️ Download Disagreement Report",
-        data=content,
-        file_name=f"APOLLO_disagreements_{timestamp}.csv",
-        mime="text/csv"
-    )
-
-
-def render_review_interface():
-    """Main review interface."""
-    st.header("🔬 APOLLO - Human-in-the-Loop Screening")
-    st.caption("Researcher makes final decisions with LLM advisory suggestions")
-    
-    render_protocol_info()
-    
-    st.divider()
-    
-    if "session" not in st.session_state or not st.session_state.session:
-        render_start_new_session()
-    else:
-        render_active_session()
-
-
-def render_start_new_session():
-    """Render start new session UI."""
-    st.subheader("📁 Start New Screening Session")
-    
-    st.info("""
-    **Upload ATLAS Excel file** to begin screening:
-    - WL sheet: Library, Global_ID, Local_ID, Title, Abstract, Keywords
-    - GL sheet: Posicao, Title, URL, Source_File
-    """)
-    
-    uploaded_file = st.file_uploader("Upload ATLAS Excel", type=["xlsx"])
-    
-    if uploaded_file:
-        stage = st.selectbox(
-            "Start at stage",
-            options=["ec", "ic", "qc"],
-            format_func=lambda x: {"ec": "Exclusion Criteria (EC)", "ic": "Inclusion Criteria (IC)", "qc": "Quality Assessment (QC)"}[x]
-        )
+    if decision:
+        # Update Session Data
+        session.apply_decision(article.article_id, session.stage, decision, notes)
         
-        if st.button("🚀 Start Screening", type="primary", use_container_width=True):
-            if load_atlas_and_start_session(uploaded_file, stage):
-                st.rerun()
-
-
-def render_active_session():
-    """Render active session UI."""
-    session = st.session_state.session
-    reviewer = st.session_state.reviewer_state
-    
-    render_review_sidebar()
-    
-    st.divider()
-    
-    article = session.get_current_article()
-    
-    if not article:
-        st.success("Screening Complete!")
-        
-        render_export_section()
-        
-        if st.button("Start New Session"):
-            del st.session_state.session
-            del st.session_state.reviewer_state
-            st.rerun()
-        
-        return
-    
-    current_stage = render_stage_selector_with_indicator()
-    
-    render_article_card(article)
-    
-    st.divider()
-    
-    # Check if article is blocked from current stage
-    is_blocked = render_blocked_message(article, current_stage)
-    
-    # Show LLM suggestion panel (only if not blocked)
-    llm_assistant = LLMAssistant()
-    
-    protocol_criteria = None
-    if session.dynamic_protocol:
-        from src.core.dynamic_protocol import DynamicProtocol
-        protocol = DynamicProtocol.from_dict(session.dynamic_protocol)
-        stage_protocol = protocol.get_stage_protocol(current_stage)
-        if stage_protocol:
-            protocol_criteria = {k: v.description for k, v in stage_protocol.criteria.items() if v.enabled}
-    
-    suggestion = None
-    if not is_blocked and llm_assistant.is_available():
-        try:
-            if current_stage == "ec":
-                suggestion = llm_assistant.suggest_ec(
-                    article.title,
-                    article.abstract,
-                    article.metadata.get("literature_type", "WL"),
-                    protocol_criteria=protocol_criteria
-                )
-            elif current_stage == "ic":
-                suggestion = llm_assistant.suggest_ic(
-                    article.title,
-                    article.abstract,
-                    article.metadata.get("literature_type", "WL"),
-                    protocol_criteria=protocol_criteria
-                )
-            elif current_stage == "qc":
-                suggestion = llm_assistant.suggest_qc(
-                    article.title,
-                    article.abstract,
-                    article.metadata.get("literature_type", "WL"),
-                    protocol_criteria=protocol_criteria
-                )
-        except Exception:
-            pass
-    
-    if suggestion and not is_blocked:
-        render_llm_suggestion_panel(suggestion.to_dict() if hasattr(suggestion, "to_dict") else {}, current_stage)
-    elif not is_blocked:
-        st.info("LLM suggestions not available - review manually")
-    
-    # Use new decision controls with notes field always visible
-    choice, notes = render_decision_controls_with_notes(current_stage)
-    
-    if choice and choice != "skip":
-        article_review = session.articles[session.current_index]
-        
-        if current_stage == "ec":
-            article_review.ec_stage = choice
-            article_review.ec_notes = notes
-        elif current_stage == "ic":
-            article_review.ic_stage = choice
-            article_review.ic_notes = notes
-        elif current_stage == "qc":
-            article_review.qc_stage = choice
-            article_review.qc_notes = notes
-        
-        reviewer.record_decision(
-            article_id=article.article_id,
-            stage=current_stage,
-            decision=choice,
-            notes=notes
-        )
-        
-        if choice == "include":
-            session.included_count += 1
-        elif choice == "exclude":
-            session.excluded_count += 1
-        elif choice == "needs_discussion":
-            session.discussion_count += 1
-        
-        if current_stage == "ec":
-            session.ec_completed += 1
-        elif current_stage == "ic":
-            session.ic_completed += 1
-        elif current_stage == "qc":
-            session.qc_completed += 1
+        # Log in ReviewerState for audit
+        if "reviewer_state" in st.session_state:
+            st.session_state.reviewer_state.record_decision(
+                article_id=article.article_id,
+                stage=session.stage,
+                decision=decision,
+                notes=notes
+            )
         
         save_session_state()
-        
         session.advance()
-        
         st.rerun()
-    
-    elif choice == "skip":
+        
+    if skp:
         session.advance(skip=True)
         st.rerun()
 
+# ==============================================================================
+# 5. MAIN RENDERER
+# ==============================================================================
+
+def render_review_interface():
+    """Main entry point for the review module."""
+
+    st.warning("DEPRECATED: This view is not routed by app.py. Canonical workflow uses EC/IC/QC Screening views. Will be removed in a future release.")
+
+    # Initialize session if empty
+    if "session" not in st.session_state or st.session_state.session is None:
+        terminal_header("SCREENING SESSION", "Ready for ingestion", status="IDLE")
+        
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.markdown("### Start New Session")
+            uploaded_file = st.file_uploader("Upload ATLAS Excel File (WL/GL)", type=["xlsx"])
+            if uploaded_file:
+                from src.core.atlas_processor import create_screening_session
+                # Salva arquivo temporário para processamento
+                with open("temp_atlas.xlsx", "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # Inicia sessão
+                session, rev_state, _, _ = create_screening_session("temp_atlas.xlsx")
+                st.session_state.session = session
+                st.session_state.reviewer_state = rev_state
+                st.rerun()
+        return
+
+    # Active Session View
+    session = st.session_state.session
+    render_review_sidebar()
+    
+    terminal_header(
+        f"{session.stage.upper()} SCREENING", 
+        f"Reviewing {session.protocol_version} protocol",
+        status="ACTIVE"
+    )
+
+    # Stage Selector (Horizontal)
+    stages = ["ec", "ic", "qc"]
+    selected_stage = st.segmented_control(
+        "Current Workflow Stage:", 
+        options=stages, 
+        format_func=lambda x: x.upper(),
+        default=session.stage
+    )
+    if selected_stage != session.stage:
+        session.stage = selected_stage
+        st.rerun()
+
+    divider()
+
+    # Get Current Article
+    article = session.get_current_article()
+    
+    if article:
+        render_article_card(article)
+        
+        # LLM Advisory (Optional)
+        llm = LLMAssistant()
+        if llm.is_available():
+            with st.expander("🤖 AI ADVISORY SUGGESTION (Non-Binding)", expanded=False):
+                suggestion = llm.suggest(
+                    title=article.title,
+                    abstract=article.abstract,
+                    literature_type=article.metadata.get('literature_type', 'WL'),
+                    stage=session.stage,
+                    metadata=article.metadata
+                )
+                st.write(suggestion.to_display())
+                st.caption(suggestion.justification)
+                if suggestion.ambiguity_flags:
+                    st.info(f"Ambiguity flags: {', '.join(suggestion.ambiguity_flags)}")
+        
+        render_decision_controls(session, article)
+    else:
+        st.success("🏁 All articles in this stage have been reviewed.")
+        if st.button("Refresh / Start Over"):
+            session.current_index = 0
+            st.rerun()
 
 def render():
-    """Render the full review interface."""
-    if "session_state" not in st.session_state:
-        st.session_state.session = None
-        st.session_state.reviewer_state = None
-        st.session_state.wl_results = []
-        st.session_state.gl_results = []
-    
+    """Wrapper for app.py routing."""
     render_review_interface()

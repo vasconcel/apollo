@@ -1,11 +1,8 @@
 """
-APOLLO EC Screening Workspace
+APOLLO EC Screening Workspace - Forensic Terminal Aesthetic
 
 Stage-specific workspace for Exclusion Criteria screening.
 ONLY EC criteria are visible/applicable in this workspace.
-
-Researcher screens papers manually with optional AI advisory.
-No IC or QC execution occurs here.
 
 HUMAN-IN-THE-LOOP PRINCIPLE:
 - Researcher makes final screening decisions
@@ -14,308 +11,299 @@ HUMAN-IN-THE-LOOP PRINCIPLE:
 - LLM calls only on explicit researcher request
 """
 import streamlit as st
+import uuid
+from datetime import datetime
 from typing import Dict, Optional
+from src.ui.components import (
+    terminal_header, section_header, status_badge, lit_type_badge,
+    metric_tile, telemetry_panel, decision_card, progress_bar,
+    stage_indicator, structured_card, terminal_stream, code_block,
+    criteria_panel, divider, operational_status, provenance_indicator,
+    kappa_display, conflict_resolution_card
+)
+from src.ui.theme import COLORS, TYPOGRAPHY
 
 
 def render_ec_screening():
     """Render EC Screening Workspace."""
     from src.core.dynamic_protocol import ProtocolState
+    from src.core.screening_session import ScreeningSession
 
-    st.markdown("# EC Screening Workspace")
-    st.markdown("*Apply Exclusion Criteria to remove irrelevant studies*")
-    st.divider()
+    terminal_header(
+        "EC SCREENING WORKSPACE",
+        "Apply Exclusion Criteria to remove irrelevant studies",
+        status="ACTIVE"
+    )
+    divider()
 
     if "research_protocol" not in st.session_state or st.session_state.research_protocol is None:
-        st.warning("⚠️ No Research Protocol configured. Please go to 'Protocol Configuration' first.")
+        st.warning("⚠ No Research Protocol configured. Please go to 'Protocol Configuration' first.")
         return
 
     protocol = st.session_state.research_protocol
 
     if protocol.state == ProtocolState.DRAFT.value:
-        st.warning("⚠️ Protocol must be locked before screening. Go to 'Protocol Configuration' to lock your protocol.")
+        st.warning("⚠ Protocol must be locked before screening. Go to 'Protocol Configuration' to lock your protocol.")
         return
 
     render_protocol_info_banner(protocol)
-    st.divider()
+    divider()
 
-    if "ec_session" not in st.session_state:
-        st.session_state.ec_session = {
-            "articles": [],
-            "current_index": 0,
-            "decisions": {},
-            "loaded": False
-        }
+    if "apollo_session" not in st.session_state:
+        st.session_state.apollo_session = ScreeningSession(
+            session_id=str(uuid.uuid4())[:8],
+            created_at=datetime.now().isoformat(),
+            protocol_version=protocol.protocol_version,
+            researcher_id="researcher_1"
+        )
+        st.session_state.apollo_session.stage = "ec"
 
-    if not st.session_state.ec_session["loaded"]:
-        render_upload_section()
+    session = st.session_state.apollo_session
+
+    if not session.articles:
+        render_upload_section(session)
     else:
-        render_screening_workspace()
+        render_screening_workspace(session)
 
 
 def render_protocol_info_banner(protocol):
-    """Show protocol info in banner."""
+    """Show protocol info in terminal-style banner."""
     summary = protocol.get_summary()
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Protocol", f"v{summary['version']}")
-    with col2:
-        st.metric("EC Criteria", summary['ec_count'])
-    with col3:
-        st.metric("EC Enabled", summary['ec_enabled'])
-    with col4:
-        st.caption(f"Hash: `{summary['hash']}`")
+    
+    st.markdown(f'''
+    <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;margin-bottom:1rem;">
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['cyan']};letter-spacing:0.15em;margin-bottom:0.75rem;">
+            ▸ PROTOCOL TELEMETRY
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:1rem;">
+            <div><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">VERSION</span><br><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.9rem;color:{COLORS['text_primary']};">v{summary['version']}</span></div>
+            <div><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">EC CRITERIA</span><br><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.9rem;color:{COLORS['cyan']};">{summary['ec_enabled']}/{summary['ec_count']}</span></div>
+            <div><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">STATUS</span><br><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.9rem;color:{COLORS['success']};">ACTIVE</span></div>
+            <div><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">HASH</span><br><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['text_secondary']};">{summary['hash'][:16]}...</span></div>
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
 
 
-def render_upload_section():
+def render_upload_section(session):
     """Render upload section for EC screening."""
-    st.markdown("### Upload Papers for EC Screening")
-    st.info("""
-    **Upload your INITIAL SEARCH results** (ATLAS export with WL and GL sheets).
+    section_header("DATA INGESTION", "Upload ATLAS export files to begin EC screening")
 
-    Papers will be reviewed one at a time. You can:
-    - Include or Exclude each paper
-    - Request AI advisory for individual papers
-    - Navigate with Next/Previous buttons
-
-    Only EC criteria will be applied in this workspace.
-    """)
+    st.markdown(f'''
+    <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;margin:1rem 0;">
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_secondary']};margin-bottom:0.5rem;">
+            INPUT FORMAT REQUIREMENT
+        </div>
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['text_muted']};line-height:1.6;">
+            Upload ATLAS export with <span style="color:{COLORS['cyan']};">White Literature</span> and <span style="color:{COLORS['cyan']};">Grey Literature</span> sheets.
+            Papers reviewed sequentially. Decisions recorded per-item.
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
 
     uploaded_file = st.file_uploader(
         "Upload ATLAS Excel File",
         type=["xlsx"],
-        help="Upload your ATLAS export with WL and GL sheets"
+        help="Upload your ATLAS export with WL and GL sheets",
+        label_visibility="collapsed"
     )
 
     if uploaded_file:
         with st.spinner("Loading papers..."):
-            articles = load_atlas_papers(uploaded_file)
+            articles = session.ingest_from_upload(uploaded_file, stage="ec")
             if articles:
-                st.session_state.ec_session["articles"] = articles
-                st.session_state.ec_session["current_index"] = 0
-                st.session_state.ec_session["decisions"] = {}
-                st.session_state.ec_session["loaded"] = True
-                st.success(f"✅ Loaded {len(articles)} papers. Ready for EC screening.")
+                session.current_index = 0
+                st.success(f"Loaded {len(articles)} papers. Ready for EC screening.")
                 st.rerun()
             else:
                 st.error("Failed to load papers from file.")
 
 
-def load_atlas_papers(uploaded_file) -> list:
-    """Load papers from ATLAS Excel file using centralized normalization."""
-    import pandas as pd
-    from src.core.article_metadata import (
-        normalize_wl_metadata, normalize_gl_metadata, article_to_dict
-    )
-
-    import tempfile
-    temp_path = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
-
-    with open(temp_path, "wb") as f:
-        f.write(uploaded_file.getvalue())
-
-    try:
-        wl_df = pd.read_excel(temp_path, sheet_name="White Literature")
-        gl_df = pd.read_excel(temp_path, sheet_name="Grey Literature")
-
-        articles = []
-        for _, row in wl_df.iterrows():
-            row_dict = row.to_dict()
-            article = normalize_wl_metadata(row_dict)
-            article_dict = article_to_dict(article)
-            article_dict["ec_decision"] = ""
-            article_dict["ec_notes"] = ""
-            articles.append(article_dict)
-
-        for _, row in gl_df.iterrows():
-            row_dict = row.to_dict()
-            article = normalize_gl_metadata(row_dict)
-            article_dict = article_to_dict(article)
-            article_dict["ec_decision"] = ""
-            article_dict["ec_notes"] = ""
-            articles.append(article_dict)
-
-        return articles
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        return []
-    finally:
-        import os
-        os.unlink(temp_path)
-
-
-def render_screening_workspace():
+def render_screening_workspace(session):
     """Render the main EC screening workspace."""
-    session = st.session_state.ec_session
-    articles = session["articles"]
-    current_idx = session["current_index"]
-    decisions = session["decisions"]
+    from src.core.screening_session import ArticleReview
 
+    articles = session.articles
+    current_idx = session.current_index
     total = len(articles)
-    reviewed = sum(1 for d in decisions.values() if d.get("decision"))
+    reviewed = session.ec_completed
     pending = total - reviewed
 
     col_nav, col_stats, col_nav2 = st.columns([1, 2, 1])
     with col_nav:
-        if st.button("⬅️ Previous", disabled=current_idx == 0):
-            session["current_index"] = max(0, current_idx - 1)
+        if st.button("◀ PREV", disabled=current_idx == 0):
+            session.current_index = max(0, current_idx - 1)
             st.rerun()
     with col_stats:
-        st.markdown(f"**Progress:** {reviewed}/{total} reviewed | {pending} pending")
-        progress = reviewed / total if total > 0 else 0
-        st.progress(progress)
+        progress_bar(reviewed, total, stage="EC")
     with col_nav2:
-        if st.button("Next ➡️", disabled=current_idx >= total - 1):
-            session["current_index"] = min(total - 1, current_idx + 1)
+        if st.button("NEXT ▶", disabled=current_idx >= total - 1):
+            session.current_index = min(total - 1, current_idx + 1)
             st.rerun()
 
-    st.divider()
+    divider()
 
     if articles and 0 <= current_idx < total:
         article = articles[current_idx]
-        render_article_card(article, current_idx, decisions)
+        render_article_card(article, current_idx)
+        render_ai_advisory_panel(article, current_idx)
 
-        render_ai_advisory_panel(article, current_idx, decisions)
-
-        st.divider()
+        divider()
 
         col_excl, col_incl, col_skip = st.columns([1, 1, 1])
-        current_decision = decisions.get(current_idx, {}).get("decision", "")
+        current_decision = article.ec_stage or ""
 
         with col_excl:
-            excl_clicked = st.button("🚫 Exclude", type="secondary", use_container_width=True,
+            excl_clicked = st.button("EXCLUDE", type="secondary", use_container_width=True,
                                    disabled=current_decision == "exclude")
             if excl_clicked:
-                decisions[current_idx] = {"decision": "exclude", "notes": ""}
+                session.current_index = current_idx
+                session.record_decision("exclude", notes="")
                 st.rerun()
 
         with col_incl:
-            incl_clicked = st.button("✅ Include", type="primary", use_container_width=True,
+            incl_clicked = st.button("INCLUDE", type="primary", use_container_width=True,
                                     disabled=current_decision == "include")
             if incl_clicked:
-                decisions[current_idx] = {"decision": "include", "notes": ""}
+                session.current_index = current_idx
+                session.record_decision("include", notes="")
                 st.rerun()
 
         with col_skip:
-            skip_clicked = st.button("⏭️ Skip", use_container_width=True,
+            skip_clicked = st.button("SKIP", use_container_width=True,
                                     disabled=current_decision == "skip")
             if skip_clicked:
-                decisions[current_idx] = {"decision": "skip", "notes": ""}
+                session.current_index = current_idx
+                session.record_decision("skip", notes="")
                 st.rerun()
 
         if current_decision:
-            st.success(f"Current decision: **{current_decision.upper()}**")
-            if st.button("🔄 Clear Decision"):
-                if current_idx in decisions:
-                    del decisions[current_idx]
+            from src.ui.components import status_badge
+            status_badge(current_decision.upper())
+            if st.button("CLEAR"):
+                session.articles[current_idx].ec_stage = ""
+                session.articles[current_idx].ec_notes = ""
+                session.articles[current_idx].ec_timestamp = ""
+                session.ec_completed = max(0, session.ec_completed - 1)
                 st.rerun()
 
-    st.divider()
+    divider()
 
-    if st.button("📊 Export EC Results", type="primary"):
+    if st.button("EXPORT EC RESULTS", type="primary"):
         export_ec_results(session)
 
 
-def render_article_card(article: Dict, index: int, decisions: Dict):
-    """Render full paper review card optimized for screening readability."""
-    lit_type = article.get("literature_type", "WL")
-    has_title = article.get("title") and article.get("title") != "nan"
-    has_abstract = article.get("abstract") and article.get("abstract") != "nan"
+def render_article_card(article, index: int):
+    """Render full paper review card in terminal style."""
+    from src.core.screening_session import ArticleReview
+    if isinstance(article, ArticleReview):
+        lit_type = article.get_literature_type()
+        has_title = bool(article.title and article.title != "nan" and len(article.title.strip()) > 0)
+        has_abstract = bool(article.abstract and article.abstract != "nan" and len(article.abstract.strip()) > 10)
+        metadata = article.metadata
+        article_id = article.article_id
+    else:
+        lit_type = article.get("literature_type", "WL")
+        has_title = article.get("title") and article.get("title") != "nan"
+        has_abstract = article.get("abstract") and article.get("abstract") != "nan"
+        metadata = article
+        article_id = metadata.get("global_id", "N/A")
 
-    st.markdown("---")
-    col_badge, col_progress = st.columns([1, 4])
-    with col_badge:
-        badge = "WL" if lit_type == "WL" else "GL"
-        color = "#238636" if lit_type == "WL" else "#f0883e"
-        st.markdown(f"<span style='background:{color};color:white;padding:4px 12px;border-radius:6px;font-size:14px;font-weight:bold'>{badge}</span>",
-                   unsafe_allow_html=True)
-    with col_progress:
-        st.caption(f"Paper {index + 1}")
+    st.markdown(f"""
+    <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;margin-bottom:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid {COLORS['border']};">
+            <div style="display:flex;align-items:center;gap:1rem;">
+                <span style="background:{COLORS['success'] if lit_type == 'WL' else COLORS['warning']};color:#000;padding:2px 8px;font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;font-weight:600;">{lit_type}</span>
+                <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">INDEX: {index + 1:04d}</span>
+            </div>
+            <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">ARTICLE ID: {article_id[:16] if article_id else 'N/A'}...</span>
+        </div>
+    """, unsafe_allow_html=True)
 
     if not has_title:
-        st.warning("⚠️ Title is missing from this record")
+        st.warning("Title is missing from this record")
     else:
-        st.markdown(f"### {article['title']}")
+        st.markdown(f"### {article.title}")
 
     col_meta1, col_meta2 = st.columns(2)
     with col_meta1:
-        authors = article.get("authors", "")
+        authors = metadata.get("authors", "")
         if authors and authors != "nan":
             st.markdown(f"**Authors:** {authors}")
         else:
             st.markdown("**Authors:** _[NOT AVAILABLE]_")
 
-        year = article.get("year", "")
+        year = metadata.get("year", "")
         if year and year != "nan":
             st.markdown(f"**Year:** {year}")
     with col_meta2:
-        source = article.get("source", "")
+        source = metadata.get("source", "")
         if source and source != "nan":
             st.markdown(f"**Source:** {source}")
         else:
             st.markdown("**Source:** _[NOT AVAILABLE]_")
 
-        doi = article.get("doi", "")
+        doi = metadata.get("doi", "")
         if doi and doi != "nan":
             st.markdown(f"**DOI:** {doi}")
         else:
-            url = article.get("url", "")
+            url = metadata.get("url", "")
             if url and url != "nan":
                 st.markdown(f"**URL:** [{url[:50]}...]({url})")
 
-    st.divider()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if not has_abstract:
-        st.info("**Abstract:** _[NOT AVAILABLE]_ — Manual review required")
+        st.info("Abstract: _[NOT AVAILABLE]_ — Manual review required")
     else:
-        with st.expander("📄 Abstract (click to expand)"):
-            st.markdown(article.get("abstract", ""))
+        with st.expander("ABSTRACT", expanded=True):
+            st.markdown(article.abstract if isinstance(article, ArticleReview) else article.get("abstract", ""))
 
-    keywords = article.get("keywords", "")
+    keywords = metadata.get("keywords", "")
     if keywords and keywords != "nan" and len(keywords.strip()) > 0:
         st.markdown(f"**Keywords:** {keywords}")
 
-    completeness = article.get("completeness", "unknown")
+    completeness = metadata.get("metadata_completeness", "unknown")
     if completeness == "minimal":
-        st.warning("⚠️ Limited metadata — review with caution")
+        st.warning("Limited metadata — review with caution")
     elif completeness == "partial":
-        st.info("ℹ️ Partial metadata available")
+        st.info("Partial metadata available")
 
-    with st.expander("🔧 Debug Metadata"):
-        st.json(article.get("raw_data", {}))
+    with st.expander("DEBUG METADATA"):
+        st.json(metadata.get("raw_data", {}))
 
 
-def render_ai_advisory_panel(article: Dict, current_idx: int, decisions: Dict):
+def render_ai_advisory_panel(article, current_idx: int):
     """Render AI Advisory Panel - OPTIONAL cognitive support for researcher."""
-    st.divider()
-    st.markdown("### AI Advisory Panel")
+    divider()
+    section_header("AI ADVISORY PANEL", "Optional cognitive assistance - researcher makes final decision")
 
     cache_key = f"ec_advice_{current_idx}"
     cached_advice = st.session_state.get(cache_key, None)
 
-    with st.expander("🤖 Request AI Suggestion (Optional)"):
-        st.info("""
-        **Human-in-the-Loop Review**
-
-        AI suggestions are **ADVISORY ONLY**.
-        You are the screener — AI is a cognitive support tool.
-        Final decision is always yours.
-        """)
+    with st.expander("REQUEST AI ANALYSIS"):
+        st.markdown(f'''
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};border-left:2px solid {COLORS['cyan']};padding-left:1rem;margin-bottom:1rem;">
+            Human-in-the-Loop Review Mode: AI suggestions are <span style="color:{COLORS['warning']};">ADVISORY ONLY</span>.
+            Final decision authority rests with the researcher.
+        </div>
+        ''', unsafe_allow_html=True)
 
         col_btn, col_status = st.columns([1, 2])
         with col_btn:
             request_suggestion = st.button(
-                "🔮 Generate AI Suggestion",
+                "GENERATE ANALYSIS",
                 use_container_width=True,
-                help="Request AI advisory for this article. Only triggers when you click."
+                help="Request AI advisory for this article"
             )
         with col_status:
             if cached_advice:
-                st.success("✓ AI suggestion available for this article")
+                st.success("AI analysis available for this article")
             else:
-                st.caption("No suggestion generated yet for this article")
+                st.caption("No analysis generated yet for this article")
 
         if request_suggestion:
-            with st.spinner("Generating AI suggestion..."):
+            with st.spinner("Generating AI analysis..."):
                 suggestion = get_llm_ec_suggestion(article)
 
                 if suggestion:
@@ -326,12 +314,13 @@ def render_ai_advisory_panel(article: Dict, current_idx: int, decisions: Dict):
                     st.warning("LLM unavailable — continue with manual review.")
 
         if cached_advice:
-            st.divider()
+            divider()
             render_suggestion_details(cached_advice)
 
 
-def get_llm_ec_suggestion(article: Dict) -> Optional[Dict]:
+def get_llm_ec_suggestion(article) -> Optional[Dict]:
     """Get LLM advisory suggestion for EC screening with metadata robustness."""
+    from src.core.screening_session import ArticleReview
     try:
         from src.core.llm_assistant import LLMAssistant
 
@@ -339,10 +328,18 @@ def get_llm_ec_suggestion(article: Dict) -> Optional[Dict]:
         if not llm.is_available():
             return None
 
-        title = article.get("title", "")
-        abstract = article.get("abstract", "")
-        literature_type = article.get("literature_type", "WL")
-        year = article.get("year")
+        if isinstance(article, ArticleReview):
+            title = article.title
+            abstract = article.abstract
+            literature_type = article.get_literature_type()
+            year = article.metadata.get("year", "")
+            metadata = article.metadata
+        else:
+            title = article.get("title", "")
+            abstract = article.get("abstract", "")
+            literature_type = article.get("literature_type", "WL")
+            year = article.get("year")
+            metadata = article
 
         has_title = bool(title and title != "nan" and len(title.strip()) > 0)
         has_abstract = bool(abstract and abstract != "nan" and len(abstract.strip()) > 10)
@@ -397,7 +394,7 @@ def get_protocol_ec_criteria() -> Dict[str, str]:
 
 
 def render_suggestion_details(suggestion: Dict):
-    """Render detailed LLM suggestion with color-coded output."""
+    """Render detailed LLM suggestion in terminal style."""
     decision = suggestion.get("decision", "").upper()
     confidence = suggestion.get("confidence", 0)
     confidence_pct = int(confidence * 100)
@@ -406,66 +403,74 @@ def render_suggestion_details(suggestion: Dict):
 
     if decision == "EXCLUDE":
         with col_dec:
-            st.error("🚫 **EXCLUDE**")
+            status_badge("EXCLUDED")
     elif decision == "INCLUDE":
         with col_dec:
-            st.success("✅ **INCLUDE**")
+            status_badge("INCLUDED")
     elif decision == "UNCERTAIN":
         with col_dec:
-            st.warning("⚠️ **UNCERTAIN** — Manual Review Required")
+            status_badge("PENDING")
     else:
         with col_dec:
-            st.info(f"**{decision}**")
+            st.markdown(f"**{decision}**")
 
     with col_conf:
-        st.metric("Confidence", f"{confidence_pct}%")
+        metric_tile("CONFIDENCE", f"{confidence_pct}%")
 
     st.markdown(f"**Reasoning:** {suggestion.get('justification', 'N/A')}")
 
     triggered = suggestion.get("triggered_criteria", {})
     if triggered and any(v for v in triggered.values()):
-        st.markdown("**🔍 Triggered Criteria:**")
-        for criterion, reason in triggered.items():
-            if reason:
-                st.markdown(f"  • **{criterion}**: {reason}")
+        criteria_panel({k: v for k, v in triggered.items() if v}, title="TRIGGERED CRITERIA")
 
     evidence = suggestion.get("evidence", [])
     if evidence:
-        st.markdown("**📝 Evidence Extracted:**")
-        for phrase in evidence:
-            st.markdown(f"  • \"{phrase}\"")
+        with st.expander("EVIDENCE EXTRACTED"):
+            for phrase in evidence:
+                st.markdown(f"  - \"{phrase}\"")
 
     ambiguity = suggestion.get("ambiguity_flags", [])
     if ambiguity and any(ambiguity):
-        st.markdown("**⚠️ Potential Ambiguities:**")
-        for flag in ambiguity:
-            if flag:
-                st.markdown(f"  • {flag}")
+        with st.expander("AMBIGUITY FLAGS"):
+            for flag in ambiguity:
+                if flag:
+                    st.markdown(f"  - {flag}")
 
 
-def export_ec_results(session: Dict):
+def export_ec_results(session):
     """Export EC screening results."""
     import pandas as pd
+    from src.core.screening_session import ArticleReview
 
-    articles = session["articles"]
-    decisions = session["decisions"]
+    articles = session.articles
 
     results = []
     for i, article in enumerate(articles):
-        decision = decisions.get(i, {}).get("decision", "pending")
+        if isinstance(article, ArticleReview):
+            title = article.title
+            abstract = article.abstract
+            lit_type = article.get_literature_type()
+            metadata = article.metadata
+        else:
+            title = article.get("title", "")
+            abstract = article.get("abstract", "")
+            lit_type = article.get("literature_type", "WL")
+            metadata = article
+
+        decision = article.ec_stage if isinstance(article, ArticleReview) else metadata.get("ec_decision", "")
         results.append({
-            "Title": article["title"],
-            "Literature_Type": article["literature_type"],
-            "EC_Decision": decision.upper(),
-            "EC_Notes": decisions.get(i, {}).get("notes", ""),
-            "Abstract": article.get("abstract", "")
+            "Title": title,
+            "Literature_Type": lit_type,
+            "EC_Decision": decision.upper() if decision else "PENDING",
+            "EC_Notes": article.ec_notes if isinstance(article, ArticleReview) else metadata.get("ec_notes", ""),
+            "Abstract": abstract
         })
 
     df = pd.DataFrame(results)
     csv = df.to_csv(index=False)
 
     st.download_button(
-        "📥 Download EC Results (CSV)",
+        "Download EC Results (CSV)",
         data=csv,
         file_name="apollo_ec_screening_results.csv",
         mime="text/csv"

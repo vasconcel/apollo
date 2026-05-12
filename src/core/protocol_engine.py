@@ -10,8 +10,15 @@ Design Goals:
 - No schema drift: output columns remain unchanged
 """
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
+
+from src.core.criteria_registry import (
+    SE_KEYWORDS, RECRUITMENT_KEYWORDS, EMPIRICAL_KEYWORDS, INDUSTRY_KEYWORDS,
+    WL_QC_SCORING_KEYWORDS, GL_QC_SCORING_KEYWORDS,
+    evaluate_se_context, evaluate_recruitment, evaluate_empirical,
+    evaluate_industry, evaluate_wl_qc_score, evaluate_gl_qc_score
+)
 
 
 @dataclass
@@ -254,18 +261,15 @@ class ProtocolEngine:
         
         text = f"{title} {abstract}".lower()
         
-        # IC evaluation matching default logic
-        recruitment_keywords = ["recruit", "hire", "hiring", "selection", "talent",
-                                "interview", "hiring process", "recruitment"]
-        has_recruitment = any(kw in text for kw in recruitment_keywords)
+        # IC evaluation using canonical registry
+        title = data.get("title", "")
+        abstract = data.get("abstract", "")
         
-        empirical_keywords = ["empirical", "study", "research", "survey", "case study",
-                              "experiment", "quantitative", "qualitative", "results", "findings"]
-        has_empirical = any(kw in text for kw in empirical_keywords)
+        text = f"{title} {abstract}".lower()
         
-        industry_keywords = ["software", "software industry", "tech company", "IT company",
-                             "software development", "software team", "developer", "programming"]
-        has_industry = any(kw in text for kw in industry_keywords)
+        has_recruitment = evaluate_recruitment(text)
+        has_empirical = evaluate_empirical(text)
+        has_industry = evaluate_industry(text)
         
         # Default IC logic: IC1 + (IC2 OR IC3)
         if has_recruitment:
@@ -304,10 +308,8 @@ class ProtocolEngine:
         if year and year < 2015:
             return ("exclude", "EC2", f"Published in {year}, before 2015 threshold")
         
-        # EC1: Not empirical SE research
-        se_keywords = ["software", "software engineering", "programming", "development",
-                       "code", "developer", "software engineer", "agile", "devops"]
-        if not any(kw in text for kw in se_keywords):
+        # EC1: Not empirical SE research - uses canonical registry
+        if not evaluate_se_context(text):
             return ("exclude", "EC1", "No software engineering context detected")
         
         # EC4: Duplicate (by Global_ID)
@@ -328,17 +330,10 @@ class ProtocolEngine:
         
         text = f"{title} {abstract}".lower()
         
-        recruitment_keywords = ["recruit", "hire", "hiring", "selection", "talent",
-                                "interview", "hiring process", "recruitment"]
-        has_recruitment = any(kw in text for kw in recruitment_keywords)
-        
-        empirical_keywords = ["empirical", "study", "research", "survey", "case study",
-                              "experiment", "quantitative", "qualitative", "results", "findings"]
-        has_empirical = any(kw in text for kw in empirical_keywords)
-        
-        industry_keywords = ["software", "software industry", "tech company", "IT company",
-                             "software development", "software team", "developer", "programming"]
-        has_industry = any(kw in text for kw in industry_keywords)
+        # IC evaluation using canonical registry
+        has_recruitment = evaluate_recruitment(text)
+        has_empirical = evaluate_empirical(text)
+        has_industry = evaluate_industry(text)
         
         if has_recruitment:
             if has_empirical or has_industry:
@@ -361,79 +356,11 @@ class ProtocolEngine:
         scores = {}
         
         if literature_type == "WL":
-            # WL-Q1: Aims and context
-            if any(kw in text for kw in ["aim", "objective", "purpose", "research question",
-                                          "goal", "context", "motivation"]):
-                scores["WL-Q1"] = 1.0
-            elif any(kw in text for kw in ["investigate", "explore", "examine"]):
-                scores["WL-Q1"] = 0.5
-            else:
-                scores["WL-Q1"] = 0.0
-            
-            # WL-Q2: Methodology
-            if any(kw in text for kw in ["methodology", "method", "approach", "design",
-                                          "procedure", "technique"]):
-                if any(kw in text for kw in ["survey", "case study", "experiment", "interview",
-                                              "qualitative", "quantitative"]):
-                    scores["WL-Q2"] = 1.0
-                else:
-                    scores["WL-Q2"] = 0.5
-            else:
-                scores["WL-Q2"] = 0.0
-            
-            # WL-Q3: Findings supported
-            if any(kw in text for kw in ["result", "finding", "conclusion", "show", "demonstrate",
-                                         "indicate", "reveal"]):
-                scores["WL-Q3"] = 1.0
-            elif "discussion" in text:
-                scores["WL-Q3"] = 0.5
-            else:
-                scores["WL-Q3"] = 0.0
-            
-            # WL-Q4: Limitations
-            if any(kw in text for kw in ["limitation", "threat", "validity", "reliability",
-                                          "constraint", "future work"]):
-                scores["WL-Q4"] = 1.0
-            elif "discussion" in text:
-                scores["WL-Q4"] = 0.5
-            else:
-                scores["WL-Q4"] = 0.0
+            for criterion in ["WL-Q1", "WL-Q2", "WL-Q3", "WL-Q4"]:
+                scores[criterion] = evaluate_wl_qc_score(criterion, text)
         else:
-            # GL-Q1: Author expertise
-            if any(kw in text for kw in ["author", "expert", "experience", "years", "background",
-                                          "senior", "lead", "manager"]):
-                scores["GL-Q1"] = 1.0
-            elif any(kw in text for kw in ["we", "our", "based on"]):
-                scores["GL-Q1"] = 0.5
-            else:
-                scores["GL-Q1"] = 0.0
-            
-            # GL-Q2: Source transparency
-            if any(kw in text for kw in ["company", "organization", "team", "department",
-                                          "size", "location", "industry"]):
-                scores["GL-Q2"] = 1.0
-            elif "case" in text or "example" in text:
-                scores["GL-Q2"] = 0.5
-            else:
-                scores["GL-Q2"] = 0.0
-            
-            # GL-Q3: Artifacts support
-            if any(kw in text for kw in ["data", "metric", "statistic", "figure", "table",
-                                          "example", "artifact", "tool", "process"]):
-                scores["GL-Q3"] = 1.0
-            elif any(kw in text for kw in ["show", "result", "experience"]):
-                scores["GL-Q3"] = 0.5
-            else:
-                scores["GL-Q3"] = 0.0
-            
-            # GL-Q4: Beyond marketing
-            if any(kw in text for kw in ["challenge", "difficulty", "problem", "issue",
-                                          "lesson", "learn", "recommend"]):
-                scores["GL-Q4"] = 1.0
-            elif any(kw in text for kw in ["benefit", "advantage", "feature"]):
-                scores["GL-Q4"] = 0.5
-            else:
-                scores["GL-Q4"] = 0.0
+            for criterion in ["GL-Q1", "GL-Q2", "GL-Q3", "GL-Q4"]:
+                scores[criterion] = evaluate_gl_qc_score(criterion, text)
         
         total = sum(scores.values())
         threshold = 2.0
@@ -482,8 +409,7 @@ def get_default_protocol() -> Dict:
                 "description": "Not empirical software engineering research",
                 "field": "text_combined",
                 "operator": "contains_any",
-                "value": ["software", "software engineering", "programming", "development",
-                          "code", "developer", "software engineer", "agile", "devops"],
+                "value": SE_KEYWORDS,
                 "action": "exclude_if_none_found"
             },
             "EC2": {
@@ -517,24 +443,21 @@ def get_default_protocol() -> Dict:
                 "description": "Addresses recruitment/selection practices",
                 "field": "text_combined",
                 "operator": "contains_any",
-                "value": ["recruit", "hire", "hiring", "selection", "talent",
-                          "interview", "hiring process", "recruitment"]
+                "value": RECRUITMENT_KEYWORDS
             },
             "IC2": {
                 "type": "rule",
                 "description": "Reports empirical findings",
                 "field": "text_combined",
                 "operator": "contains_any",
-                "value": ["empirical", "study", "research", "survey", "case study",
-                          "experiment", "quantitative", "qualitative", "results", "findings"]
+                "value": EMPIRICAL_KEYWORDS
             },
             "IC3": {
                 "type": "rule",
                 "description": "Focuses on software industry context",
                 "field": "text_combined",
                 "operator": "contains_any",
-                "value": ["software", "software industry", "tech company", "IT company",
-                          "software development", "software team", "developer", "programming"]
+                "value": INDUSTRY_KEYWORDS
             }
         },
         "quality_criteria": {

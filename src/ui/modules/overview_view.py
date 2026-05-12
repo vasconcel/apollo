@@ -12,6 +12,7 @@ def get_database():
 
 def render_overview():
     """APOLLO Pipeline Status Dashboard with LLM Rationale Inspection."""
+    st.warning("DEPRECATED: This view is not routed by app.py. Use the canonical protocol and screening views instead. Will be removed in a future release.")
     db = get_database()
     
     st.header("APOLLO Dashboard")

@@ -4,8 +4,7 @@ Manages human-in-the-loop screening sessions
 
 WORKFLOW RULES:
 - EC stage: All papers reviewed. If excluded, cannot proceed.
-- IC stage: Only EC-included papers reviewed. If excluded, cannot proceed to QC.
-- QC stage: Only IC-included papers reviewed.
+- IC stage: Only EC-included papers reviewed. If excluded, screening is complete.
 - SKIP papers: Can be recovered for later review.
 - NEEDS_DISCUSSION: Tracked separately for team review.
 """
@@ -52,7 +51,6 @@ class SessionStage(Enum):
     """Screening stages."""
     EC = "ec"  # Exclusion Criteria
     IC = "ic"  # Inclusion Criteria
-    QC = "qc"  # Quality Criteria
     COMPLETE = "complete"
 
 
@@ -82,12 +80,11 @@ class ArticleReview:
     ic_timestamp: str = ""
     ic_llm_suggestion: Dict[str, Any] = field(default_factory=dict)
     
-    qc_stage: str = ""  # Decision at QC stage (only if IC passed)
-    qc_notes: str = ""
-    qc_timestamp: str = ""
-    qc_llm_suggestion: Dict[str, Any] = field(default_factory=dict)
-    
     final_decision: str = ""
+    
+    cis1: str = ""  # Reviewer 1 IC code (IC1, IC2, etc. or "YES")
+    ces1: str = ""  # Reviewer 1 EC code (EC1, EC2, etc.)
+    revisor1: str = ""  # Researcher ID for Reviewer 1
     
     def get_year_source(self) -> str:
         """Get year source provenance flag."""
@@ -125,11 +122,9 @@ class ArticleReview:
             "source_file": self.metadata.get("source_file", ""),
             "ec_decision": self.metadata.get("ec_decision", ""),
             "ic_decision": self.metadata.get("ic_decision", ""),
-            "qc_score": self.metadata.get("qc_score", ""),
             "final_decision": self.final_decision,
             "ec_stage": self.ec_stage,
             "ic_stage": self.ic_stage,
-            "qc_stage": self.qc_stage,
         }
 
     def to_dict(self) -> Dict:
@@ -147,14 +142,9 @@ class ArticleReview:
         return self.is_ec_included and self.ic_stage == "include"
     
     @property
-    def is_qc_included(self) -> bool:
-        """Check if passed QC stage (requires IC pass first)."""
-        return self.is_ic_included and self.qc_stage == "include"
-    
-    @property
     def is_discussion_needed(self) -> bool:
         """Check if needs discussion at any stage."""
-        return self.ec_stage == "needs_discussion" or self.ic_stage == "needs_discussion" or self.qc_stage == "needs_discussion"
+        return self.ec_stage == "needs_discussion" or self.ic_stage == "needs_discussion"
     
     def get_current_stage_decision(self, stage: str) -> str:
         """Get decision for current stage."""
@@ -162,16 +152,12 @@ class ArticleReview:
             return self.ec_stage
         elif stage == "ic":
             return self.ic_stage
-        elif stage == "qc":
-            return self.qc_stage
         return ""
     
     def can_proceed_to_stage(self, stage: str) -> bool:
         """Check if can proceed to next stage."""
         if stage == "ic":
             return self.is_ec_included
-        elif stage == "qc":
-            return self.is_ic_included
         return True
     
     def compute_final_decision(self) -> str:
@@ -179,8 +165,6 @@ class ArticleReview:
         if not self.is_ec_included:
             return "EXCLUDE"
         if not self.is_ic_included:
-            return "EXCLUDE"
-        if not self.is_qc_included:
             return "EXCLUDE"
         
         if self.is_discussion_needed:
@@ -204,7 +188,6 @@ class ArticleReview:
             "posicao": record.posicao,
             "ec_decision": record.ec_decision,
             "ic_decision": record.ic_decision,
-            "qc_score": record.qc_score,
             "final_decision": record.final_decision
         }
         
@@ -236,7 +219,6 @@ class ScreeningSession:
     
     ec_completed: int = 0
     ic_completed: int = 0
-    qc_completed: int = 0
     
     included_count: int = 0
     excluded_count: int = 0
@@ -268,7 +250,7 @@ class ScreeningSession:
 
         Args:
             uploaded_file: Streamlit UploadedFile object
-            stage: Current screening stage ("ec", "ic", "qc")
+            stage: Current screening stage ("ec", "ic")
 
         Returns:
             List of ArticleReview objects with full metadata
@@ -311,9 +293,6 @@ class ScreeningSession:
                     )
                     if stage == "ic":
                         review_article.ec_stage = str(row_dict.get("EC_Decision", "INCLUDE"))
-                    elif stage == "qc":
-                        review_article.ec_stage = str(row_dict.get("EC_Decision", "INCLUDE"))
-                        review_article.ic_stage = str(row_dict.get("IC_Decision", "INCLUDE"))
                     articles.append(review_article)
                 self.articles = articles
                 self.total_count = len(articles)
@@ -429,16 +408,6 @@ class ScreeningSession:
             if llm_suggestion:
                 article.ic_llm_suggestion = llm_suggestion
             self.ic_completed += 1
-            
-        elif stage == "qc":
-            if not article.can_proceed_to_stage("qc"):
-                return False
-            article.qc_stage = decision
-            article.qc_notes = notes
-            article.qc_timestamp = timestamp
-            if llm_suggestion:
-                article.qc_llm_suggestion = llm_suggestion
-            self.qc_completed += 1
         
         if decision == "include":
             self.included_count += 1
@@ -589,7 +558,7 @@ class ScreeningSession:
         
         Args:
             article_id: The article's article_id (from ArticleReview.article_id)
-            stage: The stage at which to record ("ec", "ic", "qc")
+            stage: The stage at which to record ("ec", "ic")
             decision: The decision ("include", "exclude", "skip", "needs_discussion")
             notes: Researcher notes/reasoning
             llm_suggestion: Optional LLM advisory snapshot
@@ -718,8 +687,6 @@ class ScreeningSession:
             return self.total_count - self.ec_completed - self.skip_count
         elif stage == "ic":
             return len(self.get_ec_included_articles()) - self.ic_completed - self.skip_count
-        elif stage == "qc":
-            return len(self.get_ic_included_articles()) - self.qc_completed - self.skip_count
         return 0
     
     def is_complete(self) -> bool:
@@ -730,8 +697,7 @@ class ScreeningSession:
         """Get stage field name."""
         stage_map = {
             SessionStage.EC.value: "ec_stage",
-            SessionStage.IC.value: "ic_stage", 
-            SessionStage.QC.value: "qc_stage"
+            SessionStage.IC.value: "ic_stage"
         }
         return stage_map.get(stage, "")
     
@@ -743,10 +709,8 @@ class ScreeningSession:
             "stage": self.stage,
             "ec_completed": self.ec_completed,
             "ic_completed": self.ic_completed,
-            "qc_completed": self.qc_completed,
             "ec_pending": self.get_pending_for_stage("ec"),
             "ic_pending": self.get_pending_for_stage("ic"),
-            "qc_pending": self.get_pending_for_stage("qc"),
             "included": self.included_count,
             "excluded": self.excluded_count,
             "skipped": self.skip_count,
@@ -793,7 +757,7 @@ class ScreeningSession:
         fields_for_checksum = [
             "session_id", "created_at", "protocol_version", "stage",
             "current_index", "total_count", "ec_completed", "ic_completed",
-            "qc_completed", "included_count", "excluded_count", "skip_count",
+            "included_count", "excluded_count", "skip_count",
             "discussion_count", "researcher_id", "last_saved", "schema_version",
             "articles", "dynamic_protocol"
         ]
@@ -847,7 +811,7 @@ class ScreeningSession:
         fields_for_checksum = [
             "session_id", "created_at", "protocol_version", "stage",
             "current_index", "total_count", "ec_completed", "ic_completed",
-            "qc_completed", "included_count", "excluded_count", "skip_count",
+            "included_count", "excluded_count", "skip_count",
             "discussion_count", "researcher_id", "last_saved", "schema_version",
             "articles", "dynamic_protocol"
         ]
@@ -865,7 +829,6 @@ class ScreeningSession:
         self.total_count = data.get("total_count", 0)
         self.ec_completed = data.get("ec_completed", 0)
         self.ic_completed = data.get("ic_completed", 0)
-        self.qc_completed = data.get("qc_completed", 0)
         self.included_count = data.get("included_count", 0)
         self.excluded_count = data.get("excluded_count", 0)
         self.skip_count = data.get("skip_count", 0)
@@ -904,7 +867,7 @@ class ScreeningSession:
         fields_for_checksum = [
             "session_id", "created_at", "protocol_version", "stage",
             "current_index", "total_count", "ec_completed", "ic_completed",
-            "qc_completed", "included_count", "excluded_count", "skip_count",
+            "included_count", "excluded_count", "skip_count",
             "discussion_count", "researcher_id", "last_saved", "schema_version",
             "articles", "dynamic_protocol"
         ]
@@ -924,7 +887,6 @@ class ScreeningSession:
             "total_count": self.total_count,
             "ec_completed": self.ec_completed,
             "ic_completed": self.ic_completed,
-            "qc_completed": self.qc_completed,
             "included_count": self.included_count,
             "excluded_count": self.excluded_count,
             "skip_count": self.skip_count,
@@ -947,7 +909,6 @@ class ScreeningSession:
             "total_count": self.total_count,
             "ec_completed": self.ec_completed,
             "ic_completed": self.ic_completed,
-            "qc_completed": self.qc_completed,
             "included_count": self.included_count,
             "excluded_count": self.excluded_count,
             "skip_count": self.skip_count,
@@ -980,7 +941,6 @@ class ScreeningSession:
             total_count=data.get("total_count", 0),
             ec_completed=data.get("ec_completed", 0),
             ic_completed=data.get("ic_completed", 0),
-            qc_completed=data.get("qc_completed", 0),
             included_count=data.get("included_count", 0),
             excluded_count=data.get("excluded_count", 0),
             skip_count=data.get("skip_count", 0),
@@ -1065,9 +1025,6 @@ def recover_session(output_dir: str = "sessions") -> Optional[ScreeningSession]:
             
             if a.ic_stage and not a.is_ec_included:
                 issues.append(f"Article {i}: IC decision without EC pass")
-            
-            if a.qc_stage and not a.is_ic_included:
-                issues.append(f"Article {i}: QC decision without IC pass")
         
         return issues
 

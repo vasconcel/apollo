@@ -1,7 +1,7 @@
 """
 APOLLO Decision Engine - ATLAS Orchestrator
 
-Orchestrates WL/GL article processing through EC/IC/QC pipeline.
+Orchestrates WL/GL article processing through EC/IC pipeline.
 Delegates loading, evaluation, and export to specialized modules.
 Replaces the monolithic atlas_processor.py with decomposed architecture.
 """
@@ -10,15 +10,15 @@ import os
 import time
 from typing import Dict, List, Tuple, Optional, Any
 
-from src.core.article_record import ArticleRecord, EligibilityDecision, QualityDecision
+from src.core.article_record import ArticleRecord, EligibilityDecision
 from src.core.ingestion_engine import ATLASLoader
-from src.core.criteria_evaluator import EligibilityDecision as ED, QualityDecision as QD, ExclusionCriteria, InclusionCriteria, QualityCriteria
+from src.core.criteria_evaluator import EligibilityDecision as ED, ExclusionCriteria, InclusionCriteria
 from src.core.year_extraction import extract_year, compute_metadata_completeness
 
 
 class APOLLODecisionEngine:
     """
-    Main decision engine that processes ATLAS data through EC/IC/QC pipeline.
+    Main decision engine that processes ATLAS data through EC/IC pipeline.
     Protocol Support: Configurable via ProtocolEngine.
     """
     
@@ -102,7 +102,7 @@ class APOLLODecisionEngine:
         """
         Process Grey Literature articles.
         METHODOLOGICAL FIX (v1.0.0): GL articles passing EC are marked as PENDING
-        for IC/QC to allow manual review via URL, preserving them in the HITL funnel.
+        for IC to allow manual review via URL, preserving them in the HITL funnel.
         """
         results = []
         

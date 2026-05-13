@@ -78,11 +78,11 @@ def render_calibration_view():
             # Stage Selection
             selected_stage = st.selectbox(
                 "SELECT_STAGE_FOR_ANALYSIS",
-                options=["ec", "ic", "qc"],
+                options=["ec", "ic"],
                 format_func=lambda x: f"STAGE_{x.upper()}"
             )
 
-            if st.button("RUN CALIBRATION ANALYSIS", type="primary", use_container_width=True):
+            if st.button("RUN CALIBRATION ANALYSIS", type="primary", width="stretch"):
                 engine = CalibrationEngine()
                 
                 # Perform Alignment and Calculation
@@ -128,7 +128,7 @@ def render_calibration_view():
                     if results["disagreements"]:
                         with st.expander("🔍 VIEW DISAGREEMENT LOG", expanded=False):
                             dis_df = pd.DataFrame(results["disagreements"])
-                            st.dataframe(dis_df, use_container_width=True)
+                            st.dataframe(dis_df, width="stretch")
                             
                             # Export Disagreements
                             csv = dis_df.to_csv(index=False).encode('utf-8')

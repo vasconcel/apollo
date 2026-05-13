@@ -211,14 +211,14 @@ def render_assessment_card(article, index: int, session):
     else:
         col_pass, col_fail = st.columns(2)
         with col_pass:
-            if st.button("PASS QUALITY", type="primary", use_container_width=True):
+            if st.button("PASS QUALITY", type="primary", width="stretch"):
                 if isinstance(article, ArticleReview):
                     article.qc_stage = "include"
                     article.qc_timestamp = datetime.now().isoformat()
                     session.qc_completed += 1
                 st.rerun()
         with col_fail:
-            if st.button("FAIL QUALITY", type="secondary", use_container_width=True):
+            if st.button("FAIL QUALITY", type="secondary", width="stretch"):
                 if isinstance(article, ArticleReview):
                     article.qc_stage = "exclude"
                     article.qc_timestamp = datetime.now().isoformat()

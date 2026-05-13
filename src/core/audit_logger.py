@@ -39,13 +39,7 @@ class ProcessingStats:
     ic1_failures: int = 0
     ic2_failures: int = 0
     
-    qc_scores_4: int = 0
-    qc_scores_3: int = 0
-    qc_scores_2: int = 0
-    qc_scores_below: int = 0
-    
     gl_pending_ic: int = 0  # Changed from skipped to pending (HITL support)
-    gl_pending_qc: int = 0  # Changed from skipped to pending (HITL support)
 
 
 @dataclass
@@ -56,7 +50,6 @@ class ProtocolInfo:
     checksum: str
     ec_count: int
     ic_count: int
-    qc_count: int
     threshold: float
 
 
@@ -145,30 +138,10 @@ class AuditLogger:
             elif "IC2" in ic:
                 stats.ic2_failures += 1
         
-        # QC scores distribution (WL only)
-        for r in wl_results:
-            qc = r.qc_score
-            if qc in ["N/A", "PENDING"]:
-                continue
-            try:
-                score = float(qc.split("/")[0])
-                if score >= 4.0:
-                    stats.qc_scores_4 += 1
-                elif score >= 3.0:
-                    stats.qc_scores_3 += 1
-                elif score >= 2.0:
-                    stats.qc_scores_2 += 1
-                else:
-                    stats.qc_scores_below += 1
-            except:
-                pass
-        
         # GL PENDING counts (Support for new HITL methodology)
         for r in gl_results:
             if r.ic_decision == "PENDING":
                 stats.gl_pending_ic += 1
-            if r.qc_score == "PENDING":
-                stats.gl_pending_qc += 1
         
         # EC4 duplicates
         stats.duplicates_detected = stats.ec4_failures
@@ -189,9 +162,7 @@ class AuditLogger:
                 checksum=AuditLogger._compute_protocol_checksum(default),
                 ec_count=len(default.get("exclusion_criteria", {})),
                 ic_count=len(default.get("inclusion_criteria", {})),
-                qc_count=len(default.get("quality_criteria", {}).get("WL", {})) + 
-                         len(default.get("quality_criteria", {}).get("GL", {})),
-                threshold=default.get("quality_criteria", {}).get("threshold", 2.0)
+                threshold=2.0
             )
         else:
             return ProtocolInfo(
@@ -200,9 +171,7 @@ class AuditLogger:
                 checksum=AuditLogger._compute_protocol_checksum(protocol),
                 ec_count=len(protocol.get("exclusion_criteria", {})),
                 ic_count=len(protocol.get("inclusion_criteria", {})),
-                qc_count=len(protocol.get("quality_criteria", {}).get("WL", {})) + 
-                         len(protocol.get("quality_criteria", {}).get("GL", {})),
-                threshold=protocol.get("quality_criteria", {}).get("threshold", 2.0)
+                threshold=2.0
             )
     
     @staticmethod

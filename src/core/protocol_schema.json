@@ -1,7 +1,7 @@
 {
   "protocol_version": "1.0",
   "name": "Default APOLLO Protocol",
-  "description": "Standard EC/IC/QC protocol for systematic literature review",
+  "description": "Standard EC/IC protocol for systematic literature review",
   "metadata": {
     "created_for": "Software Engineering Recruitment & Selection",
     "min_year": 2015,

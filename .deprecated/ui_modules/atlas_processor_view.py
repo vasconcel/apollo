@@ -150,7 +150,7 @@ def render_decision_transparency(wl_results, gl_results):
                     "QC Score": r.qc_score,
                     "Final": r.final_decision
                 })
-            st.dataframe(wl_data, use_container_width=True, height=300)
+            st.dataframe(wl_data, width="stretch", height=300)
         else:
             st.info("No WL articles processed")
     
@@ -165,7 +165,7 @@ def render_decision_transparency(wl_results, gl_results):
                     "QC Score": r.qc_score,
                     "Final": r.final_decision
                 })
-            st.dataframe(gl_data, use_container_width=True, height=300)
+            st.dataframe(gl_data, width="stretch", height=300)
         else:
             st.info("No GL articles processed")
 
@@ -250,7 +250,7 @@ def render_atlas_processor():
             else:
                 st.caption("Protocol: Default")
 
-        process_btn = st.button("🚀 Run Screening Pipeline", type="primary", use_container_width=True)
+        process_btn = st.button("🚀 Run Screening Pipeline", type="primary", width="stretch")
 
         if process_btn:
             output_file = temp_input.replace(".xlsx", "_decisions.xlsx")
@@ -289,7 +289,7 @@ def render_atlas_processor():
                                 data=f.read(),
                                 file_name="APOLLO_Selection_Criteria.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
+                                width="stretch"
                             )
 
                     with col_dl2:

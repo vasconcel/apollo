@@ -78,7 +78,7 @@ def render_review_sidebar():
             from src.ui.modules.protocol_view import render_protocol_config_panel
             render_protocol_config_panel(session, session.stage)
             
-            if st.button("💾 SAVE SESSION", use_container_width=True):
+            if st.button("💾 SAVE SESSION", width="stretch"):
                 save_session_state()
                 st.toast("Progress persisted to disk", icon="💾")
                 
@@ -196,13 +196,13 @@ def render_decision_controls(session: ScreeningSession, article):
     btn_disabled = is_blocked
     
     with c1:
-        inc = st.button("✅ INCLUDE", use_container_width=True, type="primary", disabled=btn_disabled)
+        inc = st.button("✅ INCLUDE", width="stretch", type="primary", disabled=btn_disabled)
     with c2:
-        exc = st.button("❌ EXCLUDE", use_container_width=True, disabled=btn_disabled)
+        exc = st.button("❌ EXCLUDE", width="stretch", disabled=btn_disabled)
     with c3:
-        dis = st.button("💬 DISCUSS", use_container_width=True, disabled=btn_disabled)
+        dis = st.button("💬 DISCUSS", width="stretch", disabled=btn_disabled)
     with c4:
-        skp = st.button("⏭️ SKIP", use_container_width=True)
+        skp = st.button("⏭️ SKIP", width="stretch")
 
     notes = st.text_area("Audit Notes / Reasoning:", placeholder="Enter justification for this decision...", key=f"note_{article.article_id}")
 

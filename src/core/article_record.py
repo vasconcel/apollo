@@ -23,31 +23,6 @@ class EligibilityDecision:
 
 
 @dataclass
-class QualityDecision:
-    """QC scoring result."""
-    scores: Dict[str, float]
-    total_score: float
-    decision: str
-    literature_type: str
-    
-    def to_display(self) -> str:
-        if self.decision == "pending":
-            return "PENDING"
-        if not self.scores:
-            return "NO"
-        return f"{self.total_score}/4"
-    
-    def to_category(self) -> str:
-        if self.decision == "pending":
-            return "PENDING"
-        if not self.scores:
-            return "NO"
-        if self.total_score >= 2.0:
-            return "PASS"
-        return "FAIL"
-
-
-@dataclass
 class ArticleRecord:
     """
     Complete article record with all decisions.
@@ -74,7 +49,6 @@ class ArticleRecord:
     source_sheet: str = ""
     ec_decision: str = ""
     ic_decision: str = ""
-    qc_score: str = ""
     final_decision: str = ""
     
     metadata: Dict[str, Any] = field(default_factory=dict)

@@ -219,13 +219,6 @@ WORKFLOW_STAGE_COLORS = {
         "icon": "⊕",
         "description": "Inclusion Criteria Screening"
     },
-    "qc": {
-        "bg": "rgba(0, 214, 126, 0.15)",
-        "border": "#00D67E",
-        "text": "#00D67E",
-        "icon": "◎",
-        "description": "Quality Assessment"
-    },
     "export": {
         "bg": "rgba(0, 200, 215, 0.15)",
         "border": "#00c8d7",

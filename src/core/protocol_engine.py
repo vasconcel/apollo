@@ -1,8 +1,8 @@
 """
-APOLLO Protocol Engine - Configuration layer for EC/IC/QC criteria
+APOLLO Protocol Engine - Configuration layer for EC/IC criteria
 
 This module provides a configurable decision engine that allows users to define
-EC, IC, and QC criteria in a structured, machine-readable format (JSON/YAML).
+EC and IC criteria in a structured, machine-readable format (JSON/YAML).
 
 Design Goals:
 - Backward compatibility: existing behavior preserved when no protocol provided
@@ -15,9 +15,8 @@ from dataclasses import dataclass
 
 from src.core.criteria_registry import (
     SE_KEYWORDS, RECRUITMENT_KEYWORDS, EMPIRICAL_KEYWORDS, INDUSTRY_KEYWORDS,
-    WL_QC_SCORING_KEYWORDS, GL_QC_SCORING_KEYWORDS,
     evaluate_se_context, evaluate_recruitment, evaluate_empirical,
-    evaluate_industry, evaluate_wl_qc_score, evaluate_gl_qc_score
+    evaluate_industry
 )
 
 
@@ -100,7 +99,7 @@ class ProtocolRule:
         return False
     
     def _keyword_match(self, text: str) -> float:
-        """Evaluate keyword matching for QC scoring (returns 0, 0.5, or 1.0)."""
+        """Evaluate keyword matching for criteria scoring (returns 0, 0.5, or 1.0)."""
         if not isinstance(self.value, dict):
             return 0.0
         
@@ -120,7 +119,7 @@ class ProtocolEngine:
     Protocol-driven evaluation engine.
     
     Loads protocol definitions (JSON/YAML) and translates rules into 
-    executable evaluation logic that interfaces with EC/IC/QC engines.
+    executable evaluation logic that interfaces with EC/IC engines.
     """
     
     DEFAULT_PROTOCOL = None  # Lazy-loaded
@@ -170,35 +169,6 @@ class ProtocolEngine:
                 value=rule_def.get("value"),
                 description=rule_def.get("description", "")
             )
-        
-        # Parse QC rules
-        qc_def = self.protocol.get("quality_criteria", {})
-        self._wl_qc_rules = {}
-        self._gl_qc_rules = {}
-        
-        if "WL" in qc_def:
-            for rule_id, rule_def in qc_def["WL"].items():
-                self._wl_qc_rules[rule_id] = ProtocolRule(
-                    rule_id=rule_id,
-                    rule_type=rule_def.get("type", "scoring"),
-                    field=rule_def.get("field", ""),
-                    operator=rule_def.get("operator", ""),
-                    value=rule_def.get("scoring_rules", {}),
-                    description=rule_def.get("description", "")
-                )
-        
-        if "GL" in qc_def:
-            for rule_id, rule_def in qc_def["GL"].items():
-                self._gl_qc_rules[rule_id] = ProtocolRule(
-                    rule_id=rule_id,
-                    rule_type=rule_def.get("type", "scoring"),
-                    field=rule_def.get("field", ""),
-                    operator=rule_def.get("operator", ""),
-                    value=rule_def.get("scoring_rules", {}),
-                    description=rule_def.get("description", "")
-                )
-        
-        self._qc_threshold = qc_def.get("threshold", 2.0)
     
     def evaluate_ec(self, data: Dict[str, str], literature_type: str, 
                     is_duplicate: bool = False) -> tuple:
@@ -284,17 +254,6 @@ class ProtocolEngine:
         
         return ("exclude", "IC1", "Does not address recruitment/selection in software context")
     
-    def evaluate_qc(self, data: Dict[str, str], literature_type: str) -> tuple:
-        """
-        Evaluate quality criteria using protocol or default logic.
-        
-        Returns:
-            Tuple of (decision: str, scores: dict, total: float)
-        """
-        # Use default evaluation for protocol to ensure semantic parity
-        # The default evaluation logic is replicated exactly in _default_qc_evaluation
-        return self._default_qc_evaluation(data, literature_type)
-    
     def _default_ec_evaluation(self, data: Dict[str, str], literature_type: str,
                               is_duplicate: bool) -> tuple:
         """Default EC behavior - matches original ExclusionCriteria class."""
@@ -344,50 +303,9 @@ class ProtocolEngine:
         if has_industry and has_empirical:
             return ("include", "NO", "Empirical SE research relevant to scope")
         
-        return ("exclude", "IC1", "Does not address recruitment/selection in software context")
-    
-    def _default_qc_evaluation(self, data: Dict[str, str], literature_type: str) -> tuple:
-        """Default QC behavior - matches original QualityCriteria class."""
-        title = data.get("title", "")
-        abstract = data.get("abstract", "")
-        
-        text = f"{title} {abstract}".lower()
-        
-        scores = {}
-        
-        if literature_type == "WL":
-            for criterion in ["WL-Q1", "WL-Q2", "WL-Q3", "WL-Q4"]:
-                scores[criterion] = evaluate_wl_qc_score(criterion, text)
-        else:
-            for criterion in ["GL-Q1", "GL-Q2", "GL-Q3", "GL-Q4"]:
-                scores[criterion] = evaluate_gl_qc_score(criterion, text)
-        
-        total = sum(scores.values())
-        threshold = 2.0
-        decision = "include" if total >= threshold else "exclude"
-        
-        return (decision, scores, total)
+return ("exclude", "IC1", "Does not address recruitment/selection in software context")
 
-
-def load_protocol(protocol_path: str) -> Dict:
-    """
-    Load protocol from JSON or YAML file.
-    
-    Args:
-        protocol_path: Path to protocol file
-        
-    Returns:
-        Protocol dictionary
-    """
-    with open(protocol_path, 'r', encoding='utf-8') as f:
-        if protocol_path.endswith('.yaml') or protocol_path.endswith('.yml'):
-            import yaml
-            return yaml.safe_load(f)
-        else:
-            return json.load(f)
-
-
-def get_default_protocol() -> Dict:
+    def get_default_protocol() -> Dict:
     """
     Get the default built-in protocol equivalent to current APOLLO behavior.
     
@@ -397,7 +315,7 @@ def get_default_protocol() -> Dict:
     return {
         "protocol_version": "1.0",
         "name": "Default APOLLO Protocol",
-        "description": "Standard EC/IC/QC protocol for systematic literature review",
+        "description": "Standard EC/IC protocol for systematic literature review",
         "metadata": {
             "created_for": "Software Engineering Recruitment & Selection",
             "min_year": 2015,
@@ -598,10 +516,5 @@ def validate_protocol(protocol: Dict) -> tuple:
             errors.append(f"IC {rule_id}: missing 'field'")
         if "operator" not in rule_def:
             errors.append(f"IC {rule_id}: missing 'operator'")
-    
-    # Validate QC structure
-    qc = protocol.get("quality_criteria", {})
-    if "threshold" not in qc:
-        errors.append("QC: missing 'threshold'")
     
     return (len(errors) == 0, errors)

@@ -12,7 +12,9 @@ SPRINT 7.7: Structured Advisory Semantics
 """
 import json
 import os
+import re
 import hashlib
+import time
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -225,8 +227,6 @@ class LLMAssistant:
             return self.suggest_ec(title, abstract, literature_type, year, metadata=metadata)
         elif stage == "ic":
             return self.suggest_ic(title, abstract, literature_type, metadata=metadata)
-        elif stage == "qc":
-            return self.suggest_qc(title, abstract, literature_type, metadata=metadata)
         return self._fallback_advisory(stage, "Invalid stage", metadata or {})
 
     def suggest_ec(
@@ -262,6 +262,36 @@ class LLMAssistant:
         )
 
         advisory = self._call_structured_llm(prompt, "ec", canonical_lit, metadata)
+        
+        if "EC2" in criteria or "ec2" in [k.lower() for k in criteria.keys()]:
+            advisory.criterion_evaluations["EC2"] = CriterionEvaluation(
+                criterion_id="EC2",
+                triggered=False,
+                evidence=[],
+                justification="N/A: Evaluation deferred to Full-Text stage.",
+                ambiguity_detected=False,
+                grounded_metadata_fields=[]
+            )
+            if "EC2" not in advisory.non_triggered_criteria:
+                advisory.non_triggered_criteria.append("EC2")
+            if "EC2" in advisory.triggered_criteria:
+                advisory.triggered_criteria = [c for c in advisory.triggered_criteria if str(c).upper() != "EC2"]
+        
+        ec6_keys = [k for k in criteria.keys() if k.upper() in ["EC6", "DUPLICATE", "DUPLICATES"]]
+        if ec6_keys:
+            ec6_key = ec6_keys[0]
+            advisory.criterion_evaluations[ec6_key] = CriterionEvaluation(
+                criterion_id=ec6_key,
+                triggered=False,
+                evidence=[],
+                justification="N/A: Handled by deterministic Global_ID matching.",
+                ambiguity_detected=False,
+                grounded_metadata_fields=[]
+            )
+            if ec6_key not in advisory.non_triggered_criteria:
+                advisory.non_triggered_criteria.append(ec6_key)
+            if ec6_key in advisory.triggered_criteria:
+                advisory.triggered_criteria = [c for c in advisory.triggered_criteria if c != ec6_key]
         
         mg = dict(advisory.metadata_grounding) if advisory.metadata_grounding else {}
         
@@ -313,45 +343,6 @@ class LLMAssistant:
         )
 
         return self._call_structured_llm(prompt, "ic", canonical_lit, metadata)
-
-    def suggest_qc(
-        self,
-        title: str,
-        abstract: str,
-        literature_type: str = "WL",
-        protocol_criteria: Optional[Dict[str, str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> StructuredAdvisory:
-        """
-        Structured QC advisory with criterion-by-criterion evaluation.
-        """
-        metadata = metadata or {}
-        canonical_lit = normalize_literature_label(literature_type)
-
-        if canonical_lit == WL_CANONICAL:
-            criteria = protocol_criteria or {
-                "WL-Q1": "Are the research aims and SE R&S context clearly stated?",
-                "WL-Q2": "Is the methodology adequately described and appropriate?",
-                "WL-Q3": "Are findings clearly supported by collected data?",
-                "WL-Q4": "Does the study adequately discuss limitations?"
-            }
-        else:
-            criteria = protocol_criteria or {
-                "GL-Q1": "Is author's expertise or organizational context explicitly stated?",
-                "GL-Q2": "Is the source of experience transparent?",
-                "GL-Q3": "Are claims supported by operational artifacts?",
-                "GL-Q4": "Does the source provide insights beyond generic marketing?"
-            }
-
-        prompt = self._build_qc_prompt(
-            title=title,
-            abstract=abstract,
-            literature_type=canonical_lit,
-            criteria=criteria,
-            metadata=metadata
-        )
-
-        return self._call_structured_llm(prompt, "qc", canonical_lit, metadata)
 
     def _build_ec_prompt(
         self,
@@ -436,16 +427,25 @@ CRITICAL YEAR RULE (STRICT ENFORCEMENT):
 - If Year >= 2015, the year criterion is NOT triggered — the paper passes the year threshold
 - NEVER exclude a paper for year reasons if Year >= 2015
 
+METHODOLOGICAL CONSTRAINTS (STRICT ENFORCEMENT):
+- EC2 (Full Text Availability): You MUST NOT assume availability. Since we are in the Title/Abstract screening phase, availability is UNKNOWN. Your evaluation for EC2 should always be: "Cannot be evaluated at Title/Abstract screening stage. Proceeding with metadata analysis."
+- EC6 (Duplicates): Ignore EC6 (Duplicates). This is handled deterministically by the APOLLO system logic. Your evaluation for EC6 should always be: "Handled by system deterministic engine."
+- Evidence Extracts: Strictly map extracts to the criteria. Instead of a general list, provide evidence that refutes a specific EC trigger (e.g., refuting EC1 by finding SE keywords, or refuting EC3 by identifying peer-review indicators).
+
 {abstract_instruction}
 
 EXCLUSION CRITERIA (from LOCKED protocol — these are the ONLY rules):
 {chr(10).join(criteria_list)}
+
+METHODOLOGICAL ISOLATION (STRICT):
+Focus ONLY on Exclusion Criteria (EC1-EC6). Do NOT discuss or evaluate Inclusion Criteria (IC). Your goal is to find reasons to REJECT the paper. If no exclusion criteria are met, simply state: 'No exclusion triggers found - paper passes EC'.
 
 IMPORTANT REMINDERS:
 1. Use the EXACT criteria labels provided (e.g., EC1, EC2, IC1, etc.)
 2. Evaluate each criterion independently — one triggered does not affect others
 3. Only trigger criteria where clear evidence exists in the metadata
 4. "Short publications" or "non-peer-reviewed" criteria apply ONLY to GL if they appear in the criteria list
+5. **CONFIDENCE RATIONALE**: If your CONFIDENCE is less than 100%, your 'reasoning_summary' field MUST begin with: '[CONFIDENCE {X}%]: ' followed by the explanation of why the metadata is ambiguous or what information is missing (e.g., "[CONFIDENCE 70%]: Year information is missing from metadata, making it impossible to verify EC2 applicability").
 
 STRUCTURED OUTPUT REQUIRED:
 Return ONLY valid JSON with this exact structure:
@@ -522,6 +522,7 @@ ADVISORY CONSTRAINTS (STRICT ENFORCEMENT):
 4. NEVER fabricate ambiguity when metadata is complete
 5. NEVER fabricate missing metadata when it is provided
 6. NEVER fabricate abstract content when no abstract is available
+7. **CONFIDENCE RATIONALE**: If your CONFIDENCE is less than 100%, your 'reasoning_summary' field MUST begin with: '[CONFIDENCE {X}%]: ' followed by the explanation of why the metadata is ambiguous or what information is missing (e.g., "[CONFIDENCE 80%]: Abstract is not detailed enough to fully assess IC2 applicability").
 
 INCLUSION CRITERIA (protocol-authoritative):
 {chr(10).join([f"- {k}: {v}" for k, v in criteria.items()])}
@@ -548,55 +549,78 @@ Return ONLY valid JSON."""
 
         return prompt
 
-    def _build_qc_prompt(
-        self,
-        title: str,
-        abstract: str,
-        literature_type: str,
-        criteria: Dict[str, str],
-        metadata: Dict[str, Any]
-    ) -> str:
+    def _sanitize_json_string(self, content: str) -> str:
+        r"""
+        Pre-parsing sanitization to handle LaTeX/BibTeX escape sequences
+        that may have been mirrored by the LLM.
+        
+        Handles: \o{}, \ae{}, special unicode chars, unescaped quotes
         """
-        Build structured QC prompt with EXPLICIT metadata grounding.
+        content = content.strip()
+        
+        content = content.replace(r'\o{}', 'ø')
+        content = content.replace(r'\ae{}', 'æ')
+        content = re.sub(r'\\"\{(\w)\}', r'\1', content)
+        content = re.sub(r"\\'\{(\w)\}", r'\1', content)
+        content = re.sub(r'\\\^\{?(\w)\}?', r'\1', content)
+        content = re.sub(r'\\~{?(\w)}?', r'\1', content)
+        content = content.replace(r'\&', '&')
+        content = content.replace(r'\%', '%')
+        content = content.replace(r'\#', '#')
+        content = content.replace(r'\$', '$')
+        content = content.replace(r'\_', '_')
+        content = re.sub(r'\\text\{([^}]+)\}', r'\1', content)
+        
+        content = re.sub(r'\\([{}\[\]])', r'\1', content)
+        
+        return content
+        content = re.sub(r'\\"\{(\w)\}', r'\1', content)
+        content = re.sub(r"\\'\{(\w)\}", r'\1', content)
+        content = re.sub(r'\\\^\{?(\w)\}?', r'\1', content)
+        content = re.sub(r'\\~{?(\w)}?', r'\1', content)
+        content = re.sub(r'\\&', '&', content)
+        content = re.sub(r'\\%', '%', content)
+        content = re.sub(r'\\#', '#', content)
+        content = re.sub(r'\$_', '$', content)
+        content = re.sub(r'\\_', '_', content)
+        content = re.sub(r'\\text\{([^}]+)\}', r'\1', content)
+        
+        content = re.sub(r'\\([{}\[\]])', r'\1', content)
+        
+        return content
+
+    def _extract_json_block(self, content: str) -> Optional[Dict]:
         """
-        lit_type_key = "WL" if literature_type == WL_CANONICAL else "GL"
-        criteria_blocks = "\n".join([
-            f'    "{cid}": {{"triggered": false, "evidence": [], "justification": "", "ambiguity_detected": false}}'
-            for cid in criteria.keys()
-        ])
-
-        prompt = f"""SYSTEM CONTEXT:
-You are a systematic review expert. PROTOCOL and CANONICAL METADATA are authoritative.
-
-METADATA GROUNDING:
-- Title: {title}
-- Literature Type: {literature_type}
-- Abstract: {abstract[:600] if abstract else 'No abstract available'}
-
-QUALITY CRITERIA (protocol-authoritative):
-{chr(10).join([f"- {k}: {v}" for k, v in criteria.items()])}
-
-STRUCTURED OUTPUT REQUIRED:
-Return ONLY valid JSON:
-
-{{
-  "decision": "include" or "exclude",
-  "confidence": 0.0-1.0,
-  "justification": "2-3 sentence explanation",
-  "reasoning_summary": "quality assessment summary",
-  "triggered_criteria": ["criteria scores"],
-  "non_triggered_criteria": [],
-  "criterion_evaluations": {{
-{criteria_blocks}
-  }},
-  "ambiguity_flags": [],
-  "evidence_extracts": [],
-  "metadata_grounding": {{"title_used": true, "abstract_used": true}}
-}}
-
-Return ONLY valid JSON."""
-
-        return prompt
+        Robust JSON extraction using regex to find JSON block in LLM response.
+        Handles markdown code blocks, partial responses, and malformed JSON.
+        """
+        content = content.strip()
+        
+        json_match = re.search(r'\{[\s\S]*\}', content)
+        if json_match:
+            json_str = json_match.group(0)
+            
+            json_str = self._sanitize_json_string(json_str)
+            
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+        
+        cleaned = self._sanitize_json_string(content)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+        
+        content_no_backticks = re.sub(r'^```json\s*', '', content)
+        content_no_backticks = re.sub(r'\s*```$', '', content_no_backticks)
+        content_no_backticks = self._sanitize_json_string(content_no_backticks)
+        
+        try:
+            return json.loads(content_no_backticks)
+        except json.JSONDecodeError:
+            return None
 
     def _call_structured_llm(
         self,
@@ -606,7 +630,8 @@ Return ONLY valid JSON."""
         metadata: Dict[str, Any]
     ) -> StructuredAdvisory:
         """
-        Call LLM and parse structured response with deterministic error handling.
+        Call LLM and parse structured response with robust error handling.
+        Includes LaTeX/BibTeX escape sequence handling and retry logic.
         """
         if not self._client:
             return self._fallback_advisory(stage, "No LLM client", metadata)
@@ -614,12 +639,13 @@ Return ONLY valid JSON."""
         messages = [
             {
                 "role": "system",
-                "content": "You are a systematic review expert. Provide structured JSON responses ONLY. Follow the exact schema provided."
+                "content": "You are a systematic review expert. Provide structured JSON responses ONLY. Follow the exact schema provided. IMPORTANT: Do not use LaTeX or BibTeX escape sequences in the JSON output. Use plain ASCII characters."
             },
             {"role": "user", "content": prompt}
         ]
 
         try:
+            time.sleep(0.5)
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
@@ -628,12 +654,32 @@ Return ONLY valid JSON."""
             )
 
             content = response.choices[0].message.content
-
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                content = content.strip().strip("```json").strip("```").strip()
-                parsed = json.loads(content)
+            
+            parsed = self._extract_json_block(content)
+            
+            if parsed is None:
+                retry_messages = [
+                    {
+                        "role": "system",
+                        "content": "You must return ONLY valid JSON. No markdown, no explanation. Return exactly the JSON object."
+                    },
+                    {"role": "user", "content": "Convert this response to valid JSON: " + content[:500]}
+                ]
+                
+                try:
+                    retry_response = self._client.chat.completions.create(
+                        model=self._model,
+                        messages=retry_messages,
+                        temperature=0.0,
+                        max_tokens=800
+                    )
+                    retry_content = retry_response.choices[0].message.content
+                    parsed = self._extract_json_block(retry_content)
+                except:
+                    pass
+            
+            if parsed is None:
+                return self._fallback_advisory(stage, "JSON parse failed after sanitization", metadata)
 
             evals = {}
             for cid, eval_data in parsed.get("criterion_evaluations", {}).items():

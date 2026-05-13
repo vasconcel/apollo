@@ -1,4 +1,3 @@
-"""APOLLO Core Module."""
-from .database import Database, DatabaseError
+"""APOLLO Core Module - V2.0.0 Primal (EC/IC only)."""
 
-__all__ = ['Database', 'DatabaseError']
+__all__ = []

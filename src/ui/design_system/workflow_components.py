@@ -2,7 +2,7 @@
 APOLLO Scientific Design System - Workflow Components
 
 Components for visualizing canonical screening workflow:
-Protocol → EC → IC → QC → Export → Replay
+Protocol → EC → IC → Export → Replay
 
 PURPOSE:
 - Enforce workflow order visually
@@ -23,7 +23,6 @@ WORKFLOW_STAGES = [
     {"id": "protocol", "label": "PROTOCOL", "icon": "◈"},
     {"id": "ec", "label": "EC", "icon": "⊘"},
     {"id": "ic", "label": "IC", "icon": "⊕"},
-    {"id": "qc", "label": "QC", "icon": "◎"},
     {"id": "export", "label": "EXPORT", "icon": "⬇"},
     {"id": "replay", "label": "REPLAY", "icon": "⟲"},
 ]
@@ -39,7 +38,7 @@ def render_workflow_stepper(
     Render canonical workflow stepper with explicit stage progression.
 
     Args:
-        current_stage: Current stage identifier (protocol, ec, ic, qc, export, replay)
+        current_stage: Current stage identifier (protocol, ec, ic, export, replay)
         session_state: Optional session state for progress tracking
         locked: Whether current stage is locked
         protocol_hash: Protocol hash for authority verification

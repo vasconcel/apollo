@@ -7,7 +7,6 @@ Canonical article decision component displaying:
 - DOI/source/year lineage
 - Metadata completeness
 - Decision history
-- QC state
 - Audit verification state
 
 PURPOSE:
@@ -36,7 +35,6 @@ def render_article_decision_card(
     article_review,
     current_stage: str,
     show_full_details: bool = True,
-    show_qc_state: bool = True,
     show_audit_state: bool = True
 ) -> None:
     """
@@ -46,7 +44,6 @@ def render_article_decision_card(
         article_review: ArticleReview object
         current_stage: Current screening stage
         show_full_details: Whether to show full metadata
-        show_qc_state: Whether to show QC assessment state
         show_audit_state: Whether to show audit verification
     """
     lit_type = article_review.get_literature_type()
@@ -110,9 +107,6 @@ def render_article_decision_card(
         <!-- Stage Decisions Summary -->
         {render_stage_decisions_summary(article_review)}
 
-        <!-- QC State -->
-        {render_qc_state_section(article_review) if show_qc_state else ''}
-
         <!-- Metadata Completeness -->
         <div style="
             padding: 0.75rem 1rem;
@@ -125,7 +119,7 @@ def render_article_decision_card(
         {render_audit_state_section(article_review) if show_audit_state else ''}
 
         <!-- Notes -->
-        {render_notes_section(article_review, current_stage) if article_review.ec_notes or article_review.ic_notes or article_review.qc_notes else ''}
+        {render_notes_section(article_review, current_stage) if article_review.ec_notes or article_review.ic_notes else ''}
     </div>
     """, unsafe_allow_html=True)
 
@@ -299,11 +293,9 @@ def render_stage_decisions_summary(article_review) -> str:
     """Render summary of decisions across all stages."""
     ec_dec = article_review.ec_stage or "pending"
     ic_dec = article_review.ic_stage or "—"
-    qc_dec = article_review.qc_stage or "—"
 
     ec_sem = get_semantic_color(ec_dec.upper() if ec_dec != "pending" else "PENDING")
     ic_sem = get_semantic_color(ic_dec.upper() if ic_dec not in ("—", "pending") else "PENDING")
-    qc_sem = get_semantic_color(qc_dec.upper() if qc_dec not in ("—", "pending") else "PENDING")
 
     return f'''
     <div style="
@@ -350,55 +342,8 @@ def render_stage_decisions_summary(article_review) -> str:
                 {ic_dec.upper() if ic_dec not in ('—', 'pending') else '—'}
             </span>
         </div>
-        <div style="width: 1px; background: #1A1A1A;"></div>
-        <div style="flex: 1; text-align: center;">
-            <div style="
-                font-family: {TYPOGRAPHY['mono']};
-                font-size: 0.55rem;
-                color: #4A4A4A;
-                text-transform: uppercase;
-                letter-spacing: 0.1em;
-                margin-bottom: 0.25rem;
-            ">QC</div>
-            <span style="
-                font-family: {TYPOGRAPHY['mono']};
-                font-size: 0.65rem;
-                font-weight: 600;
-                color: {qc_sem['text']};
-            ">
-                {qc_dec.upper() if qc_dec not in ('—', 'pending') else '—'}
-            </span>
-        </div>
     </div>
     '''
-
-
-def render_qc_state_section(article_review) -> str:
-    """Render QC state section."""
-    if article_review.qc_stage:
-        qc_score = article_review.metadata.get("qc_score", "")
-        qc_semantic = get_semantic_color("INCLUDED" if article_review.qc_stage == "include" else "EXCLUDED")
-
-        return f'''
-        <div style="
-            padding: 0.75rem 1rem;
-            border-top: 1px solid #1A1A1A;
-        ">
-            <div style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                font-family: {TYPOGRAPHY['mono']};
-                font-size: 0.7rem;
-            ">
-                <span style="color: #808080;">QC Assessment</span>
-                <span style="color: {qc_semantic['text']}; font-weight: 600;">
-                    {article_review.qc_stage.upper()} {f'({qc_score})' if qc_score else ''}
-                </span>
-            </div>
-        </div>
-        '''
-    return ''
 
 
 def render_completeness_html(completeness: str) -> str:
@@ -443,8 +388,6 @@ def render_audit_state_section(article_review) -> str:
         timestamps.append(f"EC: {article_review.ec_timestamp[:19]}")
     if article_review.ic_timestamp:
         timestamps.append(f"IC: {article_review.ic_timestamp[:19]}")
-    if article_review.qc_timestamp:
-        timestamps.append(f"QC: {article_review.qc_timestamp[:19]}")
 
     if not timestamps:
         return ''
@@ -486,7 +429,6 @@ def render_notes_section(article_review, current_stage: str) -> str:
     notes = {
         "ec": article_review.ec_notes,
         "ic": article_review.ic_notes,
-        "qc": article_review.qc_notes,
     }
 
     active_notes = {k: v for k, v in notes.items() if v}

@@ -1,0 +1,20 @@
+{
+  "output": {
+    "file_path": "repomix-output.md",
+    "style": "markdown"
+  },
+  "ignore": {
+    "custom_patterns": [
+      ".deprecated/**",
+      "tests/**",
+      "sessions/**",
+      "logs/**",
+      "exports/**",
+      "data/**",
+      "venv/**",
+      ".venv/**",
+      "*.xlsx",
+      "*.csv"
+    ]
+  }
+}

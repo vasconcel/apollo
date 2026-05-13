@@ -3,7 +3,7 @@ APOLLO Dynamic Protocol Model
 researcher-configurable screening criteria
 
 This module provides:
-- Protocol definition (EC/IC/QC criteria)
+- Protocol definition (EC/IC criteria)
 - Protocol snapshot for audit
 - Stage-aware criteria access
 - Protocol versioning and locking
@@ -46,20 +46,6 @@ class ProtocolTemplate:
             "IC4": {"description": "Sources describing practices, assessment methods, or evaluation mechanisms used in SE R&S.", "enabled": True},
             "IC5": {"description": "Sources providing empirical findings or practitioner-reported experiences related to SE R&S practices.", "enabled": True},
         },
-        "wl_qc": {
-            "WL-Q1": {"description": "Are the research aims and the SE R&S context clearly stated?", "enabled": True, "weight": 1.0},
-            "WL-Q2": {"description": "Is the research methodology adequately described and appropriate?", "enabled": True, "weight": 1.0},
-            "WL-Q3": {"description": "Are the findings clearly supported by the collected data?", "enabled": True, "weight": 1.0},
-            "WL-Q4": {"description": "Does the study adequately discuss its limitations or threats to validity?", "enabled": True, "weight": 1.0},
-        },
-        "gl_qc": {
-            "GL-Q1": {"description": "Is the author's expertise or organizational context explicitly stated?", "enabled": True, "weight": 1.0},
-            "GL-Q2": {"description": "Is the source of experience transparent (e.g., specific hiring cycle, personal narrative)?", "enabled": True, "weight": 1.0},
-            "GL-Q3": {"description": "Are the claims supported by operational artifacts (e.g., process steps, rubrics, or data) rather than mere opinion?", "enabled": True, "weight": 1.0},
-            "GL-Q4": {"description": "Does the source provide insights beyond generic employer marketing (e.g., discussing trade-offs or friction points)?", "enabled": True, "weight": 1.0},
-        },
-        "wl_threshold": 2.0,
-        "gl_threshold": 2.0,
     }
 
     KITCHENHAM_SLR = {
@@ -75,13 +61,6 @@ class ProtocolTemplate:
             "IC1": {"description": "Focuses on software engineering domain", "enabled": True},
             "IC2": {"description": "Addresses research questions explicitly", "enabled": True},
         },
-        "wl_qc": {
-            "QC1": {"description": "Research methodology is clearly stated", "enabled": True, "weight": 1.0},
-            "QC2": {"description": "Findings are supported by evidence", "enabled": True, "weight": 1.0},
-        },
-        "gl_qc": {},
-        "wl_threshold": 2.0,
-        "gl_threshold": 0.0,
     }
 
     GENERIC_MLR = {
@@ -96,14 +75,6 @@ class ProtocolTemplate:
         "ic": {
             "IC1": {"description": "Relevant to research scope", "enabled": True},
         },
-        "wl_qc": {
-            "QC1": {"description": "Quality criterion 1", "enabled": True, "weight": 1.0},
-        },
-        "gl_qc": {
-            "QC1": {"description": "Quality criterion 1", "enabled": True, "weight": 1.0},
-        },
-        "wl_threshold": 1.0,
-        "gl_threshold": 1.0,
     }
 
     @classmethod
@@ -216,89 +187,15 @@ class ICProtocol:
 
 
 @dataclass
-class QCProtocol:
-    """Quality Assessment protocol with separate WL/GL frameworks."""
-    wl_criteria: Dict[str, Criterion] = field(default_factory=dict)
-    gl_criteria: Dict[str, Criterion] = field(default_factory=dict)
-    wl_threshold: float = 2.0
-    gl_threshold: float = 2.0
-
-    @property
-    def criteria(self) -> Dict[str, Criterion]:
-        return self.wl_criteria
-
-    def get_criteria_for_type(self, literature_type: str) -> Dict[str, Criterion]:
-        """Get criteria for specific literature type."""
-        if literature_type == "GL":
-            return self.gl_criteria
-        return self.wl_criteria
-
-    def get_threshold_for_type(self, literature_type: str) -> float:
-        """Get threshold for specific literature type."""
-        if literature_type == "GL":
-            return self.gl_threshold
-        return self.wl_threshold
-
-    def to_dict(self) -> Dict:
-        return {
-            "wl_criteria": {k: v.to_dict() for k, v in self.wl_criteria.items()},
-            "gl_criteria": {k: v.to_dict() for k, v in self.gl_criteria.items()},
-            "wl_threshold": self.wl_threshold,
-            "gl_threshold": self.gl_threshold
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> "QCProtocol":
-        if not isinstance(data, dict):
-            raise TypeError(f"QCProtocol.from_dict requires dict, got {type(data).__name__}")
-
-        wl_criteria = {}
-        for k, v in data.get("wl_criteria", {}).items():
-            if isinstance(v, dict):
-                wl_criteria[k] = Criterion.from_dict(v)
-            elif isinstance(v, Criterion):
-                wl_criteria[k] = v
-
-        gl_criteria = {}
-        for k, v in data.get("gl_criteria", {}).items():
-            if isinstance(v, dict):
-                gl_criteria[k] = Criterion.from_dict(v)
-            elif isinstance(v, Criterion):
-                gl_criteria[k] = v
-
-        return cls(
-            wl_criteria=wl_criteria,
-            gl_criteria=gl_criteria,
-            wl_threshold=data.get("wl_threshold", 2.0),
-            gl_threshold=data.get("gl_threshold", 2.0)
-        )
-
-    def to_prompt(self, literature_type: str = "WL") -> str:
-        """Format for LLM prompt based on literature type."""
-        criteria = self.get_criteria_for_type(literature_type)
-        if not criteria:
-            return f"No {literature_type} quality criteria defined"
-        threshold = self.get_threshold_for_type(literature_type)
-        lines = [f"{k}: {c.description} (weight: {c.weight})" for k, c in criteria.items() if c.enabled]
-        header = f"### {literature_type} Quality Criteria (threshold: {threshold})"
-        return header + "\n" + "\n".join(lines) if lines else f"No {literature_type} QC enabled"
-
-    def is_complete(self, literature_type: str = "WL") -> bool:
-        """Check if framework has criteria."""
-        criteria = self.get_criteria_for_type(literature_type)
-        return len(criteria) > 0
-
-
 @dataclass
 class ProtocolSnapshot:
     """Snapshot of protocol at a point in time."""
     snapshot_id: str
     created_at: str
-    stage: str  # "ec", "ic", "qc"
+    stage: str  # "ec", "ic"
     
     ec_protocol: Dict
     ic_protocol: Dict
-    qc_protocol: Dict
     
     snapshot_hash: str = ""
     
@@ -336,7 +233,6 @@ class DynamicProtocol:
 
         self.ec = ECProtocol(criteria={})
         self.ic = ICProtocol(criteria={})
-        self.qc = QCProtocol()
 
         self._snapshots: List[ProtocolSnapshot] = []
 
@@ -362,25 +258,6 @@ class DynamicProtocol:
                 enabled=ic_data.get("enabled", True)
             )
 
-        for qc_id, qc_data in template.get("wl_qc", {}).items():
-            self.qc.wl_criteria[qc_id] = Criterion(
-                id=qc_id,
-                description=qc_data.get("description", ""),
-                enabled=qc_data.get("enabled", True),
-                weight=qc_data.get("weight", 1.0)
-            )
-
-        for qc_id, qc_data in template.get("gl_qc", {}).items():
-            self.qc.gl_criteria[qc_id] = Criterion(
-                id=qc_id,
-                description=qc_data.get("description", ""),
-                enabled=qc_data.get("enabled", True),
-                weight=qc_data.get("weight", 1.0)
-            )
-
-        self.qc.wl_threshold = template.get("wl_threshold", 2.0)
-        self.qc.gl_threshold = template.get("gl_threshold", 2.0)
-
     def get_template_info(self) -> Dict:
         """Get template metadata if bootstrapped from template."""
         if not self.template_name:
@@ -395,16 +272,12 @@ class DynamicProtocol:
         """Check if protocol has minimum required criteria."""
         ec_count = len(self.ec.criteria)
         ic_count = len(self.ic.criteria)
-        wl_qc = len(self.qc.wl_criteria)
-        gl_qc = len(self.qc.gl_criteria)
 
         errors = []
         if ec_count == 0:
             errors.append("At least one Exclusion Criterion (EC) required")
         if ic_count == 0:
             errors.append("At least one Inclusion Criterion (IC) required")
-        if wl_qc == 0 and gl_qc == 0:
-            errors.append("At least one Quality Criterion (QC) required for WL or GL")
 
         return (len(errors) == 0, errors)
 
@@ -429,13 +302,6 @@ class DynamicProtocol:
         self.ec = ECProtocol(criteria=self.ec.criteria.copy())
         self.ic = ICProtocol(criteria=self.ic.criteria.copy())
 
-        new_qc = QCProtocol()
-        new_qc.wl_criteria = {k: Criterion.from_dict(v.to_dict()) for k, v in self.qc.wl_criteria.items()}
-        new_qc.gl_criteria = {k: Criterion.from_dict(v.to_dict()) for k, v in self.qc.gl_criteria.items()}
-        new_qc.wl_threshold = self.qc.wl_threshold
-        new_qc.gl_threshold = self.qc.gl_threshold
-        self.qc = new_qc
-
     def unlock(self) -> "DynamicProtocol":
         """
         Unlock and create a new protocol version for modification.
@@ -452,11 +318,6 @@ class DynamicProtocol:
         new_protocol.ec = ECProtocol(criteria={k: Criterion.from_dict(v.to_dict()) for k, v in self.ec.criteria.items()})
         new_protocol.ic = ICProtocol(criteria={k: Criterion.from_dict(v.to_dict()) for k, v in self.ic.criteria.items()})
 
-        new_protocol.qc.wl_criteria = {k: Criterion.from_dict(v.to_dict()) for k, v in self.qc.wl_criteria.items()}
-        new_protocol.qc.gl_criteria = {k: Criterion.from_dict(v.to_dict()) for k, v in self.qc.gl_criteria.items()}
-        new_protocol.qc.wl_threshold = self.qc.wl_threshold
-        new_protocol.qc.gl_threshold = self.qc.gl_threshold
-
         return new_protocol
 
     def create_session(self) -> None:
@@ -469,12 +330,8 @@ class DynamicProtocol:
         """Get protocol summary for display."""
         ec_count = len(self.ec.criteria)
         ic_count = len(self.ic.criteria)
-        wl_qc_count = len(self.qc.wl_criteria)
-        gl_qc_count = len(self.qc.gl_criteria)
         ec_enabled = len([c for c in self.ec.criteria.values() if c.enabled])
         ic_enabled = len([c for c in self.ic.criteria.values() if c.enabled])
-        wl_qc_enabled = len([c for c in self.qc.wl_criteria.values() if c.enabled])
-        gl_qc_enabled = len([c for c in self.qc.gl_criteria.values() if c.enabled])
 
         return {
             "version": self.protocol_version,
@@ -482,15 +339,8 @@ class DynamicProtocol:
             "hash": self.protocol_hash,
             "ec_count": ec_count,
             "ic_count": ic_count,
-            "wl_qc_count": wl_qc_count,
-            "gl_qc_count": gl_qc_count,
-            "qc_count": wl_qc_count + gl_qc_count,
             "ec_enabled": ec_enabled,
             "ic_enabled": ic_enabled,
-            "wl_qc_enabled": wl_qc_enabled,
-            "gl_qc_enabled": gl_qc_enabled,
-            "wl_threshold": self.qc.wl_threshold,
-            "gl_threshold": self.qc.gl_threshold,
             "locked_at": self.locked_at,
             "template_name": self.template_name,
             "template_version": self.template_version
@@ -502,8 +352,6 @@ class DynamicProtocol:
             return self.ec
         elif stage == "ic":
             return self.ic
-        elif stage == "qc":
-            return self.qc
         return None
 
     def get_criteria_for_stage(self, stage: str, literature_type: str = "WL") -> Dict[str, Criterion]:
@@ -512,43 +360,26 @@ class DynamicProtocol:
             return {k: v for k, v in self.ec.criteria.items() if v.enabled}
         elif stage == "ic":
             return {k: v for k, v in self.ic.criteria.items() if v.enabled}
-        elif stage == "qc":
-            return self.qc.get_criteria_for_type(literature_type)
         return {}
     
     def add_criterion(self, stage: str, criterion_id: str, description: str, **kwargs) -> None:
         """Add a new criterion."""
         criterion = Criterion(id=criterion_id, description=description, **kwargs)
-        if stage == "qc":
-            lit_type = kwargs.get("literature_type", "WL")
-            criteria = self.qc.get_criteria_for_type(lit_type)
-            criteria[criterion_id] = criterion
-        else:
-            protocol = self.get_stage_protocol(stage)
-            if protocol:
-                protocol.criteria[criterion_id] = criterion
+        protocol = self.get_stage_protocol(stage)
+        if protocol:
+            protocol.criteria[criterion_id] = criterion
 
     def remove_criterion(self, stage: str, criterion_id: str, literature_type: str = "WL") -> None:
         """Remove a criterion."""
-        if stage == "qc":
-            criteria = self.qc.get_criteria_for_type(literature_type)
-            if criterion_id in criteria:
-                del criteria[criterion_id]
-        else:
-            protocol = self.get_stage_protocol(stage)
-            if protocol and criterion_id in protocol.criteria:
-                del protocol.criteria[criterion_id]
+        protocol = self.get_stage_protocol(stage)
+        if protocol and criterion_id in protocol.criteria:
+            del protocol.criteria[criterion_id]
 
     def enable_criterion(self, stage: str, criterion_id: str, enabled: bool = True, literature_type: str = "WL") -> None:
         """Enable/disable a criterion."""
-        if stage == "qc":
-            criteria = self.qc.get_criteria_for_type(literature_type)
-            if criterion_id in criteria:
-                criteria[criterion_id].enabled = enabled
-        else:
-            protocol = self.get_stage_protocol(stage)
-            if protocol and criterion_id in protocol.criteria:
-                protocol.criteria[criterion_id].enabled = enabled
+        protocol = self.get_stage_protocol(stage)
+        if protocol and criterion_id in protocol.criteria:
+            protocol.criteria[criterion_id].enabled = enabled
     
     def create_snapshot(self, stage: str) -> ProtocolSnapshot:
         """Create a protocol snapshot for audit."""
@@ -557,8 +388,7 @@ class DynamicProtocol:
             created_at=datetime.now().isoformat(),
             stage=stage,
             ec_protocol=self.ec.to_dict(),
-            ic_protocol=self.ic.to_dict(),
-            qc_protocol=self.qc.to_dict()
+            ic_protocol=self.ic.to_dict()
         )
         self._snapshots.append(snapshot)
         return snapshot
@@ -574,8 +404,7 @@ class DynamicProtocol:
             "template_name": self.template_name,
             "template_version": self.template_version,
             "ec": self.ec.to_dict(),
-            "ic": self.ic.to_dict(),
-            "qc": self.qc.to_dict()
+            "ic": self.ic.to_dict()
         }
 
     @classmethod
@@ -605,13 +434,6 @@ class DynamicProtocol:
                 protocol.ic = ICProtocol.from_dict(ic_data)
             else:
                 raise ValueError("DynamicProtocol.from_dict: 'ic' must be dict")
-
-        if "qc" in data:
-            qc_data = data["qc"]
-            if isinstance(qc_data, dict):
-                protocol.qc = QCProtocol.from_dict(qc_data)
-            else:
-                raise ValueError("DynamicProtocol.from_dict: 'qc' must be dict")
 
         return protocol
     

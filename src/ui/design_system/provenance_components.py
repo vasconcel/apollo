@@ -197,14 +197,6 @@ def render_decision_history(article_review) -> None:
             "notes": article_review.ic_notes
         })
 
-    if article_review.qc_stage:
-        decisions.append({
-            "stage": "QC",
-            "decision": article_review.qc_stage,
-            "timestamp": article_review.qc_timestamp,
-            "notes": article_review.qc_notes
-        })
-
     if not decisions:
         st.caption("No decisions recorded yet")
         return

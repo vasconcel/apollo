@@ -182,30 +182,6 @@ def render_full_protocol_banner(
                     text-transform: uppercase;
                     letter-spacing: 0.1em;
                     margin-bottom: 0.25rem;
-                ">QC Criteria</div>
-                <div style="
-                    font-family: {TYPOGRAPHY['mono']};
-                    font-size: 1.25rem;
-                    color: #00D67E;
-                    font-weight: 600;
-                ">
-                    {protocol_summary.get('qc_count', 0)}
-                </div>
-            </div>
-
-            <div style="
-                padding: 0.75rem;
-                background: #111111;
-                border: 1px solid #1A1A1A;
-                text-align: center;
-            ">
-                <div style="
-                    font-family: {TYPOGRAPHY['mono']};
-                    font-size: 0.55rem;
-                    color: #4A4A4A;
-                    text-transform: uppercase;
-                    letter-spacing: 0.1em;
-                    margin-bottom: 0.25rem;
                 ">Threshold</div>
                 <div style="
                     font-family: {TYPOGRAPHY['mono']};
@@ -272,7 +248,7 @@ def render_compact_protocol_banner(
                 font-size: 0.7rem;
                 color: #E5E5E5;
             ">
-                v{protocol_summary.get('version', '1.0')} | {protocol_summary.get('ec_count', 0)}EC/{protocol_summary.get('ic_count', 0)}IC/{protocol_summary.get('qc_count', 0)}QC
+                v{protocol_summary.get('version', '1.0')} | {protocol_summary.get('ec_count', 0)}EC/{protocol_summary.get('ic_count', 0)}IC
             </span>
         </div>
         <span style="

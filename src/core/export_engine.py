@@ -10,6 +10,12 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 import hashlib
 
+try:
+    import xlsxwriter
+    XLSXWRITER_AVAILABLE = True
+except ImportError:
+    XLSXWRITER_AVAILABLE = False
+
 
 @dataclass
 class AuditEntry:
@@ -79,76 +85,184 @@ class ExportEngine:
     def export_decisions_excel(
         self,
         session,
-        output_path: str
+        output_path: str,
+        ec_criteria_descriptions: Optional[Dict[str, str]] = None,
+        ic_criteria_descriptions: Optional[Dict[str, str]] = None
     ) -> str:
         """
         Export decisions to Excel with STRICT WL/GL separation.
-        PRISMA-compliant schema with exact column structure.
+        Uses xlsxwriter for styling and cell comments.
         
-        WL Sheet: Academic literature with full metadata
-        GL Sheet: Grey literature requiring URL review for IC
-        WL Seeds for HERMES: Empty placeholder for downstream operations
+        WL Sheet: 13-column schema (Researcher 1 Package)
+        GL Sheet: 7-column schema (Researcher 1 Package)
+        
+        SPRINT 7.17 Updates:
+        - Full criteria descriptions in header comments
+        - Sheet tab coloring (WL=Cyan, GL=Orange)
+        - GL IC stage: "PENDING" for GL passing EC (no abstracts)
+        - NaN values in Abstract replaced with empty string
         """
-        wl_data = []
-        gl_data = []
+        if not XLSXWRITER_AVAILABLE:
+            raise ImportError(
+                "xlsxwriter library not available. Install with: pip install xlsxwriter"
+            )
         
         wl_articles = session.get_wl_articles()
         gl_articles = session.get_gl_articles()
-        
-        for article in wl_articles:
-            meta = article.metadata
-            final_dec = article.final_decision if article.final_decision else self._compute_decision(article)
-            
-            wl_data.append({
-                "Library": meta.get("library", ""),
-                "Global_ID": meta.get("global_id", ""),
-                "Local_ID": meta.get("local_id", ""),
-                "Title": article.title,
-                "Abstract": article.abstract if article.abstract else "",
-                "Keywords": meta.get("keywords", ""),
-                "CIs1": article.ic_stage if article.ic_stage else "PENDING",
-                "CEs1": article.ec_stage if article.ec_stage else "PENDING",
-                "Revisor 1": session.researcher_id,
-                "CIs2": "",
-                "CEs2": "",
-                "Revisor 2": "",
-                "Decision": final_dec
-            })
-        
-        for article in gl_articles:
-            meta = article.metadata
-            final_dec = article.final_decision if article.final_decision else self._compute_decision(article)
-            
-            gl_data.append({
-                "Posicao": meta.get("posicao", meta.get("#", "")),
-                "Title": article.title,
-                "URL": meta.get("url", ""),
-                "Source_File": meta.get("source_file", ""),
-                "Revisor 1 EC": article.ec_stage if article.ec_stage else "PENDING",
-                "Revisor 1 IC": article.ic_stage if article.ic_stage else "PENDING",
-                "Decision": final_dec
-            })
         
         wl_columns = ["Library", "Global_ID", "Local_ID", "Title", "Abstract", "Keywords",
                       "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision"]
         gl_columns = ["Posicao", "Title", "URL", "Source_File", "Revisor 1 EC", "Revisor 1 IC", "Decision"]
         
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            pd.DataFrame(wl_data, columns=wl_columns).to_excel(writer, sheet_name="WL", index=False)
+        workbook = xlsxwriter.Workbook(output_path)
+        
+        wl_format_header = workbook.add_format({
+            'bold': True, 'bg_color': '#1E3A5F', 'font_color': 'white',
+            'border': 1, 'font_size': 10
+        })
+        wl_format_data = workbook.add_format({'border': 1, 'font_size': 9})
+        wl_format_cis1_green = workbook.add_format({
+            'border': 1, 'font_size': 9, 'bg_color': '#C6EFCE', 'font_color': '#006100'
+        })
+        wl_format_ces1_red = workbook.add_format({
+            'border': 1, 'font_size': 9, 'bg_color': '#FFC7CE', 'font_color': '#9C0006'
+        })
+        
+        gl_format_header = workbook.add_format({
+            'bold': True, 'bg_color': '#1E3A5F', 'font_color': 'white',
+            'border': 1, 'font_size': 10
+        })
+        gl_format_data = workbook.add_format({'border': 1, 'font_size': 9})
+        gl_format_ec_green = workbook.add_format({
+            'border': 1, 'font_size': 9, 'bg_color': '#C6EFCE', 'font_color': '#006100'
+        })
+        gl_format_ic_green = workbook.add_format({
+            'border': 1, 'font_size': 9, 'bg_color': '#C6EFCE', 'font_color': '#006100'
+        })
+        gl_format_pending = workbook.add_format({
+            'border': 1, 'font_size': 9, 'bg_color': '#FFEB9C', 'font_color': '#9C5700'
+        })
+        
+        ws_wl = workbook.add_worksheet("WL")
+        ws_wl.set_column('A:M', 18)
+        ws_wl.set_tab_color('#00C8D7')
+        
+        for col_idx, col_name in enumerate(wl_columns):
+            ws_wl.write(0, col_idx, col_name, wl_format_header)
+        
+        ic_comment_text = "INCLUSION CRITERIA CODES:\n" + "\n".join(
+            [f"{k}: {v}" for k, v in (ic_criteria_descriptions or {"IC1": "Addresses R&S practices", "IC2": "Reports empirical findings", "IC3": "Focuses on software industry"}).items()]
+        )
+        ec_comment_text = "EXCLUSION CRITERIA CODES:\n" + "\n".join(
+            [f"{k}: {v}" for k, v in (ec_criteria_descriptions or {"EC1": "Not empirical SE research", "EC2": "Published before 2015", "EC3": "Not peer-reviewed"}).items()]
+        )
+        ws_wl.write_comment(6, 0, ic_comment_text)
+        ws_wl.write_comment(7, 0, ec_comment_text)
+        
+        row_idx = 1
+        for article in wl_articles:
+            meta = article.metadata if article.metadata else {}
+            final_dec = article.final_decision if article.final_decision else self._compute_decision(article)
             
-            pd.DataFrame(gl_data, columns=gl_columns).to_excel(writer, sheet_name="GL", index=False)
+            cis1_value = article.cis1 if article.cis1 else (article.ic_stage if article.ic_stage else "PENDING")
+            ces1_value = article.ces1 if article.ces1 else (article.ec_stage if article.ec_stage else "PENDING")
             
-            pd.DataFrame(columns=wl_columns).to_excel(writer, sheet_name="WL Seeds for HERMES", index=False)
+            abstract_text = article.abstract if article.abstract else ""
+            if isinstance(abstract_text, float) or (isinstance(abstract_text, str) and abstract_text.lower() in ['nan', 'none', 'n/a']):
+                abstract_text = ""
+            
+            def safe_str(val, default=""):
+                if val is None:
+                    return default
+                if isinstance(val, float):
+                    if str(val).lower() in ['nan', 'none', 'inf']:
+                        return default
+                    return str(int(val)) if val == int(val) else str(val)
+                if isinstance(val, str):
+                    return val if val.lower() not in ['nan', 'none', 'n/a', ''] else default
+                return str(val)
+            
+            ws_wl.write(row_idx, 0, safe_str(meta.get("library", "")), wl_format_data)
+            ws_wl.write(row_idx, 1, safe_str(meta.get("global_id", "")), wl_format_data)
+            ws_wl.write(row_idx, 2, safe_str(meta.get("local_id", "")), wl_format_data)
+            ws_wl.write(row_idx, 3, safe_str(article.title, "Untitled"), wl_format_data)
+            ws_wl.write(row_idx, 4, safe_str(abstract_text), wl_format_data)
+            ws_wl.write(row_idx, 5, safe_str(meta.get("keywords", "")), wl_format_data)
+            
+            cis1_format = wl_format_cis1_green if cis1_value not in ["", "PENDING", "NO"] else wl_format_data
+            ws_wl.write(row_idx, 6, cis1_value, cis1_format)
+            
+            ces1_format = wl_format_ces1_red if ces1_value not in ["", "PENDING", "NO"] else wl_format_data
+            ws_wl.write(row_idx, 7, ces1_value if ces1_value else "", ces1_format)
+            
+            ws_wl.write(row_idx, 8, article.revisor1 if article.revisor1 else session.researcher_id, wl_format_data)
+            ws_wl.write(row_idx, 9, "", wl_format_data)
+            ws_wl.write(row_idx, 10, "", wl_format_data)
+            ws_wl.write(row_idx, 11, "", wl_format_data)
+            ws_wl.write(row_idx, 12, final_dec, wl_format_data)
+            
+            row_idx += 1
+        
+        ws_gl = workbook.add_worksheet("GL")
+        ws_gl.set_column('A:G', 20)
+        ws_gl.set_tab_color('#FFB020')
+        
+        for col_idx, col_name in enumerate(gl_columns):
+            ws_gl.write(0, col_idx, col_name, gl_format_header)
+        
+        row_idx = 1
+        for article in gl_articles:
+            meta = article.metadata if article.metadata else {}
+            final_dec = article.final_decision if article.final_decision else self._compute_decision(article)
+            
+            ces1_value = article.ces1 if article.ces1 else (article.ec_stage if article.ec_stage else "PENDING")
+            
+            ec_passed = article.ec_stage == "include" or ces1_value not in ["", "PENDING", "NO", "exclude"]
+            if ec_passed and not article.cis1 and article.ic_stage != "exclude":
+                cis1_value = "PENDING"
+            else:
+                cis1_value = article.cis1 if article.cis1 else (article.ic_stage if article.ic_stage else "PENDING")
+            
+            def safe_str(val, default=""):
+                if val is None:
+                    return default
+                if isinstance(val, float):
+                    if str(val).lower() in ['nan', 'none', 'inf']:
+                        return default
+                    return str(int(val)) if val == int(val) else str(val)
+                if isinstance(val, str):
+                    return val if val.lower() not in ['nan', 'none', 'n/a', ''] else default
+                return str(val)
+            
+            ws_gl.write(row_idx, 0, safe_str(meta.get("posicao", meta.get("#", ""))), gl_format_data)
+            ws_gl.write(row_idx, 1, safe_str(article.title, "Untitled"), gl_format_data)
+            ws_gl.write(row_idx, 2, safe_str(meta.get("url", "")), gl_format_data)
+            ws_gl.write(row_idx, 3, safe_str(meta.get("source_file", "")), gl_format_data)
+            
+            ec_format = gl_format_ec_green if ces1_value not in ["", "PENDING", "NO"] else gl_format_data
+            ws_gl.write(row_idx, 4, ces1_value, ec_format)
+            
+            if cis1_value == "PENDING":
+                ic_format = gl_format_pending
+            elif cis1_value not in ["", "PENDING", "NO"]:
+                ic_format = gl_format_ic_green
+            else:
+                ic_format = gl_format_data
+            ws_gl.write(row_idx, 5, cis1_value, ic_format)
+            
+            ws_gl.write(row_idx, 6, final_dec, gl_format_data)
+            
+            row_idx += 1
+        
+        workbook.close()
         
         return output_path
     
     def _compute_decision(self, article) -> str:
-        """Compute final decision from stage decisions."""
+        """Compute final decision from stage decisions (Reviewer 1 only - no QC)."""
         if article.ec_stage in ["", "exclude"]:
             return "EXCLUDE"
         if article.ic_stage in ["", "exclude"]:
-            return "EXCLUDE"
-        if article.qc_stage in ["", "exclude"]:
             return "EXCLUDE"
         
         if article.ec_stage == "needs_discussion" or article.ic_stage == "needs_discussion":

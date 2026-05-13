@@ -9,7 +9,7 @@ MODULES:
 - semantic_colors: Semantic color tokens for scientific states
 - typography: Typography scale and style guides
 - spacing: Spacing tokens for layout rhythm
-- workflow_components: Workflow visualization (Protocol → EC → IC → QC → Export → Replay)
+- workflow_components: Workflow visualization (Protocol → EC → IC → Export → Replay)
 - provenance_components: Article and session provenance visualization
 - audit_components: Audit chain and tampering detection visualization
 - reproducibility_components: Reproducibility state and deterministic execution

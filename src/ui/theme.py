@@ -140,6 +140,6 @@ def render_audit_entry(timestamp: str, actor: str, action: str, target: str) -> 
 
 def render_stage_indicator(stage: str, status: str) -> str:
     """Render stage indicator with status."""
-    stage_colors = {"EC": COLORS["error"], "IC": COLORS["warning"], "QC": COLORS["success"]}
+    stage_colors = {"EC": COLORS["error"], "IC": COLORS["warning"]}
     color = stage_colors.get(stage, COLORS["cyan"])
     return f'<span style="color:{color};font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;letter-spacing:0.1em;">[{stage}]</span> <span style="color:{COLORS['text_secondary']};font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;">{status}</span>'

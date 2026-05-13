@@ -54,16 +54,18 @@ def render_ingestion():
             # Validação via Core Engine
             wl_df, gl_df = ATLASLoader.load_atlas_file(temp_filename)
             
+            session_initialized = False
+            
             st.success(f"✓ SOURCE VERIFIED: {len(wl_df)} WL papers | {len(gl_df)} GL records identified.")
             
             # Painel de Preview
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown(f"<div style='{TYPOGRAPHY['mono']}; font-size:0.6rem; color:{COLORS['text_muted']}'>PREVIEW_WL</div>", unsafe_allow_html=True)
-                st.dataframe(wl_df[['Title', 'Authors']].head(3), use_container_width=True)
+                st.dataframe(wl_df[['Title', 'Authors']].head(3), width="stretch")
             with col2:
                 st.markdown(f"<div style='{TYPOGRAPHY['mono']}; font-size:0.6rem; color:{COLORS['text_muted']}'>PREVIEW_GL</div>", unsafe_allow_html=True)
-                st.dataframe(gl_df[['Title', 'URL']].head(3), use_container_width=True)
+                st.dataframe(gl_df[['Title', 'URL']].head(3), width="stretch")
 
             divider()
 
@@ -82,7 +84,7 @@ def render_ingestion():
                     format_func=lambda x: f"STAGE_{x.upper()}"
                 )
 
-            if st.button("🚀 INITIALIZE APOLLO PIPELINE", type="primary", use_container_width=True):
+            if st.button("🚀 INITIALIZE APOLLO PIPELINE", type="primary", width="stretch"):
                 with st.spinner("Initializing deterministic engine..."):
                     # Aqui chamamos o factory do core que unifica tudo
                     session, rev_state, _, _ = create_screening_session(
@@ -101,6 +103,9 @@ def render_ingestion():
                     
                     st.toast("Pipeline Initialized Successfully!", icon="🚀")
                     st.rerun()
+        finally:
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
 
         except Exception as e:
             st.error(f"FATAL_ERROR: {str(e)}")

@@ -196,23 +196,34 @@ class LLMAssistant:
             self._init_client()
 
     def _init_client(self) -> None:
+        key = os.getenv("GROQ_API_KEY")
+        print(f"!!! LLM DIAGNOSTIC !!! Key found: {bool(key)}")
+        if not key:
+            print("!!! LLM DIAGNOSTIC !!! Warning: GROQ_API_KEY is missing from environment.")
+        
         if os.environ.get("GROQ_API_KEY"):
             try:
                 from groq import Groq
                 self._client = Groq(api_key=self._api_key)
                 self._model = "llama-3.3-70b-versatile"
+                print("!!! LLM DIAGNOSTIC !!! Groq client initialized successfully")
             except ImportError:
+                print("!!! LLM DIAGNOSTIC !!! ERROR: groq library not installed")
                 pass
         else:
             try:
                 import openai
                 self._client = openai.OpenAI(api_key=self._api_key)
                 self._model = "gpt-4o-mini"
+                print("!!! LLM DIAGNOSTIC !!! OpenAI client initialized successfully")
             except ImportError:
+                print("!!! LLM DIAGNOSTIC !!! ERROR: openai library not installed")
                 pass
 
     def is_available(self) -> bool:
-        return self._client is not None
+        available = self._client is not None and self._api_key is not None
+        print(f"!!! LLM STATUS !!! Available: {available} | Client: {bool(self._client)} | Key: {bool(self._api_key)}")
+        return available
 
     def suggest(
         self,
@@ -365,7 +376,10 @@ class LLMAssistant:
         
         authors_value = metadata.get("authors", "")
         has_authors = bool(authors_value and authors_value != "nan" and str(authors_value).strip())
-        authors_display = authors_value if has_authors else "NOT PROVIDED"
+        if has_authors:
+            authors_display = str(authors_value).replace('"', '\\"').replace('\n', ' ').replace('\r', ' ')[:200]
+        else:
+            authors_display = "NOT PROVIDED"
         
         year_provided = year_str != "NOT PROVIDED"
         abstract_available = bool(abstract and abstract.strip() and abstract != "nan" and len(abstract.strip()) > 10)
@@ -376,13 +390,16 @@ class LLMAssistant:
             for cid in criteria.keys()
         ])
         
+        title_sanitized = str(title).replace('"', '\\"').replace('\n', ' ').replace('\r', ' ')[:300] if title else ""
+        abstract_sanitized = str(abstract)[:800].replace('"', '\\"').replace('\n', ' ').replace('\r', ' ') if abstract else "NOT PROVIDED"
+        
         metadata_block = f"""
         {{
-          "Title": "{title}",
+          "Title": "{title_sanitized}",
           "Year": {year_str},
           "Authors": "{authors_display}",
           "Literature_Type": "{literature_type}",
-          "Abstract": "{abstract[:800] if abstract else 'NOT PROVIDED'}"
+          "Abstract": "{abstract_sanitized}"
         }}"""
         
         abstract_instruction = ""
@@ -445,7 +462,7 @@ IMPORTANT REMINDERS:
 2. Evaluate each criterion independently — one triggered does not affect others
 3. Only trigger criteria where clear evidence exists in the metadata
 4. "Short publications" or "non-peer-reviewed" criteria apply ONLY to GL if they appear in the criteria list
-5. **CONFIDENCE RATIONALE**: If your CONFIDENCE is less than 100%, your 'reasoning_summary' field MUST begin with: '[CONFIDENCE {X}%]: ' followed by the explanation of why the metadata is ambiguous or what information is missing (e.g., "[CONFIDENCE 70%]: Year information is missing from metadata, making it impossible to verify EC2 applicability").
+5. **CONFIDENCE RATIONALE**: If your CONFIDENCE is less than 100%, your 'reasoning_summary' field MUST begin with: '[CONFIDENCE {{X}}%]: ' followed by the explanation of why the metadata is ambiguous or what information is missing (e.g., "[CONFIDENCE 70%]: Year information is missing from metadata, making it impossible to verify EC2 applicability").
 
 STRUCTURED OUTPUT REQUIRED:
 Return ONLY valid JSON with this exact structure:
@@ -491,7 +508,10 @@ Return ONLY valid JSON."""
         """
         authors_value = metadata.get("authors", "")
         has_authors = bool(authors_value and authors_value != "nan" and str(authors_value).strip())
-        authors_display = authors_value if has_authors else "NOT PROVIDED"
+        if has_authors:
+            authors_display = str(authors_value).replace('"', '\\"').replace('\n', ' ').replace('\r', ' ')[:200]
+        else:
+            authors_display = "NOT PROVIDED"
         
         year_value = metadata.get("year")
         has_year = bool(year_value and str(year_value).strip() and str(year_value) != "nan")
@@ -503,15 +523,18 @@ Return ONLY valid JSON."""
             f'    "{cid}": {{"triggered": false, "evidence": [], "justification": "", "ambiguity_detected": false}}'
             for cid in criteria.keys()
         ])
+        
+        title_sanitized = str(title).replace('"', '\\"').replace('\n', ' ').replace('\r', ' ')[:300] if title else ""
+        abstract_sanitized = str(abstract)[:200].replace('"', '\\"').replace('\n', ' ').replace('\r', ' ') if abstract else "NOT AVAILABLE"
 
         prompt = f"""SYSTEM CONTEXT:
 You are a systematic review expert. PROTOCOL and CANONICAL METADATA are authoritative.
 
 CRITICAL METADATA GROUNDING (HALLUCINATION PREVENTION):
-- Title: "{title}" (ALWAYS USE THIS)
+- Title: "{title_sanitized}" (ALWAYS USE THIS)
 - Year: {year_display} {"✓ YEAR PROVIDED" if has_year else "✗ YEAR NOT PROVIDED"}
 - Authors: {authors_display} {"✓ AUTHORS PROVIDED" if has_authors else "✗ AUTHORS NOT PROVIDED"}
-- Abstract: {"AVAILABLE (" + abstract[:200] + "...)" if abstract_available else "NOT AVAILABLE"}
+- Abstract: {"AVAILABLE (" + abstract_sanitized + "...)" if abstract_available else "NOT AVAILABLE"}
 - Literature Type: {literature_type}
 - Metadata Completeness: {metadata_completeness}
 
@@ -522,7 +545,7 @@ ADVISORY CONSTRAINTS (STRICT ENFORCEMENT):
 4. NEVER fabricate ambiguity when metadata is complete
 5. NEVER fabricate missing metadata when it is provided
 6. NEVER fabricate abstract content when no abstract is available
-7. **CONFIDENCE RATIONALE**: If your CONFIDENCE is less than 100%, your 'reasoning_summary' field MUST begin with: '[CONFIDENCE {X}%]: ' followed by the explanation of why the metadata is ambiguous or what information is missing (e.g., "[CONFIDENCE 80%]: Abstract is not detailed enough to fully assess IC2 applicability").
+7. **CONFIDENCE RATIONALE**: If your CONFIDENCE is less than 100%, your 'reasoning_summary' field MUST begin with: '[CONFIDENCE {{X}}%]: ' followed by the explanation of why the metadata is ambiguous or what information is missing (e.g., "[CONFIDENCE 80%]: Abstract is not detailed enough to fully assess IC2 applicability").
 
 INCLUSION CRITERIA (protocol-authoritative):
 {chr(10).join([f"- {k}: {v}" for k, v in criteria.items()])}

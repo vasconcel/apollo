@@ -22,13 +22,13 @@
 | Module | Purpose |
 |--------|---------|
 | `app.py` | Entry point - Streamlit main navigation |
-| `protocol_view.py` | Protocol Configuration (EC/IC/QC criteria) |
+| `protocol_view.py` | Protocol Configuration (EC/IC criteria) |
 | `ec_screening_view.py` | Exclusion Criteria (Stage 1) |
 | `ic_screening_view.py` | Inclusion Criteria (Stage 2) |
-| `qc_assessment_view.py` | Quality Assessment (Stage 3) |
 | `export_view.py` | Exports & Audit (Excel + JSON) |
 | `calibration_view.py` | Inter-Rater Reliability (Cohen's Kappa) |
-| `ingestion_view.py` | ATLAS Excel file upload |
+
+> **Deprecated**: `qc_assessment_view.py`, `ingestion_view.py` moved to `.deprecated/`
 
 ### Core Engine (`src/core/`)
 | Module | Purpose |

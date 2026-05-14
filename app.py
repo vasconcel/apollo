@@ -50,7 +50,7 @@ def render_apollo_header():
             APOLLO {cursor_html}
         </h1>
         <div style="{TYPOGRAPHY['mono']};font-size:0.7rem;color:#4A4A4A;margin-top:0.5rem;">
-            Deterministic Screening Engine v2.0.0 // {datetime.now().strftime('%Y-%m-%d')}
+            APOLLO v2.0.0 Primal // 2026-05-13
         </div>
     </div>
     """, unsafe_allow_html=True)

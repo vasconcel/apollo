@@ -382,15 +382,21 @@ def render_prisma_counts_section():
         <pre style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;background:{COLORS['bg_surface']};border:1px solid {COLORS['border']};padding:1rem;margin-top:1rem;color:{COLORS['text_secondary']};">
 ┌─────────────────────────────────────────────────┐
 │  IDENTIFICATION                                 │
-│  Papers identified: {ec_total:>4}                     │
+│  Articles from ATLAS: {ec_total:>4}                   │
 └────────────────────┬────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────┐
-│  SCREENING (REVIEWER 1)                         │
-│  Excluded by EC:   {ec_excluded:>4}                     │
-│  After EC:         {ec_included:>4}                     │
-│  Excluded by IC:   {ic_excluded:>4}                     │
-│  After IC:         {ic_included:>4}                     │
+│  EC SCREENING                                   │
+│  Total screened:    {ec_total:>4}                   │
+│  Excluded by EC:    {ec_excluded:>4}                   │
+│  Remaining:         {ec_included:>4}                   │
+└────────────────────┬────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────┐
+│  IC SCREENING                                   │
+│  Total screened:    {ec_included:>4}                   │
+│  Excluded by IC:    {ic_excluded:>4}                   │
+│  FINAL SELECTION:    {ic_included:>4}                   │
 └─────────────────────────────────────────────────┘
         ''', unsafe_allow_html=True)
     else:

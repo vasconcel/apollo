@@ -32,8 +32,9 @@ def render_ic_screening():
     protocol = st.session_state.research_protocol
 
     if protocol.state == ProtocolState.DRAFT.value:
-        st.warning("⚠ Protocol must be locked before screening.")
-        return
+        print("!!! DEBUG UI !!! Auto-locking DRAFT protocol for IC screening")
+        protocol.state = ProtocolState.LOCKED.value
+        protocol.lock()
 
     if "apollo_session" not in st.session_state:
         st.session_state.apollo_session = ScreeningSession(
@@ -401,7 +402,15 @@ def render_ai_advisory_panel(article, current_idx: int):
     
     if st.session_state.get(failed_key, False):
         with st.container(border=True):
-            st.warning("🤖 AI Advisory Unavailable - LLM service unreachable")
+            from src.core.llm_assistant import get_llm_assistant
+            llm = get_llm_assistant()
+            error_msg = st.session_state.get(f"ic_advice_error_{article_id}", "")
+            if error_msg:
+                st.error(f"LLM Error: {error_msg}")
+            elif not llm.is_available():
+                st.warning("⚠️ AI Advisory Offline: Check .env file or library installation.")
+            else:
+                st.warning("🤖 AI Advisory Unavailable - LLM service unreachable")
         return
     
     cached_advice = st.session_state.get(cache_key, None)
@@ -414,7 +423,11 @@ def render_ai_advisory_panel(article, current_idx: int):
         with st.spinner("🤖 AI Consultant is analyzing paper..."):
             suggestion = get_llm_ic_suggestion(article)
             if suggestion:
-                st.session_state[cache_key] = suggestion
+                if "_error" in suggestion:
+                    st.session_state[f"ic_advice_error_{article_id}"] = suggestion["_error"]
+                    st.session_state[failed_key] = True
+                else:
+                    st.session_state[cache_key] = suggestion
             else:
                 st.session_state[failed_key] = True
         st.rerun()
@@ -460,8 +473,10 @@ def get_llm_ic_suggestion(article) -> Optional[Dict]:
         )
 
         return suggestion.to_dict()
-    except Exception:
-        return None
+    except Exception as e:
+        error_msg = str(e)
+        print(f"!!! LLM CRASH !!! IC Suggestion failed: {error_msg}")
+        return {"_error": error_msg}
 
 
 def get_protocol_ic_criteria() -> Dict[str, str]:

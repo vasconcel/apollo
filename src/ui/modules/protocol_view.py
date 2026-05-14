@@ -9,6 +9,8 @@ Workflow:
 """
 from typing import Dict, Optional
 import streamlit as st
+from src.ui.components import terminal_header, section_header, divider, metric_tile
+from src.ui.theme import COLORS, TYPOGRAPHY
 from src.core.dynamic_protocol import (
     DynamicProtocol, Criterion, ECProtocol, ICProtocol,
     ProtocolState, ProtocolTemplate

@@ -162,6 +162,7 @@ def render_screening_workspace(session):
                 skip_clicked = st.button("SKIP", width="stretch")
             
             if excl_clicked:
+                article.ec_stage = "exclude"
                 st.session_state[f"ec_show_codes_{current_idx}"] = "exclude"
                 st.rerun()
             

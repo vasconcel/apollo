@@ -9,8 +9,11 @@ Researcher screens papers that passed EC filtering.
 import streamlit as st
 import uuid
 import os
+import json
+import hashlib
+import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from src.ui.components import (
     terminal_header, section_header, status_badge, lit_type_badge,
     metric_tile, telemetry_panel, decision_card, progress_bar,
@@ -18,6 +21,213 @@ from src.ui.components import (
     criteria_panel, divider, operational_status, provenance_indicator
 )
 from src.ui.theme import COLORS, TYPOGRAPHY
+
+_ADVISORY_CACHE_CONFIG = {
+    "enable_disk_cache": True,
+    "cache_dir": "data/cache/advisories",
+    "rate_limit_retries": 3,
+    "rate_limit_backoff_base": 2.0,
+}
+
+
+def _compute_advisory_cache_key(article, protocol_version: str = "1.0") -> str:
+    """Compute deterministic cache key based on article content."""
+    if hasattr(article, 'title'):
+        title = getattr(article, 'title', '') or ''
+    elif isinstance(article, dict):
+        title = article.get('title', '') or ''
+    else:
+        title = ''
+
+    if hasattr(article, 'abstract'):
+        abstract = getattr(article, 'abstract', '') or ''
+    elif isinstance(article, dict):
+        abstract = article.get('abstract', '') or ''
+    else:
+        abstract = ''
+
+    content = f"{protocol_version}:{title.strip().lower()}:{abstract.strip().lower()}"
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:32]
+
+
+def _get_disk_cache_path(cache_key: str) -> str:
+    """Get disk cache file path."""
+    cache_dir = _ADVISORY_CACHE_CONFIG["cache_dir"]
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, f"{cache_key}.json")
+
+
+def _load_from_disk_cache(cache_key: str) -> Optional[Dict]:
+    """Load advisory from disk cache."""
+    if not _ADVISORY_CACHE_CONFIG["enable_disk_cache"]:
+        return None
+
+    cache_path = _get_disk_cache_path(cache_key)
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
+
+
+def _save_to_disk_cache(cache_key: str, advisory: Dict) -> bool:
+    """Save advisory to disk cache."""
+    if not _ADVISORY_CACHE_CONFIG["enable_disk_cache"]:
+        return False
+
+    cache_path = _get_disk_cache_path(cache_key)
+    try:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(advisory, f, indent=2, default=str)
+        return True
+    except Exception:
+        return False
+
+
+def get_ic_advisory_cached(article, protocol_version: str = "1.0") -> Optional[Dict]:
+    """
+    Centralized advisory cache accessor.
+    STRICT separation: This is the ONLY function that should generate advisories.
+
+    Flow:
+    1. Compute deterministic cache key from article content
+    2. Check session cache (fastest)
+    3. Check disk cache (persistent)
+    4. Only call LLM if cache miss (with rate limit protection)
+    5. Persist result to both caches
+    """
+    cache_key = _compute_advisory_cache_key(article, protocol_version)
+
+    session_cache_key = f"ic_advisory_{cache_key}"
+    cached = st.session_state.get(session_cache_key)
+    if cached is not None:
+        return cached
+
+    disk_cached = _load_from_disk_cache(cache_key)
+    if disk_cached is not None:
+        st.session_state[session_cache_key] = disk_cached
+        return disk_cached
+
+    advisory = None
+    last_error = None
+
+    for attempt in range(_ADVISORY_CACHE_CONFIG["rate_limit_retries"]):
+        try:
+            advisory = _generate_ic_advisory_raw(article, protocol_version)
+            break
+        except Exception as e:
+            last_error = e
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                backoff = _ADVISORY_CACHE_CONFIG["rate_limit_backoff_base"] ** attempt
+                time.sleep(backoff)
+            else:
+                break
+
+    if advisory is None:
+        fallback = {
+            "decision": "UNAVAILABLE",
+            "confidence": 0.0,
+            "justification": "LLM advisory temporarily unavailable. Manual review required.",
+            "criterion_evaluations": {},
+            "triggered_criteria": [],
+            "is_fallback": True,
+            "_error": str(last_error) if last_error else "Rate limit exceeded"
+        }
+        st.session_state[session_cache_key] = fallback
+        _save_to_disk_cache(cache_key, fallback)
+        return fallback
+
+    if "_error" not in advisory:
+        st.session_state[session_cache_key] = advisory
+        _save_to_disk_cache(cache_key, advisory)
+
+    return advisory
+
+
+def _generate_ic_advisory_raw(article, protocol_version: str) -> Optional[Dict]:
+    """Generate raw advisory - only called when cache miss."""
+    try:
+        from src.core.llm_assistant import LLMAssistant
+
+        llm = LLMAssistant()
+        if not llm.is_available():
+            return None
+
+        if hasattr(article, 'get_literature_type'):
+            title = getattr(article, 'title', '')
+            abstract = getattr(article, 'abstract', '')
+            literature_type = article.get_literature_type()
+            metadata = getattr(article, 'metadata', {})
+        else:
+            title = article.get("title", "") if hasattr(article, 'get') else ""
+            abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
+            literature_type = article.get("literature_type", "WL") if hasattr(article, 'get') else "WL"
+            metadata = article if hasattr(article, 'get') else {}
+
+        protocol_criteria = _get_protocol_ic_criteria_cached()
+
+        suggestion = llm.suggest_ic(
+            title=title,
+            abstract=abstract,
+            literature_type=literature_type,
+            protocol_criteria=protocol_criteria,
+            metadata=metadata
+        )
+
+        return suggestion.to_dict()
+    except Exception as e:
+        return {"_error": str(e)}
+
+
+def _get_protocol_ic_criteria_cached() -> Dict[str, str]:
+    """Get IC criteria from protocol - cached to avoid repeated access."""
+    if "research_protocol" in st.session_state and st.session_state.research_protocol:
+        protocol = st.session_state.research_protocol
+        return {
+            k: v.description
+            for k, v in protocol.ic.criteria.items()
+            if v.enabled
+        }
+    return {
+        "IC1": "Addresses R&S practices",
+        "IC2": "Reports empirical findings",
+        "IC3": "Focuses on software industry context"
+    }
+
+
+def _record_ic_decision(session, article, current_idx: int, decision: str):
+    """
+    Record IC decision with automatic code inference from AI advisory.
+    MIRROR EC BEHAVIOR - single action, no manual code selection.
+    """
+    original_idx = session.articles.index(article)
+    session.articles[original_idx].ic_stage = decision
+
+    if decision in ("include", "exclude"):
+        article_id = getattr(article, 'article_id', f"idx_{current_idx}")
+        cached_advice = st.session_state.get(f"ic_advice_{article_id}", None)
+
+        triggered_codes = []
+        if cached_advice:
+            criterion_evals = cached_advice.get("criterion_evaluations", {})
+            for cid, eval_data in criterion_evals.items():
+                if eval_data.get("triggered", False):
+                    triggered_codes.append(cid)
+
+        if decision == "include":
+            ic_codes = ";".join(triggered_codes) if triggered_codes else "YES"
+            session.articles[original_idx].cis1 = ic_codes
+            session.articles[original_idx].ces1 = "NO"
+        else:
+            ec_codes = ";".join(triggered_codes) if triggered_codes else "N/A"
+            session.articles[original_idx].ces1 = ec_codes
+            session.articles[original_idx].cis1 = "NO"
+
+    session.articles[original_idx].revisor1 = session.researcher_id
+    session.record_decision(decision, notes=f"Auto-inferred from AI advisory")
 
 
 def render_ic_screening():
@@ -112,11 +322,18 @@ def render_screening_workspace(session):
 
     wl_progress = session.get_wl_progress()
     gl_progress = session.get_gl_progress()
-    
-    articles = session.get_ec_included_articles()
-    current_idx = session.current_index if session.current_index < len(articles) else 0
-    total = len(articles)
+
+    ec_included_articles = session.get_ec_included_articles()
+    total_ec_included = len(ec_included_articles)
+
+    if "ic_current_index" not in st.session_state:
+        st.session_state.ic_current_index = 0
+
+    current_idx = min(st.session_state.ic_current_index, total_ec_included - 1) if total_ec_included > 0 else 0
+    total = total_ec_included
     reviewed = session.ic_completed
+
+    articles = ec_included_articles
     
     st.markdown(f'''
     <div style="border:1px solid {COLORS['cyan']};background:{COLORS['bg_card']};padding:0.75rem;margin-bottom:1rem;">
@@ -138,13 +355,13 @@ def render_screening_workspace(session):
     col_nav, col_stats, col_nav2 = st.columns([1, 3, 1])
     with col_nav:
         if st.button("◀", disabled=current_idx == 0, width="stretch"):
-            session.current_index = max(0, current_idx - 1)
+            st.session_state.ic_current_index = max(0, current_idx - 1)
             st.rerun()
     with col_stats:
         progress_bar(reviewed, total, stage="IC")
     with col_nav2:
         if st.button("▶", disabled=current_idx >= total - 1, width="stretch"):
-            session.current_index = min(total - 1, current_idx + 1)
+            st.session_state.ic_current_index = min(total - 1, current_idx + 1)
             st.rerun()
 
     if articles and 0 <= current_idx < total:
@@ -170,9 +387,8 @@ def render_screening_workspace(session):
         divider()
 
         current_decision = article.ic_stage or ""
-        current_ic_code = article.cis1 or ""
-        ic_codes = get_ic_codes()
-        
+
+        # SIMPLE SINGLE-ACTION WORKFLOW - MIRROR EC
         if not current_decision:
             col_excl, col_incl, col_skip = st.columns([1, 1, 1])
             with col_excl:
@@ -181,70 +397,31 @@ def render_screening_workspace(session):
                 incl_clicked = st.button("INCLUDE", type="primary", width="stretch")
             with col_skip:
                 skip_clicked = st.button("SKIP", width="stretch")
-            
+
             if excl_clicked:
-                st.session_state[f"ic_show_codes_{current_idx}"] = "exclude"
+                _record_ic_decision(session, article, current_idx, "exclude")
+                st.toast(f"✗ Article {current_idx + 1} EXCLUDED", icon="❌")
+                if current_idx < total - 1:
+                    st.session_state.ic_current_index = current_idx + 1
                 st.rerun()
-            
+
             if incl_clicked:
-                st.session_state[f"ic_show_codes_{current_idx}"] = "include"
-                st.toast(f"✓ Article {current_idx + 1} marked for INCLUSION", icon="✅")
+                _record_ic_decision(session, article, current_idx, "include")
+                st.toast(f"✓ Article {current_idx + 1} INCLUDED", icon="✅")
+                if current_idx < total - 1:
+                    st.session_state.ic_current_index = current_idx + 1
                 st.rerun()
-            
+
             if skip_clicked:
                 session.record_decision("skip", notes="")
                 st.toast(f"→ Article {current_idx + 1} SKIPPED", icon="⏭️")
                 if current_idx < total - 1:
-                    session.current_index = current_idx + 1
+                    st.session_state.ic_current_index = current_idx + 1
                 st.rerun()
-        
-        elif current_decision == "exclude" and not current_ic_code:
-            st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.7rem;color:{COLORS["error"]};margin-bottom:0.5rem;">▸ SELECT EXCLUSION CODE</div>', unsafe_allow_html=True)
-            
-            code_cols = st.columns(len(ic_codes))
-            for i, (code, desc) in enumerate(ic_codes.items()):
-                with code_cols[i]:
-                    if st.button(f"[{code}]", key=f"ic_code_{current_idx}_{code}", width="stretch"):
-                        article.cis1 = "NO"
-                        article.ces1 = code
-                        article.revisor1 = session.researcher_id
-                        session.ic_completed += 1
-                        st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({code})", icon="❌")
-                        if current_idx < total - 1:
-                            session.current_index = current_idx + 1
-                        st.rerun()
-        
-        elif current_decision == "include" and not current_ic_code:
-            st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.7rem;color:{COLORS["success"]};margin-bottom:0.5rem;">▸ SELECT INCLUSION CODE</div>', unsafe_allow_html=True)
-            
-            code_cols = st.columns(len(ic_codes))
-            for i, (code, desc) in enumerate(ic_codes.items()):
-                with code_cols[i]:
-                    if st.button(f"[{code}]", key=f"ic_code_{current_idx}_{code}", width="stretch"):
-                        article.cis1 = code
-                        article.ces1 = "NO"
-                        article.revisor1 = session.researcher_id
-                        session.ic_completed += 1
-                        st.toast(f"✓ Article {current_idx + 1} INCLUDED ({code})", icon="✅")
-                        if current_idx < total - 1:
-                            session.current_index = current_idx + 1
-                        st.rerun()
-        
+
         else:
-            col_status, col_clear = st.columns([3, 1])
-            with col_status:
-                from src.ui.components import status_badge
-                status_badge("INCLUDED" if current_decision == "include" else current_decision.upper())
-            with col_clear:
-                if st.button("CLEAR", width="stretch"):
-                    original_idx = session.articles.index(article)
-                    session.articles[original_idx].ic_stage = ""
-                    session.articles[original_idx].cis1 = ""
-                    session.articles[original_idx].ces1 = ""
-                    session.articles[original_idx].revisor1 = ""
-                    session.ic_completed = max(0, session.ic_completed - 1)
-                    st.toast(f"↺ Article {current_idx + 1} cleared", icon="🔄")
-                    st.rerun()
+            from src.ui.components import status_badge
+            status_badge("INCLUDED" if current_decision == "include" else current_decision.upper())
 
     with st.sidebar:
         st.markdown("**PROTOCOL**")
@@ -439,42 +616,32 @@ def render_article_card(article, index: int):
 
 
 def render_ai_advisory_panel(article, current_idx: int):
-    """Auto-trigger AI Advisory Panel - Zero manual interaction."""
-    article_id = getattr(article, 'article_id', f"idx_{current_idx}")
-    cache_key = f"ic_advice_{article_id}"
-    failed_key = f"ic_advice_failed_{article_id}"
-    
-    if st.session_state.get(failed_key, False):
+    """
+    Render AI Advisory Panel using centralized cache.
+    STRICT ISOLATION: This function ONLY renders - never generates advisories.
+    """
+    protocol_version = st.session_state.get("research_protocol", {}).get("protocol_version", "1.0") if "research_protocol" in st.session_state else "1.0"
+
+    advisory = get_ic_advisory_cached(article, protocol_version)
+
+    if advisory is None:
         with st.container(border=True):
-            from src.core.llm_assistant import get_llm_assistant
-            llm = get_llm_assistant()
-            error_msg = st.session_state.get(f"ic_advice_error_{article_id}", "")
-            if error_msg:
-                st.error(f"LLM Error: {error_msg}")
-            elif not llm.is_available():
-                st.warning("⚠️ AI Advisory Offline: Check .env file or library installation.")
-            else:
-                st.warning("🤖 AI Advisory Unavailable - LLM service unreachable")
+            st.warning("No advisory available. Manual review required.")
         return
-    
-    cached_advice = st.session_state.get(cache_key, None)
-    
-    if cached_advice:
+
+    is_fallback = advisory.get("is_fallback", False)
+    has_error = "_error" in advisory and advisory.get("_error")
+
+    if is_fallback or has_error:
         with st.container(border=True):
-            with st.expander("🤖 AI ADVISORY", expanded=True):
-                render_suggestion_details(cached_advice)
-    else:
-        with st.spinner("🤖 AI Consultant is analyzing paper..."):
-            suggestion = get_llm_ic_suggestion(article)
-            if suggestion:
-                if "_error" in suggestion:
-                    st.session_state[f"ic_advice_error_{article_id}"] = suggestion["_error"]
-                    st.session_state[failed_key] = True
-                else:
-                    st.session_state[cache_key] = suggestion
-            else:
-                st.session_state[failed_key] = True
-        st.rerun()
+            st.warning("⚠️ AI Advisory Unavailable - Manual review required")
+            if has_error:
+                st.caption(f"Reason: {advisory.get('_error', 'Unknown')}")
+            return
+
+    with st.container(border=True):
+        with st.expander("🤖 AI ADVISORY", expanded=True):
+            render_suggestion_details(advisory)
 
 
 def get_llm_ic_suggestion(article) -> Optional[Dict]:
@@ -635,10 +802,6 @@ def render_suggestion_details(suggestion: Dict):
             for flag in ambiguity:
                 if flag:
                     st.markdown(f"  - {flag}")
-
-    advisory_hash = suggestion.get("advisory_hash", "")
-    if advisory_hash:
-        st.caption(f"advisory: {advisory_hash}")
 
 
 def export_ic_results(session):

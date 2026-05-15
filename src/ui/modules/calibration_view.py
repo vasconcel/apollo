@@ -40,7 +40,7 @@ def interpret_kappa(kappa):
     if kappa <= 0.80: return "Substantial Agreement", "#05C46B"
     return "Almost Perfect Agreement", COLORS["success"]
 
-def render_calibration_view():
+def render_calibration_workspace():
     """Main Calibration Dashboard."""
     
     terminal_header(
@@ -151,4 +151,4 @@ def render_calibration_view():
 
 def render():
     """Wrapper for routing."""
-    render_calibration_view()
+    render_calibration_workspace()

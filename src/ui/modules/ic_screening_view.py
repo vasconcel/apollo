@@ -113,8 +113,8 @@ def render_screening_workspace(session):
     wl_progress = session.get_wl_progress()
     gl_progress = session.get_gl_progress()
     
-    articles = [a for a in session.articles if a.is_ec_included]
-    current_idx = session.current_index
+    articles = session.get_ec_included_articles()
+    current_idx = session.current_index if session.current_index < len(articles) else 0
     total = len(articles)
     reviewed = session.ic_completed
     
@@ -237,10 +237,11 @@ def render_screening_workspace(session):
                 status_badge("INCLUDED" if current_decision == "include" else current_decision.upper())
             with col_clear:
                 if st.button("CLEAR", width="stretch"):
-                    session.articles[current_idx].ic_stage = ""
-                    session.articles[current_idx].cis1 = ""
-                    session.articles[current_idx].ces1 = ""
-                    session.articles[current_idx].revisor1 = ""
+                    original_idx = session.articles.index(article)
+                    session.articles[original_idx].ic_stage = ""
+                    session.articles[original_idx].cis1 = ""
+                    session.articles[original_idx].ces1 = ""
+                    session.articles[original_idx].revisor1 = ""
                     session.ic_completed = max(0, session.ic_completed - 1)
                     st.toast(f"↺ Article {current_idx + 1} cleared", icon="🔄")
                     st.rerun()
@@ -253,8 +254,10 @@ def render_screening_workspace(session):
             st.markdown(f"v{summary['version']} | IC:{summary['ic_enabled']}")
         
         st.markdown("---")
-        wl_ic_count = sum(1 for a in session.get_wl_articles() if a.is_ec_included)
-        gl_ic_count = sum(1 for a in session.get_gl_articles() if a.is_ec_included)
+        wl_articles = session.get_wl_articles()
+        gl_articles = session.get_gl_articles()
+        wl_ic_count = sum(1 for a in wl_articles if a.is_ec_included)
+        gl_ic_count = sum(1 for a in gl_articles if a.is_ec_included)
         st.markdown(f"**WL:** {reviewed}/{wl_ic_count}")
         st.markdown(f"**GL:** {reviewed}/{gl_ic_count}")
         st.markdown("---")

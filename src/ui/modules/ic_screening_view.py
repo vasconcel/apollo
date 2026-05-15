@@ -22,164 +22,15 @@ from src.ui.components import (
 )
 from src.ui.theme import COLORS, TYPOGRAPHY
 
-_ADVISORY_CACHE_CONFIG = {
-    "enable_disk_cache": True,
-    "cache_dir": "data/cache/advisories",
-    "rate_limit_retries": 3,
-    "rate_limit_backoff_base": 2.0,
-}
+from src.advisory import (
+    get_advisory,
+    get_advisory_status,
+    get_cache_stats,
+    AdvisoryStatus
+)
 
 
-def _compute_advisory_cache_key(article, protocol_version: str = "1.0") -> str:
-    """Compute deterministic cache key based on article content."""
-    if hasattr(article, 'title'):
-        title = getattr(article, 'title', '') or ''
-    elif isinstance(article, dict):
-        title = article.get('title', '') or ''
-    else:
-        title = ''
 
-    if hasattr(article, 'abstract'):
-        abstract = getattr(article, 'abstract', '') or ''
-    elif isinstance(article, dict):
-        abstract = article.get('abstract', '') or ''
-    else:
-        abstract = ''
-
-    content = f"{protocol_version}:{title.strip().lower()}:{abstract.strip().lower()}"
-    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:32]
-
-
-def _get_disk_cache_path(cache_key: str) -> str:
-    """Get disk cache file path."""
-    cache_dir = _ADVISORY_CACHE_CONFIG["cache_dir"]
-    os.makedirs(cache_dir, exist_ok=True)
-    return os.path.join(cache_dir, f"{cache_key}.json")
-
-
-def _load_from_disk_cache(cache_key: str) -> Optional[Dict]:
-    """Load advisory from disk cache."""
-    if not _ADVISORY_CACHE_CONFIG["enable_disk_cache"]:
-        return None
-
-    cache_path = _get_disk_cache_path(cache_key)
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return None
-    return None
-
-
-def _save_to_disk_cache(cache_key: str, advisory: Dict) -> bool:
-    """Save advisory to disk cache."""
-    if not _ADVISORY_CACHE_CONFIG["enable_disk_cache"]:
-        return False
-
-    cache_path = _get_disk_cache_path(cache_key)
-    try:
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        with open(cache_path, 'w', encoding='utf-8') as f:
-            json.dump(advisory, f, indent=2, default=str)
-        return True
-    except Exception:
-        return False
-
-
-def get_ic_advisory_cached(article, protocol_version: str = "1.0") -> Optional[Dict]:
-    """
-    Centralized advisory cache accessor.
-    STRICT separation: This is the ONLY function that should generate advisories.
-
-    Flow:
-    1. Compute deterministic cache key from article content
-    2. Check session cache (fastest)
-    3. Check disk cache (persistent)
-    4. Only call LLM if cache miss (with rate limit protection)
-    5. Persist result to both caches
-    """
-    cache_key = _compute_advisory_cache_key(article, protocol_version)
-
-    session_cache_key = f"ic_advisory_{cache_key}"
-    cached = st.session_state.get(session_cache_key)
-    if cached is not None:
-        return cached
-
-    disk_cached = _load_from_disk_cache(cache_key)
-    if disk_cached is not None:
-        st.session_state[session_cache_key] = disk_cached
-        return disk_cached
-
-    advisory = None
-    last_error = None
-
-    for attempt in range(_ADVISORY_CACHE_CONFIG["rate_limit_retries"]):
-        try:
-            advisory = _generate_ic_advisory_raw(article, protocol_version)
-            break
-        except Exception as e:
-            last_error = e
-            if "429" in str(e) or "Too Many Requests" in str(e):
-                backoff = _ADVISORY_CACHE_CONFIG["rate_limit_backoff_base"] ** attempt
-                time.sleep(backoff)
-            else:
-                break
-
-    if advisory is None:
-        fallback = {
-            "decision": "UNAVAILABLE",
-            "confidence": 0.0,
-            "justification": "LLM advisory temporarily unavailable. Manual review required.",
-            "criterion_evaluations": {},
-            "triggered_criteria": [],
-            "is_fallback": True,
-            "_error": str(last_error) if last_error else "Rate limit exceeded"
-        }
-        st.session_state[session_cache_key] = fallback
-        _save_to_disk_cache(cache_key, fallback)
-        return fallback
-
-    if "_error" not in advisory:
-        st.session_state[session_cache_key] = advisory
-        _save_to_disk_cache(cache_key, advisory)
-
-    return advisory
-
-
-def _generate_ic_advisory_raw(article, protocol_version: str) -> Optional[Dict]:
-    """Generate raw advisory - only called when cache miss."""
-    try:
-        from src.core.llm_assistant import LLMAssistant
-
-        llm = LLMAssistant()
-        if not llm.is_available():
-            return None
-
-        if hasattr(article, 'get_literature_type'):
-            title = getattr(article, 'title', '')
-            abstract = getattr(article, 'abstract', '')
-            literature_type = article.get_literature_type()
-            metadata = getattr(article, 'metadata', {})
-        else:
-            title = article.get("title", "") if hasattr(article, 'get') else ""
-            abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
-            literature_type = article.get("literature_type", "WL") if hasattr(article, 'get') else "WL"
-            metadata = article if hasattr(article, 'get') else {}
-
-        protocol_criteria = _get_protocol_ic_criteria_cached()
-
-        suggestion = llm.suggest_ic(
-            title=title,
-            abstract=abstract,
-            literature_type=literature_type,
-            protocol_criteria=protocol_criteria,
-            metadata=metadata
-        )
-
-        return suggestion.to_dict()
-    except Exception as e:
-        return {"_error": str(e)}
 
 
 def _get_protocol_ic_criteria_cached() -> Dict[str, str]:
@@ -618,76 +469,64 @@ def render_article_card(article, index: int):
 def render_ai_advisory_panel(article, current_idx: int):
     """
     Render AI Advisory Panel using centralized cache.
+    
     STRICT ISOLATION: This function ONLY renders - never generates advisories.
+    
+    UI MUST NEVER:
+    - Call LLM directly
+    - Generate advisories
+    - Retry or backoff
+    
+    UI MAY:
+    - Read from advisory cache
+    - Show status (READY/PROCESSING/FAILED/UNAVAILABLE)
+    - Render persisted advisories
     """
     protocol_version = st.session_state.get("research_protocol", {}).get("protocol_version", "1.0") if "research_protocol" in st.session_state else "1.0"
-
-    advisory = get_ic_advisory_cached(article, protocol_version)
-
-    if advisory is None:
-        with st.container(border=True):
-            st.warning("No advisory available. Manual review required.")
-        return
-
-    is_fallback = advisory.get("is_fallback", False)
-    has_error = "_error" in advisory and advisory.get("_error")
-
-    if is_fallback or has_error:
-        with st.container(border=True):
-            st.warning("⚠️ AI Advisory Unavailable - Manual review required")
-            if has_error:
-                st.caption(f"Reason: {advisory.get('_error', 'Unknown')}")
-            return
-
+    
+    if hasattr(article, 'title'):
+        title = getattr(article, 'title', '')
+        abstract = getattr(article, 'abstract', '')
+    else:
+        title = article.get("title", "") if hasattr(article, 'get') else ""
+        abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
+    
+    advisory = get_advisory(title, abstract, protocol_version)
+    
+    status = get_advisory_status(title, abstract, protocol_version)
+    
     with st.container(border=True):
         with st.expander("🤖 AI ADVISORY", expanded=True):
-            render_suggestion_details(advisory)
+            st.caption(f"Status: {status.value}")
+            
+            if status == AdvisoryStatus.COMPLETED and advisory.is_available():
+                advisory_dict = {
+                    "decision": advisory.decision.value,
+                    "confidence": advisory.confidence,
+                    "triggered_criteria": advisory.triggered_criteria,
+                    "criterion_evaluations": {
+                        ce.criterion_id: {
+                            "criterion_name": ce.criterion_name,
+                            "satisfied": ce.satisfied,
+                            "evidence": ce.evidence,
+                            "confidence": ce.confidence
+                        }
+                        for ce in advisory.criterion_evaluations
+                    },
+                    "justification": advisory.justification
+                }
+                render_suggestion_details(advisory_dict)
+            elif status == AdvisoryStatus.PENDING:
+                st.info("⏳ Advisory pending generation. Run precompute or generate offline.")
+            elif status == AdvisoryStatus.PROCESSING:
+                st.info("🔄 Advisory being generated...")
+            elif status == AdvisoryStatus.FAILED:
+                st.warning(f"⚠️ Advisory generation failed: {advisory.error or 'Unknown error'}")
+            else:
+                st.warning("Advisory not yet generated. Manual review required.")
 
 
-def get_llm_ic_suggestion(article) -> Optional[Dict]:
-    """Get LLM advisory suggestion for IC screening."""
-    try:
-        from src.core.llm_assistant import LLMAssistant
 
-        llm = LLMAssistant()
-        if not llm.is_available():
-            return None
-
-        if hasattr(article, 'get_literature_type'):
-            title = getattr(article, 'title', '')
-            abstract = getattr(article, 'abstract', '')
-            literature_type = article.get_literature_type()
-            metadata = getattr(article, 'metadata', {})
-        else:
-            try:
-                title = article.get("title", "") if hasattr(article, 'get') else ""
-            except:
-                title = ""
-            try:
-                abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
-            except:
-                abstract = ""
-            try:
-                literature_type = article.get("literature_type", "WL") if hasattr(article, 'get') else "WL"
-            except:
-                literature_type = "WL"
-            metadata = article if hasattr(article, 'get') else {}
-
-        protocol_criteria = get_protocol_ic_criteria()
-
-        suggestion = llm.suggest_ic(
-            title=title,
-            abstract=abstract,
-            literature_type=literature_type,
-            protocol_criteria=protocol_criteria,
-            metadata=metadata
-        )
-
-        return suggestion.to_dict()
-    except Exception as e:
-        error_msg = str(e)
-        print(f"!!! LLM CRASH !!! IC Suggestion failed: {error_msg}")
-        return {"_error": error_msg}
 
 
 def get_protocol_ic_criteria() -> Dict[str, str]:
@@ -793,15 +632,52 @@ def render_suggestion_details(suggestion: Dict):
                 if eval_justification:
                     st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["text_muted"]};margin-left:1.5rem;margin-top:0.25rem;">└ {eval_justification}</div>', unsafe_allow_html=True)
                 
-                if ambiguity:
-                    st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["warning"]};margin-left:1.5rem;">⚠ ambiguity detected</div>', unsafe_allow_html=True)
-
-    ambiguity = suggestion.get("ambiguity_flags", [])
-    if ambiguity and any(flag for flag in ambiguity if flag):
+if ambiguity:
         with st.expander("AMBIGUITY FLAGS"):
             for flag in ambiguity:
                 if flag:
                     st.markdown(f"  - {flag}")
+
+
+def render_advisory_status_panel():
+    """
+    Render read-only advisory status panel.
+    
+    Shows:
+    - Cache statistics
+    - Generated/pending counts
+    - Status breakdown
+    
+    STRICT ISOLATION: This function ONLY reads, never generates.
+    """
+    st.markdown("### 📊 ADVISORY STATUS")
+    
+    try:
+        stats = get_cache_stats()
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            metric_tile("CACHED", f"{stats.get('disk_cache_count', 0)}")
+        
+        with col2:
+            total = stats.get('total_cached', 0)
+            if total > 0:
+                st.success(f"✓ {total} ready")
+            else:
+                st.info("○ None generated")
+        
+        with col3:
+            cache_dir = stats.get('cache_dir', 'data/cache/advisories')
+            st.caption(f"📁 {cache_dir}")
+        
+        st.markdown("---")
+        
+        st.caption("**Usage:** Run `python -m src.advisory.precompute_advisories` to generate advisories offline.")
+        st.caption("**Note:** UI never invokes LLM. Advisories must be precomputed.")
+        
+    except Exception as e:
+        st.warning(f"Advisory status unavailable: {e}")
 
 
 def export_ic_results(session):

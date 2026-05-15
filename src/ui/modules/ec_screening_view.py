@@ -353,114 +353,58 @@ def render_article_card(article, index: int):
 
 
 def render_ai_advisory_panel(article, current_idx: int):
-    """Auto-trigger AI Advisory Panel - Zero manual interaction."""
-    article_id = getattr(article, 'article_id', f"idx_{current_idx}")
-    cache_key = f"ec_advice_{article_id}"
-    failed_key = f"ec_advice_failed_{article_id}"
+    """
+    Render AI Advisory Panel using centralized cache.
     
-    if st.session_state.get(failed_key, False):
-        with st.container(border=True):
-            from src.core.llm_assistant import get_llm_assistant
-            llm = get_llm_assistant()
-            error_msg = st.session_state.get(f"ec_advice_error_{article_id}", "")
-            if error_msg:
-                st.error(f"LLM Error: {error_msg}")
-            elif not llm.is_available():
-                st.warning("⚠️ AI Advisory Offline: Check .env file or library installation.")
-            else:
-                st.warning("🤖 AI Advisory Unavailable - LLM service unreachable")
-        return
+    STRICT ISOLATION: This function ONLY renders - never generates advisories.
+    UI MUST NEVER call LLM directly or generate advisories.
+    """
+    from src.advisory import get_ec_advisory, get_ec_advisory_status, AdvisoryStatus
     
-    cached_advice = st.session_state.get(cache_key, None)
+    protocol_version = st.session_state.get("research_protocol", {}).get("protocol_version", "1.0") if "research_protocol" in st.session_state else "1.0"
     
-    if cached_advice:
-        with st.container(border=True):
-            with st.expander("🤖 AI ADVISORY", expanded=True):
-                render_suggestion_details(cached_advice)
+    if hasattr(article, 'title'):
+        title = getattr(article, 'title', '')
+        abstract = getattr(article, 'abstract', '')
     else:
-        with st.spinner("🤖 AI Consultant is analyzing paper..."):
-            suggestion = get_llm_ec_suggestion(article)
-            if suggestion:
-                if "_error" in suggestion:
-                    st.session_state[f"ec_advice_error_{article_id}"] = suggestion["_error"]
-                    st.session_state[failed_key] = True
-                else:
-                    st.session_state[cache_key] = suggestion
+        title = article.get("title", "") if hasattr(article, 'get') else ""
+        abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
+    
+    advisory = get_ec_advisory(title, abstract, protocol_version)
+    status = get_ec_advisory_status(title, abstract, protocol_version)
+    
+    with st.container(border=True):
+        with st.expander("🤖 AI ADVISORY", expanded=True):
+            st.caption(f"Status: {status.value}")
+            
+            if status == AdvisoryStatus.COMPLETED and advisory.is_available():
+                advisory_dict = {
+                    "decision": advisory.decision.value,
+                    "confidence": advisory.confidence,
+                    "triggered_criteria": advisory.triggered_criteria,
+                    "criterion_evaluations": {
+                        ce.criterion_id: {
+                            "criterion_name": ce.criterion_name,
+                            "satisfied": ce.satisfied,
+                            "evidence": ce.evidence,
+                            "confidence": ce.confidence
+                        }
+                        for ce in advisory.criterion_evaluations
+                    },
+                    "justification": advisory.justification
+                }
+                render_suggestion_details(advisory_dict)
+            elif status == AdvisoryStatus.PENDING:
+                st.info("⏳ Advisory pending generation. Run precompute or generate offline.")
+            elif status == AdvisoryStatus.PROCESSING:
+                st.info("🔄 Advisory being generated...")
+            elif status == AdvisoryStatus.FAILED:
+                st.warning(f"⚠️ Advisory generation failed: {advisory.error or 'Unknown error'}")
             else:
-                st.session_state[failed_key] = True
-        st.rerun()
+                st.warning("Advisory not yet generated. Manual review required.")
 
 
-def get_llm_ec_suggestion(article) -> Optional[Dict]:
-    """
-    Get LLM advisory suggestion for EC screening with metadata robustness.
-    """
-    try:
-        from src.core.llm_assistant import LLMAssistant
 
-        llm = LLMAssistant()
-        if not llm.is_available():
-            return None
-
-        if hasattr(article, 'get_literature_type'):
-            title = getattr(article, 'title', '')
-            abstract = getattr(article, 'abstract', '')
-            literature_type = article.get_literature_type()
-            metadata = getattr(article, 'metadata', {})
-            year = _extract_year_robust(article) if hasattr(article, 'metadata') else ""
-        else:
-            try:
-                title = article.get("title", "") if hasattr(article, 'get') else ""
-            except:
-                title = ""
-            try:
-                abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
-            except:
-                abstract = ""
-            try:
-                literature_type = article.get("literature_type", "WL") if hasattr(article, 'get') else "WL"
-            except:
-                literature_type = "WL"
-            metadata = article if hasattr(article, 'get') else {}
-            year = _extract_year_robust(metadata) if hasattr(metadata, 'get') else ""
-
-        has_title = bool(title and title != "nan" and len(title.strip()) > 0)
-        has_abstract = bool(abstract and abstract != "nan" and len(abstract.strip()) > 10)
-
-        if not has_title or not has_abstract:
-            return {
-                "stage": "ec",
-                "decision": "uncertain",
-                "confidence": 0.3,
-                "justification": "Insufficient metadata: " +
-                    ("title " if not has_title else "") +
-                    ("abstract " if not has_abstract else "") +
-                    "not available for reliable evaluation.",
-                "triggered_criteria": {},
-                "evidence": [],
-                "ambiguity_flags": [
-                    "Title missing" if not has_title else "",
-                    "Abstract missing" if not has_abstract else "",
-                    "Reduce confidence — manual review recommended"
-                ]
-            }
-
-        protocol_criteria = get_protocol_ec_criteria()
-
-        suggestion = llm.suggest_ec(
-            title=title,
-            abstract=abstract,
-            literature_type=literature_type,
-            year=year,
-            protocol_criteria=protocol_criteria,
-            metadata=metadata
-        )
-
-        return suggestion.to_dict()
-    except Exception as e:
-        error_msg = str(e)
-        print(f"!!! LLM CRASH !!! EC Suggestion failed: {error_msg}")
-        return {"_error": error_msg}
 
 
 def _extract_year_robust(source) -> Optional[int]:

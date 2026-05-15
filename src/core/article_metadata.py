@@ -23,38 +23,85 @@ logger = get_logger("metadata")
 logger.info(f"Author decoder initialization - pylatexenc version: {pylatexenc.__version__ if hasattr(pylatexenc, '__version__') else 'unknown'}")
 
 try:
-    from pylatexenc import latex_to_unicode
+    from pylatexenc.latex2text import LatexNodes2Text
     LATEX_DECODER_AVAILABLE = True
-    logger.info("latex_to_unicode import: SUCCESS")
+    latex_decoder = LatexNodes2Text()
+    logger.info("latex2text import: SUCCESS (using LatexNodes2Text class)")
 except ImportError as e:
     LATEX_DECODER_AVAILABLE = False
-    logger.warning(f"latex_to_unicode import: FAILED - {e}")
+    latex_decoder = None
+    logger.warning(f"latex2text import: FAILED - {e}")
 
 logger.info(f"LATEX_DECODER_AVAILABLE: {LATEX_DECODER_AVAILABLE}")
 
 
 def decode_author_string(author_str: str) -> str:
-    """Decode BibTeX/LaTeX encoded author strings to proper Unicode using pylatexenc."""
-    if DEBUG_MODE:
-        logger.debug(f"Author decoding - Input: {repr(author_str[:50] if author_str else '')}")
-    
+    """Decode BibTeX/LaTeX encoded author strings to proper Unicode."""
     if not author_str or author_str == "nan" or str(author_str) == "nan":
         return ""
-    
+
     author_str = str(author_str).strip()
-    
-    if LATEX_DECODER_AVAILABLE:
+
+    fallback_result = _fallback_decode_latex(author_str)
+
+    if LATEX_DECODER_AVAILABLE and latex_decoder is not None:
         try:
-            result = latex_to_unicode(author_str)
-            if DEBUG_MODE:
-                logger.debug(f"Author decoding - pylatexenc result: {repr(result[:50] if result else '')}")
-            return result.strip()
-        except Exception as e:
-            if DEBUG_MODE:
-                logger.debug(f"Author decoding - pylatexenc failed: {e}")
+            pylatex_result = latex_decoder.latex_to_text(author_str)
+            if pylatex_result and pylatex_result != author_str:
+                has_unicode = any(ord(c) > 127 for c in pylatex_result)
+                if has_unicode and "{" not in pylatex_result and "}" not in pylatex_result:
+                    return pylatex_result.strip()
+        except Exception:
             pass
-    
-    return author_str
+
+    return fallback_result
+
+
+def _fallback_decode_latex(author_str: str) -> str:
+    """Fallback LaTeX decoder for common patterns when pylatexenc unavailable or fails."""
+    if not author_str:
+        return author_str
+
+    result = author_str
+
+    latex_map = {
+        '{u}': 'ü', '{U}': 'Ü',
+        '{o}': 'ö', '{O}': 'Ö',
+        '{a}': 'ä', '{A}': 'Ä',
+        '{e}': 'é', '{E}': 'É',
+        '{i}': 'í', '{I}': 'Í',
+        '{n}': 'ñ', '{N}': 'Ñ',
+        '{c}': 'ç', '{C}': 'Ç',
+        '{s}': 'ß', '{ss}': 'ß',
+    }
+
+    acute_map = {
+        '{u}': 'ú', '{U}': 'Ú',
+        '{o}': 'ó', '{O}': 'Ó',
+        '{a}': 'á', '{A}': 'Á',
+        '{e}': 'é', '{E}': 'É',
+        '{i}': 'í', '{I}': 'Í',
+    }
+
+    result = result.replace('"{u}', 'ü').replace('"{U}', 'Ü')
+    result = result.replace('"{o}', 'ö').replace('"{O}', 'Ö')
+    result = result.replace('"{a}', 'ä').replace('"{A}', 'Ä')
+    result = result.replace('"{e}', 'é').replace('"{E}', 'É')
+    result = result.replace('"{i}', 'í').replace('"{I}', 'Í')
+
+    result = result.replace('"{-', '')
+
+    for pattern, replacement in latex_map.items():
+        result = result.replace(pattern, replacement)
+
+    for pattern, replacement in acute_map.items():
+        result = result.replace(pattern, replacement)
+
+    result = re.sub(r'\{([^}]+)\}', r'\1', result)
+
+    result = result.replace('M" ', 'M ')
+
+    return result.strip()
 
 
 def normalize_venue_name(venue: str) -> str:

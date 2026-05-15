@@ -267,8 +267,20 @@ def render_literature_status_header(article, index: int):
     ''', unsafe_allow_html=True)
 
 
+def _format_authors_short(authors: str) -> str:
+    """Format authors for compact display - max 2-3 with et al."""
+    if not authors:
+        return ""
+    author_list = [a.strip() for a in authors.split(";") if a.strip()]
+    if not author_list:
+        return ""
+    if len(author_list) <= 2:
+        return "; ".join(author_list[:2])
+    return f"{author_list[0]} et al."
+
+
 def render_article_card(article, index: int):
-    """Render paper review card - Title dominant, metadata secondary."""
+    """Render paper review card - Abstract dominant, clean metadata."""
     try:
         if hasattr(article, 'get_literature_type'):
             lit_type = article.get_literature_type()
@@ -289,74 +301,54 @@ def render_article_card(article, index: int):
         title = ""
         abstract = ""
         metadata = {}
-    
+
     has_title = bool(title and str(title) != "nan" and len(str(title).strip()) > 0)
     has_abstract = bool(abstract and str(abstract) != "nan" and len(str(abstract).strip()) > 10)
 
     if not has_title:
         st.warning("Title is missing from this record")
-    else:
-        st.markdown(f"### {title}")
-    
+        return
+
+    st.markdown(f"### {title}")
+
     try:
         year = metadata.get("year", "") if isinstance(metadata, dict) else ""
         authors = metadata.get("authors", "") if isinstance(metadata, dict) else ""
         source = metadata.get("source", "") if isinstance(metadata, dict) else ""
         doi = metadata.get("doi", "") if isinstance(metadata, dict) else ""
-        
-        authors_short = authors[:35] + "..." if len(authors) > 35 else authors if authors else "—"
-        
+
+        authors_formatted = _format_authors_short(authors)
+
+        meta_parts = []
         if year:
-            meta_line = f"**{year}**"
-            if authors_short != "—":
-                meta_line += f" · {authors_short}"
-            if source:
-                meta_line += f" · {source[:25]}"
-            st.caption(meta_line)
-        elif authors_short != "—":
-            st.caption(f"**{authors_short}**" + (f" · {source[:25]}" if source else ""))
+            meta_parts.append(str(year))
+        if authors_formatted:
+            meta_parts.append(authors_formatted)
+        if source:
+            meta_parts.append(source)
+
+        if meta_parts:
+            st.caption(" • ".join(meta_parts))
     except:
         pass
 
-    with st.expander("Metadata & Provenance", expanded=False):
+    if has_abstract:
+        st.markdown(f"**Abstract**")
+        st.markdown(f"<div style='line-height:1.7; font-size:0.9rem; color:{COLORS['text_secondary']};'>{abstract}</div>", unsafe_allow_html=True)
+    else:
+        st.info("No abstract available - review metadata for assessment")
+
+    with st.expander("Provenance", expanded=False):
         try:
             global_id = metadata.get("global_id", "—")[:16] if isinstance(metadata, dict) else "—"
-            year_source = metadata.get("year_source", "unknown") if isinstance(metadata, dict) else "unknown"
-            completeness = metadata.get("metadata_completeness", "unknown") if isinstance(metadata, dict) else "unknown"
-            
-            year_src_labels = {"atlas": "ATLAS", "doi": "DOI", "manual": "Manual", "csv": "CSV", "unknown": "Unknown"}
-            
-            if year and year != "nan" and year != "—":
-                year_display = f"{year}"
-                if year_source != "unknown":
-                    year_display += f" ({year_src_labels.get(year_source, year_source)})"
-            elif year_source != "unknown":
-                year_display = f"Unknown ({year_src_labels.get(year_source, year_source)})"
-            else:
-                year_display = "Unknown"
-            
-            st.markdown(f"""
-            | Field | Value |
-            |-------|--------|
-            | Year | {year_display} |
-            | Authors | {authors or '—'} |
-            | Source | {source or '—'} |
-            """)
-            
-            with st.expander("Provenance Details", expanded=False):
-                st.markdown(f"""
-                | Field | Value |
-                |-------|--------|
-                | DOI | {doi or '—'} |
-                | ID | {global_id} |
-                | Completeness | {completeness} |
-                """, unsafe_allow_html=True)
+            completeness = metadata.get("completeness", "unknown") if isinstance(metadata, dict) else "unknown"
+
+            st.markdown(f"**Full Authors:** {authors or '—'}")
+            st.markdown(f"**DOI:** {doi or '—'}")
+            st.markdown(f"**Source ID:** {global_id}")
+            st.markdown(f"**Metadata Quality:** {completeness}")
         except:
             st.caption("Metadata unavailable")
-
-    if has_abstract:
-        with st.expander("Abstract", expanded=(index == 0)):
-            st.markdown(f"<div style='line-height:1.7; font-size:0.9rem;'>{abstract}</div>", unsafe_allow_html=True)
 
 
 def render_ai_advisory_panel(article, current_idx: int):
@@ -538,116 +530,70 @@ def get_ec_codes() -> Dict[str, str]:
 
 
 def render_suggestion_details(suggestion: Dict):
-    """Render LLM advisory as clean recommendation - no percentages."""
+    """Render LLM advisory as clean recommendation - researcher-focused."""
     decision = suggestion.get("decision", "").upper()
-    
+
     if decision == "INCLUDE":
         confidence_label = "Strong heuristic alignment"
         label_color = COLORS["success"]
     elif decision == "EXCLUDE":
-        confidence_label = "Weak heuristic alignment"  
+        confidence_label = "Weak heuristic alignment"
         label_color = COLORS["error"]
     else:
         confidence_label = "Moderate LLM signal"
         label_color = COLORS["warning"]
-    
+
     is_fallback = suggestion.get("is_fallback", False)
 
     if is_fallback:
         st.warning("LLM service unavailable - manual review required")
         return
 
-    grounding = suggestion.get("metadata_grounding", {})
-    grounding_issues = []
-    if grounding:
-        if not grounding.get("title_used"):
-            grounding_issues.append("Title partial")
-        if not grounding.get("year_used"):
-            grounding_issues.append("Year incomplete")
-        if not grounding.get("abstract_used"):
-            grounding_issues.append("Abstract partial")
+    decision_color = COLORS["success"] if decision == "INCLUDE" else (COLORS["error"] if decision == "EXCLUDE" else COLORS["warning"])
+    icon = "✅" if decision == "INCLUDE" else ("❌" if decision == "EXCLUDE" else "⚠️")
 
-    with st.container():
-        st.markdown("**Recommendation**")
-        decision_color = COLORS["success"] if decision == "INCLUDE" else (COLORS["error"] if decision == "EXCLUDE" else COLORS["warning"])
-        st.markdown(f":{['x', 'check', 'warning'][0 if decision == 'EXCLUDE' else 1 if decision == 'INCLUDE' else 2]}**: {decision}")
-        
-        st.caption(f"Assessment: {confidence_label}")
-        st.caption("_Human reviewer makes final eligibility decision_")
+    st.markdown(f'''
+    <div style="background:{COLORS['bg_card']};border:1px solid {COLORS['border_light']};padding:0.75rem;border-radius:4px;margin-bottom:0.75rem;">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
+            <span style="font-size:1.2rem;">{icon}</span>
+            <span style="font-weight:600;font-size:1rem;color:{decision_color};">{decision}</span>
+        </div>
+        <div style="font-size:0.75rem;color:{COLORS['text_secondary']};">{confidence_label}</div>
+    </div>
+    ''', unsafe_allow_html=True)
 
     reasoning = suggestion.get("reasoning_summary") or suggestion.get("justification", "")
     if reasoning:
-        with st.expander("Assessment"):
-            st.write(reasoning)
+        with st.expander("Rationale", expanded=False):
+            st.markdown(f"<div style='line-height:1.6;font-size:0.85rem;'>{reasoning}</div>", unsafe_allow_html=True)
 
     criterion_evals = suggestion.get("criterion_evaluations", {})
-    if criterion_evals:
-        triggered = {k: v for k, v in criterion_evals.items() if v.get("triggered")}
-        if triggered:
-            with st.expander("Triggered criteria"):
-                for cid, eval_data in triggered.items():
-                    st.write(f"- {cid}: {eval_data.get('justification', '')[:80]}")
-
-    ambiguity = suggestion.get("ambiguity_flags", [])
-    if ambiguity and any(flag for flag in ambiguity if flag):
-        st.warning(f"Note: {ambiguity[0] if ambiguity[0] else ambiguity[-1]}")
-
-    # End of clean advisory
-
-    criterion_evals = suggestion.get("criterion_evaluations", {})
-    triggered_list = suggestion.get("triggered_criteria", [])
-
-    if isinstance(triggered_list, dict):
-        triggered_dict = {k: v for k, v in triggered_list.items() if v}
-    else:
-        triggered_dict = {}
-        for cid in triggered_list:
-            eval_data = criterion_evals.get(cid, {})
-            if eval_data.get("triggered"):
-                triggered_dict[cid] = eval_data.get("justification", "")
-
-    if triggered_dict:
-        criteria_panel(triggered_dict, title="TRIGGERED CRITERIA")
-
     if criterion_evals:
         ec_criteria = get_protocol_ec_criteria()
-        
-        with st.expander("CRITERION EVALUATIONS"):
+        triggered = {k: v for k, v in criterion_evals.items() if v.get("triggered")}
+
+        if triggered:
+            st.markdown("**Triggered Criteria**")
+            for cid, eval_data in triggered.items():
+                eval_justification = eval_data.get("justification", "")
+                official_def = ec_criteria.get(cid, "")
+                display_text = eval_justification[:100] if eval_justification else official_def
+                st.markdown(f"• **{cid}** — {display_text}")
+
+        with st.expander("All Criteria Analysis", expanded=False):
             for cid, eval_data in criterion_evals.items():
                 triggered = eval_data.get("triggered", False)
                 eval_justification = eval_data.get("justification", "")
-                ambiguity = eval_data.get("ambiguity_detected", False)
-                
-                official_def = ec_criteria.get(cid, "No definition available")
-                is_methodological_na = eval_justification and "N/A:" in eval_justification
-                
-                if is_methodological_na:
-                    eval_confidence = "◉"
-                    eval_color = COLORS["cyan"]
-                    st.markdown(f'''
-                    <div style="border-left:2px solid {COLORS['cyan']};padding-left:0.75rem;margin:0.5rem 0;">
-                        <span style="color:{eval_color};font-family:{TYPOGRAPHY["mono"]};font-size:0.75rem;">◉ {cid}</span>
-                        <div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS['text_secondary']};margin-top:0.25rem;">▸ {official_def}</div>
-                        <div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS['text_muted']};margin-top:0.25rem;font-style:italic;">└ {eval_justification}</div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                else:
-                    eval_confidence = "✓" if triggered else "✗"
-                    eval_color = COLORS["error"] if triggered else COLORS["text_muted"]
-                    border_color = COLORS["error"] if triggered else COLORS["border_light"]
-                    
-                    st.markdown(f'''
-                    <div style="border-left:2px solid {border_color};padding-left:0.75rem;margin:0.5rem 0;">
-                        <span style="color:{eval_color};font-family:{TYPOGRAPHY["mono"]};font-size:0.8rem;font-weight:600;">{eval_confidence} {cid}</span>
-                        <div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS['text_secondary']};margin-top:0.25rem;">▸ {official_def}</div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                    if eval_justification:
-                        st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["text_muted"]};margin-left:1.5rem;margin-top:0.25rem;">└ {eval_justification}</div>', unsafe_allow_html=True)
-                    
-                    if ambiguity:
-                        st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["warning"]};margin-left:1.5rem;">⚠ ambiguity detected</div>', unsafe_allow_html=True)
+                official_def = ec_criteria.get(cid, "No definition")
+
+                status_icon = "✗" if triggered else "✓"
+                status_color = COLORS["error"] if triggered else COLORS["text_muted"]
+
+                st.markdown(f"**{status_icon} {cid}** — {official_def}")
+                if eval_justification:
+                    st.caption(f"_{eval_justification}_")
+
+    st.caption("*Human reviewer makes final eligibility decision*")
 
     def export_ec_results(session):
         """Export EC screening results using ExportEngine Excel format."""

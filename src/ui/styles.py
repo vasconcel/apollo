@@ -5,9 +5,22 @@ Dark monochromatic interface with cyan accents for systematic evidence analysis.
 """
 from src.ui.theme import COLORS, TYPOGRAPHY
 
+# DEBUG MODE - Set to True to outline sidebar containers for visual validation
+SIDEBAR_DEBUG = False
+
 
 def get_custom_css():
+    debug_outline = ""
+    if SIDEBAR_DEBUG:
+        debug_outline = """/* DEBUG: Outline sidebar containers */
+[data-testid="stSidebar"] * {{ outline: 1px dashed red !important; }}
+[data-testid="stSidebar"] [data-testid="stRadio"] {{ outline: 2px solid yellow !important; }}
+[data-testid="stSidebar"] [role="radiogroup"] {{ outline: 2px solid cyan !important; }}
+[data-testid="stSidebar"] label {{ outline: 1px solid green !important; }}
+"""
+    
     return f"""<style>
+{debug_outline}
 @keyframes blink {{
     0%, 50% {{ opacity: 1; }}
     51%, 100% {{ opacity: 0; }}
@@ -93,18 +106,28 @@ html, body, .stApp {{
 [data-testid="stSidebar"] {{
     background: {COLORS['bg_surface']} !important;
     border-right: 1px solid {COLORS['border']} !important;
+    width: 300px !important;
+    min-width: 300px !important;
+}}
+
+@media (max-width: 1200px) {{
+    [data-testid="stSidebar"] {{
+        width: 260px !important;
+        min-width: 260px !important;
+    }}
 }}
 
 [data-testid="stSidebar"]::before {{
-    content: "APOLLO // OPERATIONS";
+    content: "APOLLO";
     display: block;
-    font-family: {TYPOGRAPHY['mono']};
-    font-size: 0.7rem;
+    font-family: {TYPOGRAPHY['sans']};
+    font-size: 1.1rem;
+    font-weight: 600;
     color: {COLORS['cyan']};
-    letter-spacing: 0.2em;
-    padding: 1rem;
-    border-bottom: 1px solid {COLORS['border']};
-    margin-bottom: 1rem;
+    letter-spacing: 0.05em;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid {COLORS['border_light']};
+    margin-bottom: 0.5rem;
 }}
 
 h1, h2, h3, h4, h5, h6 {{
@@ -273,17 +296,75 @@ h4 {{ font-size: 0.875rem !important; }}
     font-size: 0.75rem !important;
 }}
 
+/* Navigation radio in sidebar - full width - targeting correct elements */
+section[data-testid="stSidebar"] [data-testid="stRadio"] > div,
+section[data-testid="stSidebar"] [data-testid="stRadio"] > div > div,
+section[data-testid="stSidebar"] div[class*="stElementContainer"] {{
+    width: 100% !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+}}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] label {{
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 0.55rem 0.75rem !important;
+    margin-bottom: 0.35rem !important;
+    border-radius: 6px !important;
+    background: {COLORS['bg_card']} !important;
+    border: 1px solid transparent !important;
+    font-family: {TYPOGRAPHY['sans']} !important;
+    font-size: 0.84rem !important;
+    font-weight: 500 !important;
+    line-height: 1.3 !important;
+    color: {COLORS['text_secondary']} !important;
+    text-align: left !important;
+    transition: all 0.15s ease !important;
+}}
+    min-height: 38px !important;
+    transition: background 0.2s ease !important;
+}}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {{
+    border: 2px solid {COLORS['cyan']} !important;
+    color: {COLORS['cyan']} !important;
+    background: {COLORS['cyan_subtle']} !important;
+}}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] {{
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.4rem !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}}
+
+/* General radio fallback */
 [data-testid="stRadio"] > div {{
     gap: 0.5rem !important;
+    display: flex !important;
+    flex-direction: column !important;
 }}
 
 [data-testid="stRadio"] label {{
-    font-family: {TYPOGRAPHY['mono']} !important;
-    font-size: 0.75rem !important;
+    font-family: {TYPOGRAPHY['sans']} !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
     color: {COLORS['text_secondary']} !important;
     padding: 0.5rem 0.75rem !important;
-    border: 1px solid {COLORS['border']} !important;
-    border-radius: 0px !important;
+    background: {COLORS['bg_card']} !important;
+    border-radius: 4px !important;
+    width: 100% !important;
+    flex: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
 }}
 
 [data-testid="stRadio"] label:has(input:checked) {{

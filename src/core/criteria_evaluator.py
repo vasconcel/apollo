@@ -73,5 +73,52 @@ class InclusionCriteria:
         
         if has_industry and has_empirical:
             return EligibilityDecision("include", "NO", "Empirical SE research relevant to scope")
-        
+
         return EligibilityDecision("exclude", "IC1", "Does not address recruitment/selection in software context")
+
+
+class QualityDecision:
+    """QC decision result."""
+    def __init__(self, scores: dict, total_score: float, decision: str, literature_type: str = "WL"):
+        self.scores = scores
+        self.total_score = total_score
+        self.decision = decision
+        self.literature_type = literature_type
+
+    def to_display(self) -> str:
+        return f"{self.total_score:.1f}/8.0" if self.decision == "include" else "N/A"
+
+
+class QualityCriteria:
+    """Quality assessment criteria - stub implementation."""
+
+    WL_QUESTIONS = {
+        "WL-Q1": "Are the research aims and the SE R&S context clearly stated?",
+        "WL-Q2": "Is the research methodology adequately described?",
+        "WL-Q3": "Are the findings clearly supported by the collected data?",
+        "WL-Q4": "Does the study adequately discuss its limitations?"
+    }
+
+    GL_QUESTIONS = {
+        "GL-Q1": "Is the author's expertise or organizational context stated?",
+        "GL-Q2": "Is the source of experience transparent?",
+        "GL-Q3": "Are claims supported by operational artifacts?",
+        "GL-Q4": "Does the source provide insights beyond generic marketing?"
+    }
+
+    THRESHOLD = 2.0
+
+    @classmethod
+    def evaluate(cls, title: str, abstract: str, literature_type: str = "WL") -> QualityDecision:
+        """
+        Evaluate quality criteria - stub returns pending.
+
+        Note: Full QC implementation requires protocol-driven scoring.
+        This stub provides basic structure for protocol integration.
+        """
+        return QualityDecision(
+            scores={"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0},
+            total_score=0.0,
+            decision="pending",
+            literature_type=literature_type
+        )

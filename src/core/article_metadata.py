@@ -11,8 +11,86 @@ V1.0.0 UPDATES:
 """
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
+import re
 
 import pandas as pd
+import pylatexenc
+from src.core.logging_config import get_logger
+
+logger = get_logger("metadata")
+
+# Startup logging for pylatexenc availability
+logger.info(f"Author decoder initialization - pylatexenc version: {pylatexenc.__version__ if hasattr(pylatexenc, '__version__') else 'unknown'}")
+
+try:
+    from pylatexenc import latex_to_unicode
+    LATEX_DECODER_AVAILABLE = True
+    logger.info("latex_to_unicode import: SUCCESS")
+except ImportError as e:
+    LATEX_DECODER_AVAILABLE = False
+    logger.warning(f"latex_to_unicode import: FAILED - {e}")
+
+logger.info(f"LATEX_DECODER_AVAILABLE: {LATEX_DECODER_AVAILABLE}")
+
+
+def decode_author_string(author_str: str) -> str:
+    """Decode BibTeX/LaTeX encoded author strings to proper Unicode using pylatexenc."""
+    if DEBUG_MODE:
+        logger.debug(f"Author decoding - Input: {repr(author_str[:50] if author_str else '')}")
+    
+    if not author_str or author_str == "nan" or str(author_str) == "nan":
+        return ""
+    
+    author_str = str(author_str).strip()
+    
+    if LATEX_DECODER_AVAILABLE:
+        try:
+            result = latex_to_unicode(author_str)
+            if DEBUG_MODE:
+                logger.debug(f"Author decoding - pylatexenc result: {repr(result[:50] if result else '')}")
+            return result.strip()
+        except Exception as e:
+            if DEBUG_MODE:
+                logger.debug(f"Author decoding - pylatexenc failed: {e}")
+            pass
+    
+    return author_str
+
+
+def normalize_venue_name(venue: str) -> str:
+    """Abbreviate long venue/source names to common academic abbreviations."""
+    if not venue or venue == "nan":
+        return ""
+    
+    venue_lower = venue.lower()
+    
+    abbrev_map = {
+        'proc. acm hum.-comput. interact.': 'PACM HCI',
+        'acm trans. softw. eng. methodol.': 'TOSEM',
+        'acm trans. softw. eng. methodology': 'TOSEM',
+        'proc. int. conf. softw. eng.': 'ICSE',
+        'empirical softw. eng.': 'ESEM',
+        'empirical software engineering': 'ESEM',
+        'ieee trans. softw. eng.': 'IEEE TSE',
+        'information and software technology': 'IST',
+        'journal of systems and software': 'JSS',
+        'software quality journal': 'SQJ',
+        'advances in computers': 'Adv. Comput.',
+        'computer': 'Computers',
+        'computer standards & interfaces': 'CSI',
+        'requirements engineering': 'RE',
+    }
+    
+    for full, abbrev in abbrev_map.items():
+        if full in venue_lower:
+            return abbrev
+    
+    if len(venue) > 35:
+        words = venue.split()
+        if len(words) >= 2:
+            return words[0][:min(6, len(words[0]))] + '. ' + words[-1][:min(6, len(words[-1]))]
+    
+    return venue
 
 
 TITLE_ALIASES = [
@@ -31,8 +109,9 @@ AUTHORS_ALIASES = [
 ]
 
 YEAR_ALIASES = [
-    "year", "Year", "Publication Year", "date", "Date",
-    "pub_year", "publicationYear", "publish_year"
+    "year", "Year", "Publication Year", "Publication_Year",
+    "date", "Date", "pub_year", "publicationYear", "publish_year",
+    "published", "Published", "Year", "yr", "Yr"
 ]
 
 SOURCE_ALIASES = [
@@ -186,33 +265,74 @@ def _get_first_matching_value(row: Dict[str, Any], aliases: list, default: str =
     return default
 
 
+DEBUG_MODE = False  # Set to True for verbose diagnostics (production: False)
+
+
 def _get_year(row: Dict[str, Any]) -> Optional[int]:
-    """Extract year from row."""
-    year_str = _get_first_matching_value(row, YEAR_ALIASES)
-    if year_str:
-        try:
-            return int(year_str)
-        except (ValueError, TypeError):
-            pass
+    """Extract year from row with robust NaN handling."""
+    import math
+    
+    if DEBUG_MODE:
+        logger.debug(f"Year extraction - Available columns: {list(row.keys())}")
+    
+    for alias in YEAR_ALIASES:
+        alias_lower = alias.lower()
+        row_lower = {k.lower(): k for k in row.keys()}
+        
+        if alias_lower in row_lower:
+            key = row_lower[alias_lower]
+            raw_value = row.get(key)
+            
+            if DEBUG_MODE:
+                logger.debug(f"Year extraction - Matched alias '{alias}' -> key '{key}', raw: {repr(raw_value)}")
+            
+            if raw_value is None:
+                continue
+            
+            if isinstance(raw_value, (int, float)) and not math.isnan(raw_value):
+                try:
+                    year_val = int(float(raw_value))
+                    if 1900 <= year_val <= 2100:
+                        logger.debug(f"Year extraction - Structured year: {year_val}")
+                        return year_val
+                except (ValueError, TypeError):
+                    pass
+            
+            year_str = str(raw_value).strip()
+            if year_str and year_str.lower() != "nan":
+                try:
+                    year_val = int(year_str)
+                    logger.debug(f"Year extraction - String year: {year_val}")
+                    return year_val
+                except (ValueError, TypeError):
+                    pass
+    
+    if DEBUG_MODE:
+        print(f"[YEAR DEBUG] No year found via structured columns")
     return None
 
 
 def normalize_wl_metadata(row: Dict[str, Any]) -> NormalizedArticle:
     """Normalize White Literature metadata from ATLAS v2.0 export."""
+    if DEBUG_MODE:
+        logger.debug(f"WL normalization - Raw row keys: {list(row.keys())}")
+    
     article = NormalizedArticle()
 
     article.title = _get_first_matching_value(row, TITLE_ALIASES)
     
-    # METHODOLOGICAL FIX: Handle missing abstract gracefully for WL
     abstract_val = _get_first_matching_value(row, ABSTRACT_ALIASES)
     if not abstract_val:
         article.abstract = "[ABSTRACT MISSING - FULL TEXT REVIEW MAY BE REQUIRED]"
     else:
         article.abstract = abstract_val
         
-    article.authors = _get_first_matching_value(row, AUTHORS_ALIASES)
+    raw_authors = _get_first_matching_value(row, AUTHORS_ALIASES)
+    article.authors = decode_author_string(raw_authors)
+    
     article.year = _get_year(row)
-    article.source = _get_first_matching_value(row, SOURCE_ALIASES)
+    
+    article.source = normalize_venue_name(_get_first_matching_value(row, SOURCE_ALIASES))
     article.doi = _get_first_matching_value(row, DOI_ALIASES)
     article.url = _get_first_matching_value(row, URL_ALIASES)
     article.keywords = _get_first_matching_value(row, KEYWORDS_ALIASES)
@@ -251,7 +371,7 @@ def normalize_gl_metadata(row: Dict[str, Any]) -> NormalizedArticle:
     else:
         article.abstract = abstract_val
         
-    article.authors = _get_first_matching_value(row, AUTHORS_ALIASES)
+    article.authors = decode_author_string(_get_first_matching_value(row, AUTHORS_ALIASES))
     article.year = _get_year(row)
     article.source = _get_first_matching_value(row, SOURCE_ALIASES)
     article.url = _get_first_matching_value(row, URL_ALIASES)

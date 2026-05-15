@@ -17,6 +17,36 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
+from src.core.logging_config import get_logger
+
+logger = get_logger("ingestion")
+INGESTION_DEBUG = False  # Set to True for verbose diagnostics
+
+
+def normalize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Defensive metadata normalization - ensures ALL articles have required fields.
+    Never allows silent empty-string propagation.
+    """
+    required_fields = {
+        "year": "Unknown",
+        "year_source": "missing",
+        "authors": "",
+        "author_normalization_source": "unknown",
+        "source": "",
+        "source_type": "unknown",
+        "literature_type": "WL",
+        "metadata_completeness": "unknown"
+    }
+    
+    normalized = dict(metadata)
+    
+    for field_name, default_value in required_fields.items():
+        if field_name not in normalized or normalized[field_name] is None or str(normalized.get(field_name, "")).strip() == "":
+            normalized[field_name] = default_value
+    
+    return normalized
+
 
 LITERATURE_TYPE_MAP = {
     "WL": "WL", "wl": "WL", "Wl": "WL",
@@ -51,6 +81,7 @@ class SessionStage(Enum):
     """Screening stages."""
     EC = "ec"  # Exclusion Criteria
     IC = "ic"  # Inclusion Criteria
+    QC = "qc"  # Quality Criteria
     COMPLETE = "complete"
 
 
@@ -79,7 +110,13 @@ class ArticleReview:
     ic_notes: str = ""
     ic_timestamp: str = ""
     ic_llm_suggestion: Dict[str, Any] = field(default_factory=dict)
-    
+
+    qc_stage: str = ""  # Decision at QC stage (only if IC passed)
+    qc_notes: str = ""
+    qc_timestamp: str = ""
+    qc_score: str = ""  # QC score (e.g., "6.0/8.0")
+    qc_llm_suggestion: Dict[str, Any] = field(default_factory=dict)
+
     final_decision: str = ""
     
     cis1: str = ""  # Reviewer 1 IC code (IC1, IC2, etc. or "YES")
@@ -140,7 +177,12 @@ class ArticleReview:
     def is_ic_included(self) -> bool:
         """Check if passed IC stage (requires EC pass first)."""
         return self.is_ec_included and self.ic_stage == "include"
-    
+
+    @property
+    def is_qc_included(self) -> bool:
+        """Check if passed QC stage (requires IC pass first)."""
+        return self.is_ic_included and self.qc_stage == "include"
+
     @property
     def is_discussion_needed(self) -> bool:
         """Check if needs discussion at any stage."""
@@ -219,7 +261,8 @@ class ScreeningSession:
     
     ec_completed: int = 0
     ic_completed: int = 0
-    
+    qc_completed: int = 0
+
     included_count: int = 0
     excluded_count: int = 0
     skip_count: int = 0
@@ -259,8 +302,10 @@ class ScreeningSession:
         import pandas as pd
         import json
         from src.core.article_metadata import (
-            normalize_wl_metadata, normalize_gl_metadata, article_to_dict
+            normalize_wl_metadata, normalize_gl_metadata, article_to_dict,
+            LATEX_DECODER_AVAILABLE
         )
+        from src.core.year_extraction import extract_year
 
         temp_path = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
 
@@ -275,14 +320,26 @@ class ScreeningSession:
                     row_dict = row.to_dict()
                     lit_type = normalize_literature_type(str(row_dict.get("Literature_Type", "WL")))
                     completeness = compute_csv_metadata_completeness(row_dict)
+                    
+                    title = str(row_dict.get("Title", ""))
+                    abstract = str(row_dict.get("Abstract", ""))
+                    
+                    year_value = row_dict.get("Year")
+                    year_source = "csv"
+                    if year_value is None or str(year_value).strip() == "":
+                        extracted_year, extracted_source = extract_year(title, abstract, None)
+                        if extracted_year:
+                            year_value = extracted_year
+                            year_source = extracted_source
+                    
                     metadata = {
-                        "year": str(row_dict.get("Year", "")),
+                        "year": str(year_value) if year_value else "",
                         "authors": str(row_dict.get("Authors", "")),
                         "literature_type": lit_type,
-                        "title": str(row_dict.get("Title", "")),
-                        "abstract": str(row_dict.get("Abstract", "")),
+                        "title": title,
+                        "abstract": abstract,
                         "global_id": str(row_dict.get("global_id", str(uuid.uuid4())[:8])),
-                        "year_source": "csv",
+                        "year_source": year_source,
                         "metadata_completeness": completeness
                     }
                     review_article = ArticleReview(
@@ -302,12 +359,36 @@ class ScreeningSession:
                 gl_df = pd.read_excel(temp_path, sheet_name="Grey Literature")
 
             articles = []
-            for _, row in wl_df.iterrows():
+            if INGESTION_DEBUG:
+                logger.debug("WL ingestion start")
+            for idx, row in wl_df.iterrows():
                 row_dict = row.to_dict()
                 article = normalize_wl_metadata(row_dict)
                 article_dict = article_to_dict(article)
+                
+                year_value = article.year if article.year else None
+                year_source = "atlas"
+                
+                if INGESTION_DEBUG:
+                    logger.debug(f"WL {idx} - Structured year: {repr(year_value)}")
+                
+                if year_value is None:
+                    extracted_year, extracted_source = extract_year(
+                        article.title, 
+                        article.abstract,
+                        None
+                    )
+                    if INGESTION_DEBUG:
+                        logger.debug(f"WL {idx} - Regex fallback: year={repr(extracted_year)}, source={repr(extracted_source)}")
+                    if extracted_year:
+                        year_value = extracted_year
+                        year_source = extracted_source
+                
+                if INGESTION_DEBUG:
+                    logger.debug(f"WL {idx} - Final year: {repr(year_value)}, source: {repr(year_source)}")
+                
                 metadata = {
-                    "year": str(article.year) if article.year else "",
+                    "year": str(year_value) if year_value else "",
                     "authors": article.authors,
                     "literature_type": article.literature_type,
                     "doi": article.doi,
@@ -318,10 +399,14 @@ class ScreeningSession:
                     "local_id": article.local_id,
                     "url": article.url,
                     "completeness": article.completeness_score,
-                    "year_source": "atlas",
+                    "year_source": year_source,
                     "metadata_completeness": article.metadata_completeness,
-                    "raw_data": article.raw_data
+                    "raw_data": article.raw_data,
+                    "author_normalization_source": "pylatexenc" if LATEX_DECODER_AVAILABLE else "raw"
                 }
+                
+                metadata = normalize_metadata(metadata)
+                
                 review_article = ArticleReview(
                     article_id=article.global_id or article.local_id or str(uuid.uuid4())[:8],
                     title=article.title,
@@ -330,12 +415,36 @@ class ScreeningSession:
                 )
                 articles.append(review_article)
 
-            for _, row in gl_df.iterrows():
+            if INGESTION_DEBUG:
+                logger.debug("GL ingestion start")
+            for idx, row in gl_df.iterrows():
                 row_dict = row.to_dict()
                 article = normalize_gl_metadata(row_dict)
                 article_dict = article_to_dict(article)
+                
+                year_value = article.year if article.year else None
+                year_source = "atlas"
+                
+                if INGESTION_DEBUG:
+                    logger.debug(f"GL {idx} - Structured year: {repr(year_value)}")
+                
+                if year_value is None:
+                    extracted_year, extracted_source = extract_year(
+                        article.title, 
+                        article.abstract,
+                        None
+                    )
+                    if INGESTION_DEBUG:
+                        logger.debug(f"GL {idx} - Regex fallback: year={repr(extracted_year)}, source={repr(extracted_source)}")
+                    if extracted_year:
+                        year_value = extracted_year
+                        year_source = extracted_source
+                
+                if INGESTION_DEBUG:
+                    logger.debug(f"GL {idx} - Final year: {repr(year_value)}, source: {repr(year_source)}")
+                
                 metadata = {
-                    "year": str(article.year) if article.year else "",
+                    "year": str(year_value) if year_value else "",
                     "authors": article.authors,
                     "literature_type": article.literature_type,
                     "url": article.url,
@@ -344,10 +453,14 @@ class ScreeningSession:
                     "global_id": article.global_id,
                     "local_id": article.local_id,
                     "completeness": article.completeness_score,
-                    "year_source": "atlas",
+                    "year_source": year_source,
                     "metadata_completeness": article.metadata_completeness,
-                    "raw_data": article.raw_data
+                    "raw_data": article.raw_data,
+                    "author_normalization_source": "pylatexenc" if LATEX_DECODER_AVAILABLE else "raw"
                 }
+                
+                metadata = normalize_metadata(metadata)
+                
                 review_article = ArticleReview(
                     article_id=article.global_id or article.local_id or str(uuid.uuid4())[:8],
                     title=article.title,

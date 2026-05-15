@@ -35,13 +35,8 @@ def render_workflow_stepper(
     protocol_hash: str = ""
 ) -> None:
     """
-    Render canonical workflow stepper with explicit stage progression.
-
-    Args:
-        current_stage: Current stage identifier (protocol, ec, ic, export, replay)
-        session_state: Optional session state for progress tracking
-        locked: Whether current stage is locked
-        protocol_hash: Protocol hash for authority verification
+    Render canonical workflow stepper with equal-width blocks.
+    SCIENTIFIC UX: Strong workflow hierarchy - Protocol → EC → IC → Export → Replay
     """
     stage_order = [s["id"] for s in WORKFLOW_STAGES]
     current_idx = stage_order.index(current_stage) if current_stage in stage_order else 0
@@ -50,52 +45,59 @@ def render_workflow_stepper(
     <style>
     .workflow-stepper {
         display: flex;
-        align-items: center;
+        align-items: stretch;
         gap: 0;
-        padding: 1rem 0;
+        padding: 0.5rem 0;
         overflow-x: auto;
+        width: 100%;
     }
     .workflow-step {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        border: 1px solid;
-        background: rgba(13, 13, 13, 0.8);
+        justify-content: center;
+        gap: 0.25rem;
+        padding: 0.6rem 0.4rem;
+        border: 1px solid #252525;
+        background: #0D0D0D;
         position: relative;
-        min-width: 100px;
+        flex: 1 1 0;
+        min-width: 80px;
+        width: 100%;
+        text-align: center;
     }
     .workflow-step.completed {
         border-color: #00D67E;
-        background: rgba(0, 214, 126, 0.1);
+        background: rgba(0, 214, 126, 0.08);
     }
     .workflow-step.active {
         border-color: #00c8d7;
-        background: rgba(0, 200, 215, 0.15);
+        background: rgba(0, 200, 215, 0.1);
     }
     .workflow-step.locked {
         border-color: #58A6FF;
-        background: rgba(88, 166, 255, 0.1);
+        background: rgba(88, 166, 255, 0.08);
     }
     .workflow-step.future {
         border-color: #252525;
         opacity: 0.5;
     }
     .workflow-connector {
-        width: 20px;
+        width: 16px;
         height: 2px;
         background: #252525;
+        align-self: center;
     }
     .workflow-connector.completed {
         background: #00D67E;
     }
     .workflow-icon {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 1rem;
+        font-size: 1.1rem;
     }
     .workflow-label {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         letter-spacing: 0.1em;
         text-transform: uppercase;
     }
@@ -131,7 +133,7 @@ def render_workflow_stepper(
     st.markdown(steps_html, unsafe_allow_html=True)
 
     if protocol_hash:
-        st.caption(f"Protocol Hash: `{protocol_hash[:16]}...`")
+        st.caption(f"🔐 Protocol Hash: `{protocol_hash[:16]}...`")
 
 
 def render_stage_progress(

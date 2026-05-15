@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple, Optional, Any
 
 from src.core.article_record import ArticleRecord, EligibilityDecision
 from src.core.ingestion_engine import ATLASLoader
-from src.core.criteria_evaluator import EligibilityDecision as ED, ExclusionCriteria, InclusionCriteria
+from src.core.criteria_evaluator import EligibilityDecision as ED, ExclusionCriteria, InclusionCriteria, QualityDecision, QualityCriteria
 from src.core.year_extraction import extract_year, compute_metadata_completeness
 
 

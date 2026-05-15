@@ -302,13 +302,23 @@ class ProtocolEngine:
         
         if has_industry and has_empirical:
             return ("include", "NO", "Empirical SE research relevant to scope")
-        
-return ("exclude", "IC1", "Does not address recruitment/selection in software context")
 
-    def get_default_protocol() -> Dict:
+        return ("exclude", "IC1", "Does not address recruitment/selection in software context")
+
+    def evaluate_qc(self, data: Dict[str, str], literature_type: str) -> tuple:
+        """
+        Evaluate quality criteria using protocol or default logic.
+
+        Returns:
+            Tuple of (decision: str, scores: dict, total: float)
+        """
+        return ("pending", {}, 0.0)
+
+
+def get_default_protocol() -> Dict:
     """
     Get the default built-in protocol equivalent to current APOLLO behavior.
-    
+
     Returns:
         Default protocol dictionary
     """
@@ -485,18 +495,37 @@ return ("exclude", "IC1", "Does not address recruitment/selection in software co
     }
 
 
+def load_protocol(path: str) -> Dict:
+    """
+    Load protocol from JSON file.
+
+    Args:
+        path: Path to protocol JSON file
+
+    Returns:
+        Protocol dictionary
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        json.JSONDecodeError: If file is not valid JSON
+    """
+    import json
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def validate_protocol(protocol: Dict) -> tuple:
     """
     Validate protocol definition structure.
-    
+
     Returns:
         Tuple of (is_valid: bool, errors: list)
     """
     errors = []
-    
-    required_fields = ["protocol_version", "name", "exclusion_criteria", 
+
+    required_fields = ["protocol_version", "name", "exclusion_criteria",
                        "inclusion_criteria", "quality_criteria"]
-    
+
     for field in required_fields:
         if field not in protocol:
             errors.append(f"Missing required field: {field}")

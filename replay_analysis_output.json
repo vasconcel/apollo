@@ -1,0 +1,229 @@
+{
+  "original": {
+    "checksum": "9c5d43a6ba5095a507ee9c7fc7a4bf82450ed97725ca310d525eb2fa129ecaf6",
+    "data": {
+      "session_id": "replay-test",
+      "created_at": "2026-05-14T10:00:00",
+      "protocol_version": "1.0",
+      "stage": "ec",
+      "current_index": 0,
+      "total_count": 0,
+      "ec_completed": 1,
+      "ic_completed": 0,
+      "included_count": 1,
+      "excluded_count": 0,
+      "skip_count": 0,
+      "discussion_count": 0,
+      "researcher_id": "researcher_1",
+      "last_saved": "2026-05-14T13:53:34.060628",
+      "schema_version": "2.0",
+      "articles": [
+        {
+          "article_id": "A-1",
+          "title": "T",
+          "abstract": "A",
+          "metadata": {
+            "literature_type": "WL"
+          },
+          "ec_stage": "include",
+          "ec_notes": "Test",
+          "ec_timestamp": "2026-05-14T13:53:34.060628",
+          "ec_llm_suggestion": {},
+          "ic_stage": "",
+          "ic_notes": "",
+          "ic_timestamp": "",
+          "ic_llm_suggestion": {},
+          "qc_stage": "",
+          "qc_notes": "",
+          "qc_timestamp": "",
+          "qc_score": "",
+          "qc_llm_suggestion": {},
+          "final_decision": "",
+          "cis1": "",
+          "ces1": "",
+          "revisor1": ""
+        }
+      ],
+      "dynamic_protocol": null,
+      "audit_chain": [
+        {
+          "event_id": "77d55b1b-6511-42ee-af02-c46277cd8036",
+          "timestamp": "2026-05-14T13:53:34.063026",
+          "article_id": "A-1",
+          "reviewer_id": "researcher_1",
+          "stage": "ec",
+          "decision": "include",
+          "notes": "Test",
+          "previous_hash": "GENESIS",
+          "current_hash": "5907144c309afa3b6f2ff3ff467d1bba7c5730267a417e46eef9533b6a6baef3"
+        }
+      ]
+    }
+  },
+  "replays": [
+    {
+      "run": 1,
+      "checksum": "9c5d43a6ba5095a507ee9c7fc7a4bf82450ed97725ca310d525eb2fa129ecaf6",
+      "data": {
+        "session_id": "replay-test",
+        "created_at": "2026-05-14T10:00:00",
+        "protocol_version": "1.0",
+        "stage": "ec",
+        "current_index": 0,
+        "total_count": 0,
+        "ec_completed": 1,
+        "ic_completed": 0,
+        "included_count": 1,
+        "excluded_count": 0,
+        "skip_count": 0,
+        "discussion_count": 0,
+        "researcher_id": "researcher_1",
+        "last_saved": "2026-05-14T13:53:34.060628",
+        "schema_version": "2.0",
+        "articles": [
+          {
+            "article_id": "A-1",
+            "title": "T",
+            "abstract": "A",
+            "metadata": {
+              "literature_type": "WL"
+            },
+            "ec_stage": "include",
+            "ec_notes": "Test",
+            "ec_timestamp": "2026-05-14T13:53:34.060628",
+            "ec_llm_suggestion": {},
+            "ic_stage": "",
+            "ic_notes": "",
+            "ic_timestamp": "",
+            "ic_llm_suggestion": {},
+            "qc_stage": "",
+            "qc_notes": "",
+            "qc_timestamp": "",
+            "qc_score": "",
+            "qc_llm_suggestion": {},
+            "final_decision": "",
+            "cis1": "",
+            "ces1": "",
+            "revisor1": ""
+          }
+        ],
+        "dynamic_protocol": null,
+        "audit_chain": []
+      }
+    },
+    {
+      "run": 2,
+      "checksum": "9c5d43a6ba5095a507ee9c7fc7a4bf82450ed97725ca310d525eb2fa129ecaf6",
+      "data": {
+        "session_id": "replay-test",
+        "created_at": "2026-05-14T10:00:00",
+        "protocol_version": "1.0",
+        "stage": "ec",
+        "current_index": 0,
+        "total_count": 0,
+        "ec_completed": 1,
+        "ic_completed": 0,
+        "included_count": 1,
+        "excluded_count": 0,
+        "skip_count": 0,
+        "discussion_count": 0,
+        "researcher_id": "researcher_1",
+        "last_saved": "2026-05-14T13:53:34.060628",
+        "schema_version": "2.0",
+        "articles": [
+          {
+            "article_id": "A-1",
+            "title": "T",
+            "abstract": "A",
+            "metadata": {
+              "literature_type": "WL"
+            },
+            "ec_stage": "include",
+            "ec_notes": "Test",
+            "ec_timestamp": "2026-05-14T13:53:34.060628",
+            "ec_llm_suggestion": {},
+            "ic_stage": "",
+            "ic_notes": "",
+            "ic_timestamp": "",
+            "ic_llm_suggestion": {},
+            "qc_stage": "",
+            "qc_notes": "",
+            "qc_timestamp": "",
+            "qc_score": "",
+            "qc_llm_suggestion": {},
+            "final_decision": "",
+            "cis1": "",
+            "ces1": "",
+            "revisor1": ""
+          }
+        ],
+        "dynamic_protocol": null,
+        "audit_chain": []
+      }
+    },
+    {
+      "run": 3,
+      "checksum": "9c5d43a6ba5095a507ee9c7fc7a4bf82450ed97725ca310d525eb2fa129ecaf6",
+      "data": {
+        "session_id": "replay-test",
+        "created_at": "2026-05-14T10:00:00",
+        "protocol_version": "1.0",
+        "stage": "ec",
+        "current_index": 0,
+        "total_count": 0,
+        "ec_completed": 1,
+        "ic_completed": 0,
+        "included_count": 1,
+        "excluded_count": 0,
+        "skip_count": 0,
+        "discussion_count": 0,
+        "researcher_id": "researcher_1",
+        "last_saved": "2026-05-14T13:53:34.060628",
+        "schema_version": "2.0",
+        "articles": [
+          {
+            "article_id": "A-1",
+            "title": "T",
+            "abstract": "A",
+            "metadata": {
+              "literature_type": "WL"
+            },
+            "ec_stage": "include",
+            "ec_notes": "Test",
+            "ec_timestamp": "2026-05-14T13:53:34.060628",
+            "ec_llm_suggestion": {},
+            "ic_stage": "",
+            "ic_notes": "",
+            "ic_timestamp": "",
+            "ic_llm_suggestion": {},
+            "qc_stage": "",
+            "qc_notes": "",
+            "qc_timestamp": "",
+            "qc_score": "",
+            "qc_llm_suggestion": {},
+            "final_decision": "",
+            "cis1": "",
+            "ces1": "",
+            "revisor1": ""
+          }
+        ],
+        "dynamic_protocol": null,
+        "audit_chain": []
+      }
+    }
+  ],
+  "diffs": [
+    {
+      "path": "audit_chain",
+      "length_mismatch": true,
+      "len1": 1,
+      "len2": 0
+    }
+  ],
+  "timestamp_drift_fields": [],
+  "audit_chain_fields": [
+    "audit_chain"
+  ],
+  "uuid_fields": [],
+  "other_transient": []
+}

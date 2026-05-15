@@ -78,17 +78,18 @@ def render_protocol_info_banner(protocol):
 
 
 def render_upload_section(session):
-    """Render upload section for EC screening."""
-    section_header("DATA INGESTION", "Upload ATLAS export files to begin EC screening")
+    """Render upload section for EC screening with scientific terminology."""
+    section_header("📥 LITERATURE IMPORT", "Load ATLAS export to begin systematic review")
 
     st.markdown(f'''
     <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;margin:1rem 0;">
         <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_secondary']};margin-bottom:0.5rem;">
-            INPUT FORMAT REQUIREMENT
+            ▸ SOURCE REQUIREMENT
         </div>
         <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['text_muted']};line-height:1.6;">
-            Upload ATLAS export with <span style="color:{COLORS['cyan']};">White Literature</span> and <span style="color:{COLORS['cyan']};">Grey Literature</span> sheets.
-            Papers reviewed sequentially. Decisions recorded per-item.
+            ATLAS export containing <span style="color:{COLORS['cyan']};">White Literature</span> (peer-reviewed) and 
+            <span style="color:{COLORS['warning']};">Grey Literature</span> (non-peer-reviewed) sheets.
+            Sequential screening with per-article eligibility decisions.
         </div>
     </div>
     ''', unsafe_allow_html=True)
@@ -267,7 +268,7 @@ def render_literature_status_header(article, index: int):
 
 
 def render_article_card(article, index: int):
-    """Render paper review card - Focus Mode with abstract focus. Duck typing safe."""
+    """Render paper review card - Title dominant, metadata secondary."""
     try:
         if hasattr(article, 'get_literature_type'):
             lit_type = article.get_literature_type()
@@ -296,43 +297,66 @@ def render_article_card(article, index: int):
         st.warning("Title is missing from this record")
     else:
         st.markdown(f"### {title}")
-
+    
     try:
         year = metadata.get("year", "") if isinstance(metadata, dict) else ""
         authors = metadata.get("authors", "") if isinstance(metadata, dict) else ""
-        if year and str(year) != "nan":
-            st.markdown(f"**{year}**" + (f" — {authors[:50]}..." if authors and str(authors) != "nan" else ""))
+        source = metadata.get("source", "") if isinstance(metadata, dict) else ""
+        doi = metadata.get("doi", "") if isinstance(metadata, dict) else ""
+        
+        authors_short = authors[:35] + "..." if len(authors) > 35 else authors if authors else "—"
+        
+        if year:
+            meta_line = f"**{year}**"
+            if authors_short != "—":
+                meta_line += f" · {authors_short}"
+            if source:
+                meta_line += f" · {source[:25]}"
+            st.caption(meta_line)
+        elif authors_short != "—":
+            st.caption(f"**{authors_short}**" + (f" · {source[:25]}" if source else ""))
     except:
         pass
 
-    st.markdown(f'''
-    <div style="background:{COLORS['bg_surface']};border:1px solid {COLORS['border']};padding:1rem;margin:0.75rem 0;border-radius:4px;">
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};letter-spacing:0.1em;margin-bottom:0.5rem;">▸ ABSTRACT</div>
-    ''', unsafe_allow_html=True)
-    
-    if not has_abstract:
-        st.markdown("_No abstract available — manual review required_")
-    else:
-        st.markdown(f"<div style='font-size:0.9rem;line-height:1.6;color:{COLORS['text_primary']};'>{abstract}</div>", unsafe_allow_html=True)
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    with st.expander("📋 METADATA", expanded=False):
+    with st.expander("Metadata & Provenance", expanded=False):
         try:
-            source = metadata.get('source', 'N/A') if isinstance(metadata, dict) else 'N/A'
-            doi = metadata.get('doi', 'N/A') if isinstance(metadata, dict) else 'N/A'
-            keywords = metadata.get("keywords", "") if isinstance(metadata, dict) else ""
-            st.markdown(f"**Source:** {source}")
-            st.markdown(f"**DOI:** {doi}")
-            if keywords and str(keywords) != "nan":
-                st.markdown(f"**Keywords:** {keywords}")
+            global_id = metadata.get("global_id", "—")[:16] if isinstance(metadata, dict) else "—"
+            year_source = metadata.get("year_source", "unknown") if isinstance(metadata, dict) else "unknown"
+            completeness = metadata.get("metadata_completeness", "unknown") if isinstance(metadata, dict) else "unknown"
+            
+            year_src_labels = {"atlas": "ATLAS", "doi": "DOI", "manual": "Manual", "csv": "CSV", "unknown": "Unknown"}
+            
+            if year and year != "nan" and year != "—":
+                year_display = f"{year}"
+                if year_source != "unknown":
+                    year_display += f" ({year_src_labels.get(year_source, year_source)})"
+            elif year_source != "unknown":
+                year_display = f"Unknown ({year_src_labels.get(year_source, year_source)})"
+            else:
+                year_display = "Unknown"
+            
+            st.markdown(f"""
+            | Field | Value |
+            |-------|--------|
+            | Year | {year_display} |
+            | Authors | {authors or '—'} |
+            | Source | {source or '—'} |
+            """)
+            
+            with st.expander("Provenance Details", expanded=False):
+                st.markdown(f"""
+                | Field | Value |
+                |-------|--------|
+                | DOI | {doi or '—'} |
+                | ID | {global_id} |
+                | Completeness | {completeness} |
+                """, unsafe_allow_html=True)
         except:
-            st.markdown("**Metadata unavailable**")
-        
-        if lit_type == "GL":
-            url = metadata.get("url", "")
-            if url and url != "nan":
-                st.markdown(f"**URL:** [{url}]({url})")
+            st.caption("Metadata unavailable")
+
+    if has_abstract:
+        with st.expander("Abstract", expanded=(index == 0)):
+            st.markdown(f"<div style='line-height:1.7; font-size:0.9rem;'>{abstract}</div>", unsafe_allow_html=True)
 
 
 def render_ai_advisory_panel(article, current_idx: int):
@@ -514,49 +538,61 @@ def get_ec_codes() -> Dict[str, str]:
 
 
 def render_suggestion_details(suggestion: Dict):
-    """Render detailed LLM suggestion in terminal style with criterion-by-criterion view."""
+    """Render LLM advisory as clean recommendation - no percentages."""
     decision = suggestion.get("decision", "").upper()
-    confidence = suggestion.get("confidence", 0)
-    confidence_pct = int(confidence * 100)
+    
+    if decision == "INCLUDE":
+        confidence_label = "Strong heuristic alignment"
+        label_color = COLORS["success"]
+    elif decision == "EXCLUDE":
+        confidence_label = "Weak heuristic alignment"  
+        label_color = COLORS["error"]
+    else:
+        confidence_label = "Moderate LLM signal"
+        label_color = COLORS["warning"]
+    
     is_fallback = suggestion.get("is_fallback", False)
 
     if is_fallback:
-        st.warning("⚠ STRUCTURED ADVISORY UNAVAILABLE — LLM service unavailable. Manual review required.")
-    else:
-        metadata_grounding = suggestion.get("metadata_grounding", {})
-        if metadata_grounding:
-            st.markdown(f'''
-            <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};border-left:2px solid {COLORS['success']};padding:0.5rem;margin-bottom:0.75rem;">
-                METADATA GROUNDING: title={metadata_grounding.get("title_used", False)} | year={metadata_grounding.get("year_used", False)} | abstract={metadata_grounding.get("abstract_used", False)}
-            </div>
-            ''', unsafe_allow_html=True)
+        st.warning("LLM service unavailable - manual review required")
+        return
 
-    col_dec, col_conf = st.columns([1, 1])
+    grounding = suggestion.get("metadata_grounding", {})
+    grounding_issues = []
+    if grounding:
+        if not grounding.get("title_used"):
+            grounding_issues.append("Title partial")
+        if not grounding.get("year_used"):
+            grounding_issues.append("Year incomplete")
+        if not grounding.get("abstract_used"):
+            grounding_issues.append("Abstract partial")
 
-    if decision == "EXCLUDE":
-        with col_dec:
-            status_badge("EXCLUDED")
-    elif decision == "INCLUDE":
-        with col_dec:
-            status_badge("INCLUDED")
-    elif decision == "UNAVAILABLE":
-        with col_dec:
-            status_badge("FALLBACK")
-    elif decision == "UNCERTAIN":
-        with col_dec:
-            status_badge("PENDING")
-    else:
-        with col_dec:
-            st.markdown(f"**{decision}**")
+    with st.container():
+        st.markdown("**Recommendation**")
+        decision_color = COLORS["success"] if decision == "INCLUDE" else (COLORS["error"] if decision == "EXCLUDE" else COLORS["warning"])
+        st.markdown(f":{['x', 'check', 'warning'][0 if decision == 'EXCLUDE' else 1 if decision == 'INCLUDE' else 2]}**: {decision}")
+        
+        st.caption(f"Assessment: {confidence_label}")
+        st.caption("_Human reviewer makes final eligibility decision_")
 
-    with col_conf:
-        metric_tile("CONFIDENCE", f"{confidence_pct}%")
+    reasoning = suggestion.get("reasoning_summary") or suggestion.get("justification", "")
+    if reasoning:
+        with st.expander("Assessment"):
+            st.write(reasoning)
 
-    reasoning_summary = suggestion.get("reasoning_summary", "")
-    if reasoning_summary:
-        st.markdown(f"**Reasoning:** {reasoning_summary}")
-    else:
-        st.markdown(f"**Justification:** {suggestion.get('justification', 'N/A')}")
+    criterion_evals = suggestion.get("criterion_evaluations", {})
+    if criterion_evals:
+        triggered = {k: v for k, v in criterion_evals.items() if v.get("triggered")}
+        if triggered:
+            with st.expander("Triggered criteria"):
+                for cid, eval_data in triggered.items():
+                    st.write(f"- {cid}: {eval_data.get('justification', '')[:80]}")
+
+    ambiguity = suggestion.get("ambiguity_flags", [])
+    if ambiguity and any(flag for flag in ambiguity if flag):
+        st.warning(f"Note: {ambiguity[0] if ambiguity[0] else ambiguity[-1]}")
+
+    # End of clean advisory
 
     criterion_evals = suggestion.get("criterion_evaluations", {})
     triggered_list = suggestion.get("triggered_criteria", [])
@@ -613,57 +649,46 @@ def render_suggestion_details(suggestion: Dict):
                     if ambiguity:
                         st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["warning"]};margin-left:1.5rem;">⚠ ambiguity detected</div>', unsafe_allow_html=True)
 
-    ambiguity = suggestion.get("ambiguity_flags", [])
-    if ambiguity and any(flag for flag in ambiguity if flag):
-        with st.expander("AMBIGUITY FLAGS"):
-            for flag in ambiguity:
-                if flag:
-                    st.markdown(f"  - {flag}")
+    def export_ec_results(session):
+        """Export EC screening results using ExportEngine Excel format."""
+        import tempfile
+        import os
+        from src.core.export_engine import ExportEngine
 
-    advisory_hash = suggestion.get("advisory_hash", "")
-    if advisory_hash:
-        st.caption(f"advisory: {advisory_hash}")
-
-
-def export_ec_results(session):
-    """Export EC screening results using ExportEngine Excel format."""
-    import tempfile
-    from src.core.export_engine import ExportEngine
-
-    try:
-        engine = ExportEngine(protocol_version=session.protocol_version)
-        
-        ec_criteria = get_protocol_ec_criteria()
-        
-        protocol = st.session_state.get("research_protocol")
-        ic_criteria = {}
-        if protocol:
-            ic_criteria = {
-                k: v.description
-                for k, v in protocol.ic.criteria.items()
-                if v.enabled
-            }
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            excel_path = engine.export_decisions_excel(
-                session,
-                os.path.join(tmpdir, "ec_decisions.xlsx"),
-                ec_criteria_descriptions=ic_criteria,
-                ic_criteria_descriptions=ec_criteria
-            )
+        try:
+            engine = ExportEngine(protocol_version=session.protocol_version)
             
-            with open(excel_path, "rb") as f:
-                excel_data = f.read()
+            ec_criteria = get_protocol_ec_criteria()
             
-            st.download_button(
-                "Download EC Results (Excel)",
-                data=excel_data,
-                file_name="apollo_ec_screening_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            protocol = st.session_state.get("research_protocol")
+            ic_criteria = {}
+            if protocol:
+                ic_criteria = {
+                    k: v.description
+                    for k, v in protocol.ic.criteria.items()
+                    if v.enabled
+                }
             
-            wl_count = len(session.get_wl_articles())
-            gl_count = len(session.get_gl_articles())
-            st.success(f"EC Export Ready: {wl_count} WL + {gl_count} GL articles")
-    except Exception as e:
-        st.error(f"Export failed: {e}")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                excel_path = engine.export_decisions_excel(
+                    session,
+                    os.path.join(tmpdir, "ec_decisions.xlsx"),
+                    ec_criteria_descriptions=ic_criteria,
+                    ic_criteria_descriptions=ec_criteria
+                )
+                
+                with open(excel_path, "rb") as f:
+                    excel_data = f.read()
+                
+                st.download_button(
+                    "Download EC Results (Excel)",
+                    data=excel_data,
+                    file_name="apollo_ec_screening_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+                wl_count = len(session.get_wl_articles())
+                gl_count = len(session.get_gl_articles())
+                st.success(f"EC Export Ready: {wl_count} WL + {gl_count} GL articles")
+        except Exception as e:
+            st.error(f"Export failed: {e}")

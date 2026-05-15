@@ -353,7 +353,7 @@ def render_gl_ic_requirements(article):
 
 
 def render_article_card(article, index: int):
-    """Render paper review card - Focus Mode with abstract focus. Duck typing safe."""
+    """Render paper review card - Title dominant, metadata secondary."""
     try:
         if hasattr(article, 'get_literature_type'):
             title = getattr(article, 'title', '')
@@ -369,29 +369,70 @@ def render_article_card(article, index: int):
         title = ""
         abstract = ""
         metadata = {}
+    
+    has_abstract = bool(abstract and str(abstract) != "nan" and len(str(abstract)) > 10)
 
     st.markdown(f"### {title}")
-
+    
     try:
         year = metadata.get("year", "") if isinstance(metadata, dict) else ""
-        if year and str(year) != "nan":
-            st.markdown(f"**{year}**")
+        authors = metadata.get("authors", "") if isinstance(metadata, dict) else ""
+        source = metadata.get("source", "") if isinstance(metadata, dict) else ""
+        
+        authors_short = authors[:35] + "..." if len(authors) > 35 else authors if authors else "—"
+        
+        if year:
+            meta_line = f"**{year}**"
+            if authors_short != "—":
+                meta_line += f" · {authors_short}"
+            if source:
+                meta_line += f" · {source[:25]}"
+            st.caption(meta_line)
+        elif authors_short != "—":
+            st.caption(f"**{authors_short}**" + (f" · {source[:25]}" if source else ""))
     except:
         pass
 
-    has_abstract = bool(abstract and str(abstract) != "nan" and len(str(abstract)) > 10)
-    
-    st.markdown(f'''
-    <div style="background:{COLORS['bg_surface']};border:1px solid {COLORS['border']};padding:1rem;margin:0.75rem 0;border-radius:4px;">
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};letter-spacing:0.1em;margin-bottom:0.5rem;">▸ ABSTRACT</div>
-    ''', unsafe_allow_html=True)
-    
-    if not has_abstract:
-        st.markdown("_No abstract available — manual review required_")
-    else:
-        st.markdown(f"<div style='font-size:0.9rem;line-height:1.6;color:{COLORS['text_primary']};'>{abstract}</div>", unsafe_allow_html=True)
-    
-    st.markdown("</div>", unsafe_allow_html=True)
+    with st.expander("Metadata & Provenance", expanded=False):
+        try:
+            doi = metadata.get("doi", "") if isinstance(metadata, dict) else ""
+            global_id = metadata.get("global_id", "—")[:16] if isinstance(metadata, dict) else "—"
+            year_source = metadata.get("year_source", "unknown") if isinstance(metadata, dict) else "unknown"
+            completeness = metadata.get("metadata_completeness", "unknown") if isinstance(metadata, dict) else "unknown"
+            
+            year_src_labels = {"atlas": "ATLAS", "doi": "DOI", "manual": "Manual", "csv": "CSV", "unknown": "Unknown"}
+            
+            if year and year != "nan" and year != "—":
+                year_display = f"{year}"
+                if year_source != "unknown":
+                    year_display += f" ({year_src_labels.get(year_source, year_source)})"
+            elif year_source != "unknown":
+                year_display = f"Unknown ({year_src_labels.get(year_source, year_source)})"
+            else:
+                year_display = "Unknown"
+            
+            st.markdown(f"""
+            | Field | Value |
+            |-------|--------|
+            | Year | {year_display} |
+            | Authors | {authors or '—'} |
+            | Source | {source or '—'} |
+            """)
+            
+            with st.expander("Provenance Details", expanded=False):
+                st.markdown(f"""
+                | Field | Value |
+                |-------|--------|
+                | DOI | {doi or '—'} |
+                | ID | {global_id} |
+                | Completeness | {completeness} |
+                """, unsafe_allow_html=True)
+        except:
+            st.caption("Metadata unavailable")
+
+    if has_abstract:
+        with st.expander("Abstract", expanded=(index == 0)):
+            st.markdown(f"<div style='line-height:1.7; font-size:0.9rem;'>{abstract}</div>", unsafe_allow_html=True)
 
 
 def render_ai_advisory_panel(article, current_idx: int):
@@ -504,8 +545,14 @@ def render_suggestion_details(suggestion: Dict):
     """Render detailed LLM suggestion in terminal style with criterion-by-criterion view."""
     decision = suggestion.get("decision", "").upper()
     confidence = suggestion.get("confidence", 0)
-    confidence_pct = int(confidence * 100)
     is_fallback = suggestion.get("is_fallback", False)
+
+    if confidence >= 0.7:
+        signal_label = "Strong heuristic alignment"
+    elif confidence >= 0.4:
+        signal_label = "Moderate LLM signal"
+    else:
+        signal_label = "Weak heuristic alignment"
 
     if is_fallback:
         st.warning("⚠ STRUCTURED ADVISORY UNAVAILABLE — LLM service unavailable. Manual review required.")
@@ -529,7 +576,7 @@ def render_suggestion_details(suggestion: Dict):
         else:
             status_badge(decision)
     with col_conf:
-        metric_tile("CONFIDENCE", f"{confidence_pct}%")
+        metric_tile("SIGNAL", signal_label)
 
     reasoning_summary = suggestion.get("reasoning_summary", "")
     if reasoning_summary:

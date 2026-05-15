@@ -71,42 +71,27 @@ def get_pending_count():
 
 
 def render_researcher1_banner():
-    """Render Researcher 1 package indicator - dynamic based on pending count."""
-    session = st.session_state.get("apollo_session") or st.session_state.get("session")
-    
+    """Render Researcher 1 package indicator - Streamlit-native rendering."""
     pending_count = get_pending_count()
     
-    if pending_count > 0:
-        status_html = f'''
-        <span style="color:{COLORS['warning']};">○</span> Reviewer 1 In Progress
-        <span style="color:{COLORS['text_muted']};margin-left:1rem;">|</span>
-        <span style="color:{COLORS['text_muted']};">○</span> Reviewer 2 Pending
-        <span style="color:{COLORS['text_muted']};margin-left:1rem;">|</span>
-        <span style="color:{COLORS['text_muted']};">○</span> Consensus Phase
-        '''
-        border_color = COLORS['warning']
-    else:
-        status_html = f'''
-        <span style="color:{COLORS['success']};">●</span> Reviewer 1 Complete
-        <span style="color:{COLORS['text_muted']};margin-left:1rem;">|</span>
-        <span style="color:{COLORS['warning']};">○</span> Reviewer 2 Pending
-        <span style="color:{COLORS['text_muted']};margin-left:1rem;">|</span>
-        <span style="color:{COLORS['text_muted']};">○</span> Consensus Phase
-        '''
-        border_color = COLORS['success']
-    
-    pending_msg = f'<span style="color:{COLORS["warning"]};font-size:0.7rem;">({pending_count} pending)</span>' if pending_count > 0 else ""
-    
-    st.markdown(f'''
-    <div style="border:2px solid {border_color};background:{COLORS['bg_card']};padding:1rem;margin-bottom:1rem;">
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};letter-spacing:0.15em;margin-bottom:0.5rem;">
-            ▸ INDEPENDENT REVIEWER PACKAGE {pending_msg}
-        </div>
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.8rem;color:{COLORS['text_primary']};">
-            {status_html}
-        </div>
-    </div>
-    ''', unsafe_allow_html=True)
+    with st.container():
+        st.markdown("### Independent Reviewer Package")
+        if pending_count > 0:
+            st.caption(f"({pending_count} articles pending review)")
+        
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            if pending_count > 0:
+                st.info("Reviewer 1: In Progress")
+            else:
+                st.success("Reviewer 1: Complete")
+        
+        with col2:
+            st.warning("Reviewer 2: Pending")
+        
+        with col3:
+            st.caption("Consensus: Pending")
 
 
 def render_download_section():
@@ -334,8 +319,8 @@ def render_export_protocol_section(protocol):
 
 
 def render_prisma_counts_section():
-    """Render PRISMA-style funnel counts - EC/IC only (no QC)."""
-    section_header("PRISMA FLOW DIAGRAM COUNTS", "Use for PRISMA flow diagram population")
+    """Render PRISMA-style flow diagram with proper visual cards."""
+    section_header("PRISMA FLOW DIAGRAM", "Visual screening workflow for publication")
 
     session = st.session_state.get("apollo_session") or st.session_state.get("session")
 
@@ -347,60 +332,57 @@ def render_prisma_counts_section():
 
         ic_excluded = sum(1 for a in articles if (getattr(a, 'ces1', '') or '') == "NO" and (getattr(a, 'cis1', '') or '').strip() not in ['', 'NO'])
         ic_included = ec_included - ic_excluded
+        
+        pending_count = get_pending_count()
 
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.markdown(f'''
-            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;">
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['cyan']};letter-spacing:0.15em;margin-bottom:0.5rem;">IDENTIFICATION</div>
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:1.5rem;color:{COLORS['text_primary']};">{ec_total}</div>
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">Papers identified (from initial search)</div>
-            </div>
-            ''', unsafe_allow_html=True)
-        with col2:
-            st.markdown(f'''
-            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;">
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['cyan']};letter-spacing:0.15em;margin-bottom:0.5rem;">SCREENING</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
-                    <div><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['error']};">EXCLUDED</span><br><span style="font-family:{TYPOGRAPHY['mono']};font-size:1.1rem;color:{COLORS['text_primary']};">{ec_excluded}</span></div>
-                    <div><span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['success']};">AFTER EC</span><br><span style="font-family:{TYPOGRAPHY['mono']};font-size:1.1rem;color:{COLORS['text_primary']};">{ec_included}</span></div>
-                </div>
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};margin-top:0.5rem;">After IC: {ic_included}</div>
-            </div>
-            ''', unsafe_allow_html=True)
-        with col3:
-            st.markdown(f'''
-            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:1rem;">
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['cyan']};letter-spacing:0.15em;margin-bottom:0.5rem;">REVIEWER 1 COMPLETE</div>
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:1.5rem;color:{COLORS['success']};">{ic_included}</div>
-                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_muted']};">{f"{(ic_included/ec_total*100):.1f}%" if ec_total > 0 else "0%"} inclusion rate</div>
-            </div>
-            ''', unsafe_allow_html=True)
-
-        st.markdown(f'''
-        <pre style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;background:{COLORS['bg_surface']};border:1px solid {COLORS['border']};padding:1rem;margin-top:1rem;color:{COLORS['text_secondary']};">
-┌─────────────────────────────────────────────────┐
-│  IDENTIFICATION                                 │
-│  Articles from ATLAS: {ec_total:>4}                   │
-└────────────────────┬────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────┐
-│  EC SCREENING                                   │
-│  Total screened:    {ec_total:>4}                   │
-│  Excluded by EC:    {ec_excluded:>4}                   │
-│  Remaining:         {ec_included:>4}                   │
-└────────────────────┬────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────┐
-│  IC SCREENING                                   │
-│  Total screened:    {ec_included:>4}                   │
-│  Excluded by IC:    {ic_excluded:>4}                   │
-│  FINAL SELECTION:    {ic_included:>4}                   │
-└─────────────────────────────────────────────────┘
-        ''', unsafe_allow_html=True)
+        st.markdown("### PRISMA Flow Diagram")
+        
+        c1, c2, c3, c4, c5 = st.columns([2, 0.3, 2, 0.3, 2])
+        
+        with c1:
+            st.metric("Identification", ec_total, "articles from search")
+        
+        with c2:
+            st.caption("→")
+        
+        with c3:
+            st.metric("After EC", ec_included, f"-{ec_excluded} excluded")
+        
+        with c4:
+            st.caption("→")
+        
+        with c5:
+            rate = f"{(ic_included/ec_total*100):.1f}%" if ec_total > 0 else "0%"
+            st.metric("Final Included", ic_included, rate)
+        
+        if pending_count > 0:
+            st.warning(f"{pending_count} articles pending review")
+        
+        render_export_summary_cards(session, ec_total, ec_excluded, ec_included, ic_excluded, ic_included)
     else:
         st.info("No screening session data found. Complete EC → IC screening to enable full export.")
+
+
+def render_export_summary_cards(session, ec_total, ec_excluded, ec_included, ic_excluded, ic_included):
+    """Render export summary cards with key metrics."""
+    protocol = st.session_state.get("research_protocol")
+    protocol_version = protocol.protocol_version if protocol else "N/A"
+    session_checksum = session.compute_checksum() if hasattr(session, 'compute_checksum') else "N/A"
+    
+    wl_count = len(session.get_wl_articles()) if hasattr(session, 'get_wl_articles') else 0
+    gl_count = len(session.get_gl_articles()) if hasattr(session, 'get_gl_articles') else 0
+    
+    st.markdown("### Export Summary")
+    
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.metric("Total", ec_total, f"WL: {wl_count}, GL: {gl_count}")
+    with s2:
+        st.metric("Excluded", ec_excluded + ic_excluded, f"EC: {ec_excluded}, IC: {ic_excluded}")
+    with s3:
+        st.metric("Included", ic_included, "final selection")
+    with s4:
+        st.metric("Protocol", f"v{protocol_version}", session_checksum[:8] + "...")
 
 
 def render_audit_section(protocol):

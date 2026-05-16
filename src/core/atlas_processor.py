@@ -252,9 +252,17 @@ def create_screening_session(
     
     all_records = wl_results + gl_results
     
+    def _safe_get_protocol_version(p):
+        """Safely get protocol version supporting dict or object."""
+        if p is None:
+            return "1.0"
+        if isinstance(p, dict):
+            return p.get("protocol_version", "1.0")
+        return getattr(p, "protocol_version", "1.0")
+
     session = create_session(
         article_records=all_records,
-        protocol_version=protocol.get("protocol_version", "1.0") if protocol else "1.0"
+        protocol_version=_safe_get_protocol_version(protocol)
     )
     
     reviewer_state = ReviewerState(

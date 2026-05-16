@@ -28,6 +28,10 @@ from src.advisory import (
     get_cache_stats,
     AdvisoryStatus
 )
+from src.core.protocol_utils import get_protocol_value
+
+
+
 
 
 
@@ -107,7 +111,20 @@ def render_ic_screening():
         st.session_state.apollo_session.stage = "ic"
 
     session = st.session_state.apollo_session
-
+    
+    if "advisory_pipeline_initialized" not in st.session_state and session.articles:
+        from src.advisory import initialize_advisory_pipeline
+        pv = get_protocol_value(protocol, "protocol_version", "1.0")
+        
+        result = initialize_advisory_pipeline(
+            articles=session.articles,
+            protocol_version=pv,
+            auto_start=True
+        )
+        
+        st.session_state["advisory_pipeline_initialized"] = True
+        st.session_state["advisory_init_result"] = result
+    
     if not session.articles:
         render_upload_section(session)
     else:
@@ -214,7 +231,9 @@ def render_screening_workspace(session):
         if st.button("▶", disabled=current_idx >= total - 1, width="stretch"):
             st.session_state.ic_current_index = min(total - 1, current_idx + 1)
             st.rerun()
-
+    
+    _render_ic_advisory_status_banner()
+    
     if articles and 0 <= current_idx < total:
         article = articles[current_idx]
         render_literature_status_header(article, current_idx)
@@ -482,7 +501,11 @@ def render_ai_advisory_panel(article, current_idx: int):
     - Show status (READY/PROCESSING/FAILED/UNAVAILABLE)
     - Render persisted advisories
     """
-    protocol_version = st.session_state.get("research_protocol", {}).get("protocol_version", "1.0") if "research_protocol" in st.session_state else "1.0"
+    protocol_version = get_protocol_value(
+        st.session_state.get("research_protocol"),
+        "protocol_version",
+        "1.0"
+    )
     
     if hasattr(article, 'title'):
         title = getattr(article, 'title', '')
@@ -631,12 +654,56 @@ def render_suggestion_details(suggestion: Dict):
                 
                 if eval_justification:
                     st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["text_muted"]};margin-left:1.5rem;margin-top:0.25rem;">└ {eval_justification}</div>', unsafe_allow_html=True)
-                
-if ambiguity:
+    
+    ambiguity = suggestion.get("ambiguity_flags", [])
+    if ambiguity and any(flag for flag in ambiguity if flag):
         with st.expander("AMBIGUITY FLAGS"):
-            for flag in ambiguity:
+            for flag in ambiguity_flags:
                 if flag:
                     st.markdown(f"  - {flag}")
+
+
+def _render_ic_advisory_status_banner():
+    """Render advisory generation progress banner for IC screening."""
+    try:
+        from src.advisory import get_advisory_pipeline_status, is_advisory_generation_active
+        
+        status = get_advisory_pipeline_status()
+        
+        generated = status.get("generated_count", 0)
+        pending = status.get("pending_count", 0)
+        failed = status.get("failed_count", 0)
+        total = generated + pending + failed
+        
+        is_active = is_advisory_generation_active()
+        
+        if total > 0:
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    if is_active:
+                        st.info(f"🔄 Generating: {generated}/{total}")
+                    else:
+                        st.success(f"✓ Generated: {generated}/{total}")
+                
+                with col2:
+                    st.info(f"⏳ Pending: {pending}")
+                
+                with col3:
+                    if failed > 0:
+                        st.warning(f"⚠ Failed: {failed}")
+                    else:
+                        st.caption("✓ No failures")
+                
+                with col4:
+                    if is_active:
+                        st.caption("Worker: Active")
+                    else:
+                        st.caption("Worker: Idle")
+                        
+    except Exception as e:
+        pass
 
 
 def render_advisory_status_panel():

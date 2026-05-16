@@ -1,0 +1,14 @@
+{
+  "cache_key": "50fa6cfc42b159ea73edb1741de7cb5c",
+  "protocol_version": "1.0",
+  "decision": "UNAVAILABLE",
+  "confidence": 0.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [],
+  "justification": "Generation failed: 'str' object has no attribute 'get'",
+  "error": "'str' object has no attribute 'get'",
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-16T18:32:34.797998",
+  "generation_duration_ms": null
+}

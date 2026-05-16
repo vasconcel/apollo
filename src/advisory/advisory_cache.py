@@ -328,3 +328,25 @@ def list_cached_advisories(protocol_version: str = "1.0") -> List[str]:
     """List all cached advisory keys."""
     cache = get_advisory_cache()
     return cache.list_cached(protocol_version)
+
+
+def get_ec_advisory(
+    title: str,
+    abstract: str,
+    protocol_version: str = "1.0"
+) -> AdvisoryResult:
+    """
+    Get EC advisory for article (convenience wrapper).
+    
+    Uses stage="ec" to separate from IC advisories.
+    """
+    return get_advisory(title, abstract, protocol_version, stage="ec")
+
+
+def get_ec_advisory_status(
+    title: str,
+    abstract: str,
+    protocol_version: str = "1.0"
+) -> AdvisoryStatus:
+    """Get status of EC advisory (convenience wrapper)."""
+    return get_advisory_status(title, abstract, protocol_version, stage="ec")

@@ -63,6 +63,15 @@ from .advisory_worker import (
     generate_single_advisory
 )
 
+from .advisory_orchestrator import (
+    AdvisoryWorkerOrchestrator,
+    get_orchestrator,
+    initialize_advisory_pipeline,
+    get_advisory_pipeline_status,
+    start_background_generation,
+    is_advisory_generation_active
+)
+
 __all__ = [
     # Models
     "AdvisoryStatus",
@@ -93,5 +102,13 @@ __all__ = [
     # Worker
     "AdvisoryWorker",
     "run_worker",
-    "generate_single_advisory"
+    "generate_single_advisory",
+    
+    # Orchestrator
+    "AdvisoryWorkerOrchestrator",
+    "get_orchestrator",
+    "initialize_advisory_pipeline",
+    "get_advisory_pipeline_status",
+    "start_background_generation",
+    "is_advisory_generation_active"
 ]

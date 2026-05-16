@@ -23,6 +23,50 @@ from src.ui.components import (
     kappa_display, conflict_resolution_card
 )
 from src.ui.theme import COLORS, TYPOGRAPHY
+from src.core.protocol_utils import get_protocol_value
+
+
+def render_advisory_status_banner():
+    """Render advisory generation progress banner."""
+    try:
+        from src.advisory import get_advisory_pipeline_status, is_advisory_generation_active
+        
+        status = get_advisory_pipeline_status()
+        
+        generated = status.get("generated_count", 0)
+        pending = status.get("pending_count", 0)
+        failed = status.get("failed_count", 0)
+        total = generated + pending + failed
+        
+        is_active = is_advisory_generation_active()
+        
+        if total > 0:
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    if is_active:
+                        st.info(f"🔄 Generating: {generated}/{total}")
+                    else:
+                        st.success(f"✓ Generated: {generated}/{total}")
+                
+                with col2:
+                    st.info(f"⏳ Pending: {pending}")
+                
+                with col3:
+                    if failed > 0:
+                        st.warning(f"⚠ Failed: {failed}")
+                    else:
+                        st.caption("✓ No failures")
+                
+                with col4:
+                    if is_active:
+                        st.caption("Worker: Active")
+                    else:
+                        st.caption("Worker: Idle")
+                        
+    except Exception as e:
+        pass
 
 
 def render_ec_screening():
@@ -51,6 +95,19 @@ def render_ec_screening():
         st.session_state.apollo_session.stage = "ec"
 
     session = st.session_state.apollo_session
+    
+    if "advisory_pipeline_initialized" not in st.session_state and session.articles:
+        from src.advisory import initialize_advisory_pipeline
+        pv = get_protocol_value(protocol, "protocol_version", "1.0")
+        
+        result = initialize_advisory_pipeline(
+            articles=session.articles,
+            protocol_version=pv,
+            auto_start=True
+        )
+        
+        st.session_state["advisory_pipeline_initialized"] = True
+        st.session_state["advisory_init_result"] = result
 
     if not session.articles:
         render_upload_section(session)
@@ -135,6 +192,8 @@ def render_screening_workspace(session):
         if st.button("▶", disabled=current_idx >= total - 1, width="stretch"):
             session.current_index = min(total - 1, current_idx + 1)
             st.rerun()
+    
+    render_advisory_status_banner()
 
     if articles and 0 <= current_idx < total:
         article = articles[current_idx]
@@ -361,7 +420,11 @@ def render_ai_advisory_panel(article, current_idx: int):
     """
     from src.advisory import get_ec_advisory, get_ec_advisory_status, AdvisoryStatus
     
-    protocol_version = st.session_state.get("research_protocol", {}).get("protocol_version", "1.0") if "research_protocol" in st.session_state else "1.0"
+    protocol_version = get_protocol_value(
+        st.session_state.get("research_protocol"),
+        "protocol_version",
+        "1.0"
+    )
     
     if hasattr(article, 'title'):
         title = getattr(article, 'title', '')

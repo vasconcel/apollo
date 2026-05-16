@@ -206,7 +206,8 @@ class QueueItem:
     cache_key: str
     protocol_version: str
     article_id: str
-    
+    stage: str = "ic"
+
     status: AdvisoryStatus = AdvisoryStatus.PENDING
     priority: int = 0
     
@@ -222,6 +223,7 @@ class QueueItem:
             "cache_key": self.cache_key,
             "protocol_version": self.protocol_version,
             "article_id": self.article_id,
+            "stage": self.stage,
             "status": self.status.value,
             "priority": self.priority,
             "created_at": self.created_at,
@@ -230,13 +232,14 @@ class QueueItem:
             "retry_count": self.retry_count,
             "last_error": self.last_error
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "QueueItem":
         return cls(
             cache_key=data["cache_key"],
             protocol_version=data["protocol_version"],
             article_id=data["article_id"],
+            stage=data.get("stage", "ic"),
             status=AdvisoryStatus(data.get("status", "PENDING")),
             priority=data.get("priority", 0),
             created_at=data.get("created_at", ""),

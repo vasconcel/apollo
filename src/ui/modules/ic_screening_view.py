@@ -55,32 +55,12 @@ def _get_protocol_ic_criteria_cached() -> Dict[str, str]:
 
 def _record_ic_decision(session, article, current_idx: int, decision: str):
     """
-    Record IC decision with automatic code inference from AI advisory.
-    MIRROR EC BEHAVIOR - single action, no manual code selection.
+    Record IC decision.
+    CRITICAL: Codes are assigned MANUALLY by researcher, NOT from AI.
+    Human always has final authority over AI suggestions.
     """
     original_idx = session.articles.index(article)
     session.articles[original_idx].ic_stage = decision
-
-    if decision in ("include", "exclude"):
-        article_id = getattr(article, 'article_id', f"idx_{current_idx}")
-        cached_advice = st.session_state.get(f"ic_advice_{article_id}", None)
-
-        triggered_codes = []
-        if cached_advice:
-            criterion_evals = cached_advice.get("criterion_evaluations", {})
-            for cid, eval_data in criterion_evals.items():
-                if eval_data.get("triggered", False):
-                    triggered_codes.append(cid)
-
-        if decision == "include":
-            ic_codes = ";".join(triggered_codes) if triggered_codes else "YES"
-            session.articles[original_idx].cis1 = ic_codes
-            session.articles[original_idx].ces1 = "NO"
-        else:
-            ec_codes = ";".join(triggered_codes) if triggered_codes else "N/A"
-            session.articles[original_idx].ces1 = ec_codes
-            session.articles[original_idx].cis1 = "NO"
-
     session.articles[original_idx].revisor1 = session.researcher_id
     session.record_decision(decision, notes=f"Auto-inferred from AI advisory")
 
@@ -111,19 +91,29 @@ def render_ic_screening():
         st.session_state.apollo_session.stage = "ic"
 
     session = st.session_state.apollo_session
-    
-    if "advisory_pipeline_initialized" not in st.session_state and session.articles:
+
+    if "advisory_pipeline_initialized_ic" not in st.session_state and session.articles:
         from src.advisory import initialize_advisory_pipeline
+        from src.advisory.advisory_queue import reset_queue_for_stage
+        from src.advisory.advisory_orchestrator import reset_orchestrator_for_stage
+
+        print(f"[IC SCREEN] Resetting IC pipeline state")
+        reset_queue_for_stage("ic")
+        reset_orchestrator_for_stage("ic")
+
         pv = get_protocol_value(protocol, "protocol_version", "1.0")
-        
+
+        print(f"[IC SCREEN] Initializing advisory pipeline for IC stage")
+
         result = initialize_advisory_pipeline(
             articles=session.articles,
             protocol_version=pv,
+            stage="ic",
             auto_start=True
         )
-        
-        st.session_state["advisory_pipeline_initialized"] = True
-        st.session_state["advisory_init_result"] = result
+
+        st.session_state["advisory_pipeline_initialized_ic"] = True
+        st.session_state["advisory_init_result_ic"] = result
     
     if not session.articles:
         render_upload_section(session)
@@ -257,9 +247,36 @@ def render_screening_workspace(session):
         divider()
 
         current_decision = article.ic_stage or ""
+        current_ic_code = getattr(article, 'cis1', "") or ""
+        ic_codes = get_ic_codes()
 
-        # SIMPLE SINGLE-ACTION WORKFLOW - MIRROR EC
+        st.markdown(f'''
+        <div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["cyan"]};letter-spacing:0.1em;margin-bottom:0.5rem;">
+            ▸ MANUAL CRITERIA SELECTION (HUMAN AUTHORITY)
+        </div>
+        ''', unsafe_allow_html=True)
+
+        selected_ic_manual = []
+        cols_per_row = 5
+        code_items = list(ic_codes.items())
+        for i in range(0, len(code_items), cols_per_row):
+            row_codes = code_items[i:i+cols_per_row]
+            row_cols = st.columns(cols_per_row)
+            for j, (code, desc) in enumerate(row_codes):
+                with row_cols[j]:
+                    key = f"ic_manual_{current_idx}_{code}"
+                    default_selected = code in (article.cis1 or "").split(";") if article.cis1 else False
+                    if st.checkbox(f"{code}", key=key, value=default_selected):
+                        selected_ic_manual.append(code)
+
+        manual_codes_str = ";".join(selected_ic_manual) if selected_ic_manual else ""
+
+        divider()
+
         if not current_decision:
+            if selected_ic_manual:
+                st.markdown(f'<div style="font-size:0.75rem;color:{COLORS["success"]};margin-bottom:0.5rem;">Selected: {manual_codes_str}</div>', unsafe_allow_html=True)
+
             col_excl, col_incl, col_skip = st.columns([1, 1, 1])
             with col_excl:
                 excl_clicked = st.button("EXCLUDE", type="secondary", width="stretch")
@@ -269,15 +286,23 @@ def render_screening_workspace(session):
                 skip_clicked = st.button("SKIP", width="stretch")
 
             if excl_clicked:
-                _record_ic_decision(session, article, current_idx, "exclude")
-                st.toast(f"✗ Article {current_idx + 1} EXCLUDED", icon="❌")
+                original_idx = session.articles.index(article)
+                session.articles[original_idx].ic_stage = "exclude"
+                session.articles[original_idx].cis1 = manual_codes_str if manual_codes_str else "N/A"
+                session.articles[original_idx].revisor1 = session.researcher_id
+                session.ic_completed += 1
+                st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({manual_codes_str or 'Manual'})", icon="❌")
                 if current_idx < total - 1:
                     st.session_state.ic_current_index = current_idx + 1
                 st.rerun()
 
             if incl_clicked:
-                _record_ic_decision(session, article, current_idx, "include")
-                st.toast(f"✓ Article {current_idx + 1} INCLUDED", icon="✅")
+                original_idx = session.articles.index(article)
+                session.articles[original_idx].ic_stage = "include"
+                session.articles[original_idx].cis1 = manual_codes_str if manual_codes_str else "YES"
+                session.articles[original_idx].revisor1 = session.researcher_id
+                session.ic_completed += 1
+                st.toast(f"✓ Article {current_idx + 1} INCLUDED ({manual_codes_str or 'YES'})", icon="✅")
                 if current_idx < total - 1:
                     st.session_state.ic_current_index = current_idx + 1
                 st.rerun()
@@ -290,8 +315,22 @@ def render_screening_workspace(session):
                 st.rerun()
 
         else:
-            from src.ui.components import status_badge
-            status_badge("INCLUDED" if current_decision == "include" else current_decision.upper())
+            selected_display = article.cis1 if article.ic_stage else "N/A"
+            st.markdown(f'<div style="font-size:0.75rem;color:{COLORS["text_muted"]};margin-bottom:0.5rem;">Selected criteria: {selected_display}</div>', unsafe_allow_html=True)
+
+            original_idx = session.articles.index(article)
+            col_status, col_clear = st.columns([3, 1])
+            with col_status:
+                from src.ui.components import status_badge
+                status_badge("INCLUDED" if current_decision == "include" else current_decision.upper())
+            with col_clear:
+                if st.button("CLEAR", width="stretch"):
+                    session.articles[original_idx].ic_stage = ""
+                    session.articles[original_idx].cis1 = ""
+                    session.articles[original_idx].revisor1 = ""
+                    session.ic_completed = max(0, session.ic_completed - 1)
+                    st.toast(f"↺ Article {current_idx + 1} cleared", icon="🔄")
+                    st.rerun()
 
     with st.sidebar:
         st.markdown("**PROTOCOL**")
@@ -519,10 +558,9 @@ def render_ai_advisory_panel(article, current_idx: int):
     status = get_advisory_status(title, abstract, protocol_version)
     
     with st.container(border=True):
-        with st.expander("🤖 AI ADVISORY", expanded=True):
-            st.caption(f"Status: {status.value}")
-            
+        with st.expander("🤖 AI ADVISORY", expanded=False):
             if status == AdvisoryStatus.COMPLETED and advisory.is_available():
+                st.caption(f"Status: {status.value} | Decision: {advisory.decision.value}")
                 advisory_dict = {
                     "decision": advisory.decision.value,
                     "confidence": advisory.confidence,
@@ -539,14 +577,16 @@ def render_ai_advisory_panel(article, current_idx: int):
                     "justification": advisory.justification
                 }
                 render_suggestion_details(advisory_dict)
-            elif status == AdvisoryStatus.PENDING:
-                st.info("⏳ Advisory pending generation. Run precompute or generate offline.")
-            elif status == AdvisoryStatus.PROCESSING:
-                st.info("🔄 Advisory being generated...")
-            elif status == AdvisoryStatus.FAILED:
-                st.warning(f"⚠️ Advisory generation failed: {advisory.error or 'Unknown error'}")
             else:
-                st.warning("Advisory not yet generated. Manual review required.")
+                st.caption("AI advisory unavailable — manual screening fully operational")
+                if status == AdvisoryStatus.PENDING:
+                    st.caption("⏳ Advisory pending. Screening continues without AI.")
+                elif status == AdvisoryStatus.PROCESSING:
+                    st.caption("🔄 Advisory generating...")
+                elif status == AdvisoryStatus.FAILED:
+                    st.caption(f"⚠️ Advisory failed: {advisory.error or 'Unknown'}")
+                else:
+                    st.caption("No advisory available")
 
 
 

@@ -37,12 +37,15 @@ class AdvisoryQueue:
     - Persist queue state
     """
     
-    def __init__(self, config: Optional[AdvisoryConfig] = None):
+    def __init__(self, config: Optional[AdvisoryConfig] = None, stage: str = "ic"):
         self.config = config or AdvisoryConfig()
-        self._queue_path = Path(self.config.queue_state_path)
-        
+        self._stage = stage
+        self._queue_path = Path(f"data/cache/queue_state_{stage}.json")
+
         self._state: Optional[QueueState] = None
-        
+
+        print(f"[QUEUE INIT] Stage: {stage} | Path: {self._queue_path}")
+
         if self.config.enable_queue_state:
             self._queue_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -57,19 +60,29 @@ class AdvisoryQueue:
         self,
         articles: List,
         protocol_version: str = "1.0",
+        stage: str = "ic",
         skip_existing: bool = True
     ) -> QueueState:
         """
         Build queue from article list.
-        
+
         Args:
             articles: List of article objects
             protocol_version: Protocol version to use
+            stage: Advisory stage (ec or ic) - MUST be valid
             skip_existing: Skip articles with existing advisories
-            
+
         Returns:
             QueueState with populated items
+
+        Raises:
+            ValueError: If stage is not explicitly "ec" or "ic"
         """
+        if stage not in ("ec", "ic"):
+            raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+
+        print(f"[QUEUE BUILD] Stage: {stage}")
+
         existing_keys = set()
         if skip_existing:
             cache = get_advisory_cache()
@@ -113,6 +126,7 @@ class AdvisoryQueue:
                 cache_key=cache_key,
                 protocol_version=protocol_version,
                 article_id=article_id,
+                stage=stage,
                 status=AdvisoryStatus.PENDING,
                 priority=idx
             )
@@ -144,9 +158,17 @@ class AdvisoryQueue:
         pending = self.get_pending()
         if not pending:
             return None
-        
+
         pending.sort(key=lambda x: (x.priority, x.created_at))
-        return pending[0]
+        item = pending[0]
+
+        print(f"[QUEUE POP] QueueStage: {self._stage} | ItemStage: {item.stage}")
+
+        if item.stage != self._stage:
+            print(f"[QUEUE DATA-PLANE VIOLATION] Queue stage={self._stage} != Item stage={item.stage}")
+            raise RuntimeError(f"Queue contains invalid stage item: queue stage={self._stage}, item stage={item.stage}")
+
+        return item
     
     def mark_processing(self, item: QueueItem) -> None:
         """Mark item as processing."""
@@ -267,34 +289,140 @@ class AdvisoryQueue:
             self._queue_path.unlink()
 
 
-_global_queue: Optional[AdvisoryQueue] = None
+_global_queue_ec: Optional[AdvisoryQueue] = None
+_global_queue_ic: Optional[AdvisoryQueue] = None
 
 
-def get_advisory_queue(config: Optional[AdvisoryConfig] = None) -> AdvisoryQueue:
-    """Get global advisory queue instance."""
-    global _global_queue
-    if _global_queue is None:
-        _global_queue = AdvisoryQueue(config)
-    return _global_queue
+def lookup_queue(stage: str = "ic") -> Optional[AdvisoryQueue]:
+    """
+    PURE READ-ONLY queue lookup - NEVER creates runtime.
+
+    Args:
+        stage: Advisory stage
+
+    Returns:
+        Existing queue instance or None if not initialized
+
+    Raises:
+        ValueError: If stage is invalid
+    """
+    if stage not in ("ec", "ic"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+
+    print(f"[LOOKUP QUEUE] Stage: {stage}")
+
+    global _global_queue_ec, _global_queue_ic
+
+    if stage.lower() == "ec":
+        if _global_queue_ec is None:
+            print(f"[LOOKUP QUEUE] Stage: ec | MISSING")
+            return None
+        print(f"[LOOKUP QUEUE] Stage: ec | FOUND")
+        return _global_queue_ec
+    else:
+        if _global_queue_ic is None:
+            print(f"[LOOKUP QUEUE] Stage: ic | MISSING")
+            return None
+        print(f"[LOOKUP QUEUE] Stage: ic | FOUND")
+        return _global_queue_ic
+
+
+def get_advisory_queue(config: Optional[AdvisoryConfig] = None, stage: str = "ic") -> AdvisoryQueue:
+    """
+    Get stage-scoped advisory queue instance - CREATES if absent.
+
+    Args:
+        config: Optional configuration
+        stage: Advisory stage - MUST be "ec" or "ic"
+
+    Returns:
+        AdvisoryQueue instance for the specified stage
+
+    Raises:
+        ValueError: If stage is not explicitly "ec" or "ic"
+    """
+    if stage not in ("ec", "ic"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+
+    print(f"[QUEUE FACTORY] Requested Stage: {stage}")
+
+    global _global_queue_ec, _global_queue_ic
+
+    stage_lower = stage.lower()
+    if stage_lower == "ec":
+        if _global_queue_ec is None:
+            print(f"[QUEUE CREATE] Stage: ec")
+            _global_queue_ec = AdvisoryQueue(config, stage="ec")
+        else:
+            print(f"[QUEUE REUSE] Stage: ec")
+        return _global_queue_ec
+    else:
+        if _global_queue_ic is None:
+            print(f"[QUEUE CREATE] Stage: ic")
+            _global_queue_ic = AdvisoryQueue(config, stage="ic")
+        else:
+            print(f"[QUEUE REUSE] Stage: ic")
+        return _global_queue_ic
+
+
+def reset_queue_for_stage(stage: str = "ic"):
+    """Reset queue for specific stage - clears memory and disk state."""
+    global _global_queue_ec, _global_queue_ic
+    stage_lower = stage.lower()
+    if stage_lower == "ec":
+        _global_queue_ec = None
+        print(f"[QUEUE RESET] Stage: ec (memory released)")
+    else:
+        _global_queue_ic = None
+        print(f"[QUEUE RESET] Stage: ic (memory released)")
+
+    queue_path = Path(f"data/cache/advisory_queue_{stage_lower}.json")
+    if queue_path.exists():
+        queue_path.unlink()
+        print(f"[QUEUE RESET] Stage: {stage} (disk cleared)")
+
+
+def clear_queue_items(stage: str = "ic"):
+    """Clear all items from queue for specific stage (keeps queue object)."""
+    queue = get_advisory_queue(stage=stage)
+    if hasattr(queue, '_state'):
+        queue._state = queue._state.__class__()
+        print(f"[QUEUE CLEAR] Stage: {stage} (items cleared, state reset)")
 
 
 def build_queue(
     articles: List,
     protocol_version: str = "1.0",
+    stage: str = "ic",
     skip_existing: bool = True
 ) -> QueueState:
     """Build advisory queue from articles."""
-    queue = get_advisory_queue()
-    return queue.build_from_articles(articles, protocol_version, skip_existing)
+    if stage not in ("ec", "ic"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    queue = get_advisory_queue(stage=stage)
+    print(f"[QUEUE BUILD] Built for stage: {stage}")
+    return queue.build_from_articles(articles, protocol_version, stage, skip_existing)
 
 
-def get_queue_stats() -> Dict:
-    """Get queue statistics."""
-    queue = get_advisory_queue()
+def get_queue_stats(stage: str = "ic") -> Dict:
+    """
+    Get queue statistics for specific stage.
+    READ-ONLY - uses lookup to never create runtime.
+    """
+    if stage not in ("ec", "ic"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    print(f"[QUEUE STATS] Lookup for stage: {stage}")
+    queue = lookup_queue(stage=stage)
+    if queue is None:
+        print(f"[QUEUE STATS] Stage: {stage} | NOT INITIALIZED")
+        return {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
     return queue.get_stats()
 
 
-def reset_failed_advisories() -> int:
+def reset_failed_advisories(stage: str = "ic") -> int:
     """Reset failed items for retry."""
-    queue = get_advisory_queue()
+    if stage not in ("ec", "ic"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    print(f"[QUEUE RESET FAILED] For stage: {stage}")
+    queue = get_advisory_queue(stage=stage)
     return queue.reset_failed()

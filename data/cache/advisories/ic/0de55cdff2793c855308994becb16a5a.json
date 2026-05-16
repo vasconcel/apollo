@@ -1,0 +1,36 @@
+{
+  "cache_key": "0de55cdff2793c855308994becb16a5a",
+  "protocol_version": "1.0",
+  "decision": "EXCLUDE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "IC1",
+      "criterion_name": "IC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "IC2",
+      "criterion_name": "IC2",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "IC3",
+      "criterion_name": "IC3",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "The article does not provide sufficient information to assess its relevance to the research question, as the title, authors, and abstract are not available. The literature type is white literature, but this is not enough to determine its relevance to software industry context or empirical findings. Therefore, the article is excluded due to lack of information.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-16T21:36:44.247067",
+  "generation_duration_ms": 2745.5544471740723
+}

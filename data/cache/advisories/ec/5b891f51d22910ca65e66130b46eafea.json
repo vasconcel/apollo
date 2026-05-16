@@ -1,0 +1,16 @@
+{
+  "cache_key": "5b891f51d22910ca65e66130b46eafea",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 0.9,
+  "triggered_criteria": [
+    "PICO"
+  ],
+  "criterion_evaluations": [],
+  "justification": "Test",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": null,
+  "generation_duration_ms": null
+}

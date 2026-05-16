@@ -1,0 +1,40 @@
+{
+  "cache_key": "35d36ceae49bbbee3f168fb46de8ddaf",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "EC1",
+      "criterion_name": "EC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC2",
+      "criterion_name": "EC2",
+      "satisfied": false,
+      "evidence": [
+        "Cannot be evaluated at Title/Abstract screening stage. Proceeding with metadata analysis."
+      ],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC6",
+      "criterion_name": "EC6",
+      "satisfied": false,
+      "evidence": [
+        "Handled by system deterministic engine."
+      ],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "No exclusion criteria are met based on the provided metadata. The literature type is White Literature, which is peer-reviewed, but no exclusion criteria related to peer-review or publication type can be triggered for White Literature sources. The year is not provided, but since the critical year rule only excludes papers with year less than 2015, and we cannot determine the year, we proceed with the analysis.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-16T22:00:20.858302",
+  "generation_duration_ms": 2338.557720184326
+}

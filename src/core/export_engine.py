@@ -111,8 +111,14 @@ class ExportEngine:
         gl_articles = session.get_gl_articles()
         
         wl_columns = ["Library", "Global_ID", "Local_ID", "Title", "Abstract", "Keywords",
-                      "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision"]
-        gl_columns = ["Posicao", "Title", "URL", "Source_File", "Revisor 1 EC", "Revisor 1 IC", "Decision"]
+                      "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision",
+                      "Applied_By", "Advisory_Available", "Advisory_Status", "Advisory_Failure_Type",
+                      "AI_Suggested_EC", "AI_Suggested_IC", "Human_Final_Decision",
+                      "Advisory_Generated_At", "Advisory_Cache_Key"]
+        gl_columns = ["Posicao", "Title", "URL", "Source_File", "Revisor 1 EC", "Revisor 1 IC", "Decision",
+                      "Applied_By", "Advisory_Available", "Advisory_Status", "Advisory_Failure_Type",
+                      "AI_Suggested_EC", "AI_Suggested_IC", "Human_Final_Decision",
+                      "Advisory_Generated_At", "Advisory_Cache_Key"]
         
         workbook = xlsxwriter.Workbook(output_path)
         
@@ -200,7 +206,27 @@ class ExportEngine:
             ws_wl.write(row_idx, 10, "", wl_format_data)
             ws_wl.write(row_idx, 11, "", wl_format_data)
             ws_wl.write(row_idx, 12, final_dec, wl_format_data)
-            
+
+            applied_by = self._get_applied_by(article)
+            advisory_available = self._is_advisory_available(article)
+            ai_suggested_ec = self._get_ai_suggested_ec(article)
+            ai_suggested_ic = self._get_ai_suggested_ic(article)
+            advisory_status = self._get_advisory_status(article)
+            failure_type = self._get_failure_type(article)
+            human_final_decision = final_dec
+            generated_at = self._get_generated_at(article)
+            cache_key = self._get_cache_key(article)
+
+            ws_wl.write(row_idx, 13, applied_by, wl_format_data)
+            ws_wl.write(row_idx, 14, advisory_available, wl_format_data)
+            ws_wl.write(row_idx, 15, advisory_status, wl_format_data)
+            ws_wl.write(row_idx, 16, failure_type, wl_format_data)
+            ws_wl.write(row_idx, 17, ai_suggested_ec, wl_format_data)
+            ws_wl.write(row_idx, 18, ai_suggested_ic, wl_format_data)
+            ws_wl.write(row_idx, 19, human_final_decision, wl_format_data)
+            ws_wl.write(row_idx, 20, generated_at, wl_format_data)
+            ws_wl.write(row_idx, 21, cache_key[:16], wl_format_data)
+
             row_idx += 1
         
         ws_gl = workbook.add_worksheet("GL")
@@ -251,7 +277,27 @@ class ExportEngine:
             ws_gl.write(row_idx, 5, cis1_value, ic_format)
             
             ws_gl.write(row_idx, 6, final_dec, gl_format_data)
-            
+
+            applied_by = self._get_applied_by(article)
+            advisory_available = self._is_advisory_available(article)
+            ai_suggested_ec = self._get_ai_suggested_ec(article)
+            ai_suggested_ic = self._get_ai_suggested_ic(article)
+            advisory_status = self._get_advisory_status(article)
+            failure_type = self._get_failure_type(article)
+            human_final_decision = final_dec
+            generated_at = self._get_generated_at(article)
+            cache_key = self._get_cache_key(article)
+
+            ws_gl.write(row_idx, 7, applied_by, gl_format_data)
+            ws_gl.write(row_idx, 8, advisory_available, gl_format_data)
+            ws_gl.write(row_idx, 9, advisory_status, gl_format_data)
+            ws_gl.write(row_idx, 10, failure_type, gl_format_data)
+            ws_gl.write(row_idx, 11, ai_suggested_ec, gl_format_data)
+            ws_gl.write(row_idx, 12, ai_suggested_ic, gl_format_data)
+            ws_gl.write(row_idx, 13, human_final_decision, gl_format_data)
+            ws_gl.write(row_idx, 14, generated_at, gl_format_data)
+            ws_gl.write(row_idx, 15, cache_key[:16], gl_format_data)
+
             row_idx += 1
         
         workbook.close()
@@ -264,12 +310,129 @@ class ExportEngine:
             return "EXCLUDE"
         if article.ic_stage in ["", "exclude"]:
             return "EXCLUDE"
-        
+
         if article.ec_stage == "needs_discussion" or article.ic_stage == "needs_discussion":
             return "NEEDS_DISCUSSION"
-        
+
         return "INCLUDE"
-    
+
+    def _get_ai_suggested_ec(self, article) -> str:
+        """Extract AI suggested EC criteria from LLM suggestion."""
+        suggestion = getattr(article, 'ec_llm_suggestion', None)
+        if not suggestion:
+            return ""
+        triggered = suggestion.get("triggered_criteria", [])
+        return ";".join(triggered) if triggered else ""
+
+    def _get_ai_suggested_ic(self, article) -> str:
+        """Extract AI suggested IC criteria from LLM suggestion."""
+        suggestion = getattr(article, 'ic_llm_suggestion', None)
+        if not suggestion:
+            return ""
+        triggered = suggestion.get("triggered_criteria", [])
+        return ";".join(triggered) if triggered else ""
+
+    def _get_advisory_status(self, article) -> str:
+        """Determine advisory status for export."""
+        ec_suggestion = getattr(article, 'ec_llm_suggestion', None)
+        ic_suggestion = getattr(article, 'ic_llm_suggestion', None)
+
+        if ec_suggestion or ic_suggestion:
+            if ec_suggestion and ec_suggestion.get("error"):
+                return "FAILED"
+            if ic_suggestion and ic_suggestion.get("error"):
+                return "FAILED"
+            return "COMPLETED"
+        return "UNAVAILABLE"
+
+    def _get_human_override(self, article, ai_suggested_ec: str, ai_suggested_ic: str) -> str:
+        """Determine if human overrode AI suggestion."""
+        if not ai_suggested_ec and not ai_suggested_ic:
+            return "FALSE"
+
+        human_ec = getattr(article, 'ces1', "") or ""
+        human_ic = getattr(article, 'cis1', "") or ""
+
+        if human_ec and human_ec not in ["", "NO", "PENDING"]:
+            if ai_suggested_ec:
+                ai_codes = set(ai_suggested_ec.split(";"))
+                human_codes = set(human_ec.split(";"))
+                if human_codes != ai_codes:
+                    return "TRUE"
+
+        if human_ic and human_ic not in ["", "NO", "PENDING"]:
+            if ai_suggested_ic:
+                ai_codes = set(ai_suggested_ic.split(";"))
+                human_codes = set(human_ic.split(";"))
+                if human_codes != ai_codes:
+                    return "TRUE"
+
+        return "FALSE"
+
+    def _get_applied_by(self, article) -> str:
+        """Determine if codes were applied by human or AI-assisted."""
+        ec_suggestion = getattr(article, 'ec_llm_suggestion', None)
+        ic_suggestion = getattr(article, 'ic_llm_suggestion', None)
+
+        has_advisory = bool(ec_suggestion or ic_suggestion)
+        has_human_codes = bool(getattr(article, 'ces1', "") or getattr(article, 'cis1', ""))
+
+        if not has_human_codes:
+            return "Human"
+
+        if has_advisory:
+            return "Human+AI-Assisted"
+        return "Human"
+
+    def _is_advisory_available(self, article) -> str:
+        """Check if advisory is available."""
+        ec_suggestion = getattr(article, 'ec_llm_suggestion', None)
+        ic_suggestion = getattr(article, 'ic_llm_suggestion', None)
+        return "True" if (ec_suggestion or ic_suggestion) else "False"
+
+    def _get_failure_type(self, article) -> str:
+        """Extract failure type from advisory error."""
+        ec_suggestion = getattr(article, 'ec_llm_suggestion', None)
+        ic_suggestion = getattr(article, 'ic_llm_suggestion', None)
+
+        suggestion = ic_suggestion or ec_suggestion
+        if not suggestion:
+            return ""
+
+        error = suggestion.get("error", "")
+        if not error:
+            return ""
+
+        for ft in ["INVALID_JSON", "MISSING_FIELDS", "INVALID_STATUS", "EMPTY_RESPONSE",
+                   "MARKDOWN_WRAPPED", "SCHEMA_MISMATCH", "RATE_LIMIT", "NETWORK_ERROR",
+                   "TIMEOUT", "LLM_UNAVAILABLE", "PARSE_ERROR", "UNKNOWN"]:
+            if ft in error:
+                return ft
+
+        return "UNKNOWN"
+
+    def _get_generated_at(self, article) -> str:
+        """Extract generation timestamp from advisory."""
+        ic_suggestion = getattr(article, 'ic_llm_suggestion', None)
+        ec_suggestion = getattr(article, 'ec_llm_suggestion', None)
+
+        suggestion = ic_suggestion or ec_suggestion
+        if not suggestion:
+            return ""
+
+        return suggestion.get("generated_at", suggestion.get("timestamp", ""))
+
+    def _get_cache_key(self, article) -> str:
+        """Extract cache key from advisory."""
+        ic_suggestion = getattr(article, 'ic_llm_suggestion', None)
+        ec_suggestion = getattr(article, 'ec_llm_suggestion', None)
+
+        suggestion = ic_suggestion or ec_suggestion
+        if not suggestion:
+            return ""
+
+        return suggestion.get("cache_key", "")
+
     def export_session_json(
         self,
         session,

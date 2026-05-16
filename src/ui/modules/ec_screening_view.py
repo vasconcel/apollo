@@ -95,19 +95,29 @@ def render_ec_screening():
         st.session_state.apollo_session.stage = "ec"
 
     session = st.session_state.apollo_session
-    
-    if "advisory_pipeline_initialized" not in st.session_state and session.articles:
+
+    if "advisory_pipeline_initialized_ec" not in st.session_state and session.articles:
         from src.advisory import initialize_advisory_pipeline
+        from src.advisory.advisory_queue import reset_queue_for_stage
+        from src.advisory.advisory_orchestrator import reset_orchestrator_for_stage
+
+        print(f"[EC SCREEN] Resetting EC pipeline state")
+        reset_queue_for_stage("ec")
+        reset_orchestrator_for_stage("ec")
+
         pv = get_protocol_value(protocol, "protocol_version", "1.0")
-        
+
+        print(f"[EC SCREEN] Initializing advisory pipeline for EC stage")
+
         result = initialize_advisory_pipeline(
             articles=session.articles,
             protocol_version=pv,
+            stage="ec",
             auto_start=True
         )
-        
-        st.session_state["advisory_pipeline_initialized"] = True
-        st.session_state["advisory_init_result"] = result
+
+        st.session_state["advisory_pipeline_initialized_ec"] = True
+        st.session_state["advisory_init_result_ec"] = result
 
     if not session.articles:
         render_upload_section(session)
@@ -209,9 +219,38 @@ def render_screening_workspace(session):
 
         current_decision = article.ec_stage or ""
         current_ec_code = article.ces1 or ""
+        current_ic_code = article.cis1 or ""
         ec_codes = get_ec_codes()
-        
+
+        st.markdown(f'''
+        <div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:{COLORS["cyan"]};letter-spacing:0.1em;margin-bottom:0.5rem;">
+            ▸ MANUAL CRITERIA SELECTION (HUMAN AUTHORITY)
+        </div>
+        ''', unsafe_allow_html=True)
+
+        selected_ec_manual = []
+        cols_per_row = 5
+        code_items = list(ec_codes.items())
+        for i in range(0, len(code_items), cols_per_row):
+            row_codes = code_items[i:i+cols_per_row]
+            row_cols = st.columns(cols_per_row)
+            for j, (code, desc) in enumerate(row_codes):
+                with row_cols[j]:
+                    key = f"ec_manual_{current_idx}_{code}"
+                    default_selected = code in (article.ces1 or "").split(";") if article.ces1 else False
+                    if st.checkbox(f"{code}", key=key, value=default_selected):
+                        selected_ec_manual.append(code)
+
+        manual_codes_str = ";".join(selected_ec_manual) if selected_ec_manual else ""
+        article.ces1 = manual_codes_str
+        article.cis1 = "NO" if manual_codes_str else ""
+
+        divider()
+
         if not current_decision:
+            if selected_ec_manual:
+                st.markdown(f'<div style="font-size:0.75rem;color:{COLORS["error"]};margin-bottom:0.5rem;">Selected: {manual_codes_str}</div>', unsafe_allow_html=True)
+
             col_excl, col_incl, col_skip = st.columns([1, 1, 1])
             with col_excl:
                 excl_clicked = st.button("EXCLUDE", type="secondary", width="stretch")
@@ -219,22 +258,29 @@ def render_screening_workspace(session):
                 incl_clicked = st.button("INCLUDE", type="primary", width="stretch")
             with col_skip:
                 skip_clicked = st.button("SKIP", width="stretch")
-            
+
             if excl_clicked:
                 article.ec_stage = "exclude"
-                st.session_state[f"ec_show_codes_{current_idx}"] = "exclude"
+                article.ces1 = manual_codes_str if manual_codes_str else ""
+                article.cis1 = "NO"
+                article.revisor1 = session.researcher_id
+                session.ec_completed += 1
+                st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({manual_codes_str or 'Manual'})", icon="❌")
+                if current_idx < total - 1:
+                    session.current_index = current_idx + 1
                 st.rerun()
-            
+
             if incl_clicked:
-                session.record_decision("include", notes="")
-                article.cis1 = "PENDING"
+                article.ec_stage = "include"
+                article.cis1 = "YES"
                 article.ces1 = "NO"
                 article.revisor1 = session.researcher_id
+                session.ec_completed += 1
                 st.toast(f"✓ Article {current_idx + 1} INCLUDED", icon="✅")
                 if current_idx < total - 1:
                     session.current_index = current_idx + 1
                 st.rerun()
-            
+
             if skip_clicked:
                 session.record_decision("skip", notes="")
                 st.toast(f"→ Article {current_idx + 1} SKIPPED", icon="⏭️")
@@ -242,23 +288,10 @@ def render_screening_workspace(session):
                     session.current_index = current_idx + 1
                 st.rerun()
         
-        elif current_decision == "exclude" and not current_ec_code:
-            st.markdown(f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.7rem;color:{COLORS["error"]};margin-bottom:0.5rem;">▸ SELECT EXCLUSION CODE</div>', unsafe_allow_html=True)
-            
-            code_cols = st.columns(len(ec_codes))
-            for i, (code, desc) in enumerate(ec_codes.items()):
-                with code_cols[i]:
-                    if st.button(f"[{code}]", key=f"ec_code_{current_idx}_{code}", width="stretch"):
-                        article.ces1 = code
-                        article.cis1 = "NO"
-                        article.revisor1 = session.researcher_id
-                        session.ec_completed += 1
-                        st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({code})", icon="❌")
-                        if current_idx < total - 1:
-                            session.current_index = current_idx + 1
-                        st.rerun()
-        
         else:
+            selected_display = article.ces1 if article.ec_stage == "exclude" else "N/A"
+            st.markdown(f'<div style="font-size:0.75rem;color:{COLORS["text_muted"]};margin-bottom:0.5rem;">Selected criteria: {selected_display}</div>', unsafe_allow_html=True)
+
             col_status, col_clear = st.columns([3, 1])
             with col_status:
                 status_badge("EXCLUDED" if current_decision == "exclude" else current_decision.upper())
@@ -414,33 +447,54 @@ def render_article_card(article, index: int):
 def render_ai_advisory_panel(article, current_idx: int):
     """
     Render AI Advisory Panel using centralized cache.
-    
+
     STRICT ISOLATION: This function ONLY renders - never generates advisories.
     UI MUST NEVER call LLM directly or generate advisories.
     """
     from src.advisory import get_ec_advisory, get_ec_advisory_status, AdvisoryStatus
-    
+    from src.advisory.advisory_cache import get_advisory_cache
+
     protocol_version = get_protocol_value(
         st.session_state.get("research_protocol"),
         "protocol_version",
         "1.0"
     )
-    
+
     if hasattr(article, 'title'):
         title = getattr(article, 'title', '')
         abstract = getattr(article, 'abstract', '')
     else:
         title = article.get("title", "") if hasattr(article, 'get') else ""
         abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
-    
+
+    print(f"[UI ADVISORY LOOKUP] Stage: ec | Title: {title[:50]} | Abstract: {abstract[:50] if abstract else 'empty'}...")
+    print(f"[UI ADVISORY LOOKUP] Article ID: {getattr(article, 'article_id', 'N/A')}")
+
+    cache = get_advisory_cache()
+    ui_cache_key = cache.compute_cache_key(title, abstract, protocol_version)
+    print(f"[UI ADVISORY LOOKUP] UICacheKey: {ui_cache_key} | Protocol: {protocol_version}")
+
+    # Check what's in the queue for this article
+    from src.advisory.advisory_queue import get_advisory_queue
+    queue = get_advisory_queue(stage='ec')
+    matching_items = [item for item in queue.state.items if item.article_id == getattr(article, 'article_id', None)]
+    if matching_items:
+        queue_key = matching_items[0].cache_key
+        print(f"[UI ADVISORY LOOKUP] QueueCacheKey: {queue_key} | Match: {ui_cache_key == queue_key}")
+    else:
+        print(f"[UI ADVISORY LOOKUP] No matching queue item for article")
+
     advisory = get_ec_advisory(title, abstract, protocol_version)
     status = get_ec_advisory_status(title, abstract, protocol_version)
+
+    print(f"[UI ADVISORY LOAD] Status: {status} | Advisory: {advisory}")
     
     with st.container(border=True):
-        with st.expander("🤖 AI ADVISORY", expanded=True):
-            st.caption(f"Status: {status.value}")
-            
+        with st.expander("🤖 AI ADVISORY", expanded=False):
+            print(f"[UI ADVISORY CHECK] Status: {status} == COMPLETED: {status == AdvisoryStatus.COMPLETED} | is_available: {advisory.is_available()}")
+
             if status == AdvisoryStatus.COMPLETED and advisory.is_available():
+                st.caption(f"Status: {status.value} | Decision: {advisory.decision.value}")
                 advisory_dict = {
                     "decision": advisory.decision.value,
                     "confidence": advisory.confidence,
@@ -457,14 +511,17 @@ def render_ai_advisory_panel(article, current_idx: int):
                     "justification": advisory.justification
                 }
                 render_suggestion_details(advisory_dict)
-            elif status == AdvisoryStatus.PENDING:
-                st.info("⏳ Advisory pending generation. Run precompute or generate offline.")
-            elif status == AdvisoryStatus.PROCESSING:
-                st.info("🔄 Advisory being generated...")
-            elif status == AdvisoryStatus.FAILED:
-                st.warning(f"⚠️ Advisory generation failed: {advisory.error or 'Unknown error'}")
             else:
-                st.warning("Advisory not yet generated. Manual review required.")
+                print(f"[UI ADVISORY FALLBACK] Status: {status} | Decision: {advisory.decision if hasattr(advisory, 'decision') else 'N/A'}")
+                st.caption("AI advisory unavailable — manual screening fully operational")
+                if status == AdvisoryStatus.PENDING:
+                    st.caption("⏳ Advisory pending. Screening continues without AI.")
+                elif status == AdvisoryStatus.PROCESSING:
+                    st.caption("🔄 Advisory generating...")
+                elif status == AdvisoryStatus.FAILED:
+                    st.caption(f"⚠️ Advisory failed: {advisory.error or 'Unknown'}")
+                else:
+                    st.caption("No advisory available")
 
 
 

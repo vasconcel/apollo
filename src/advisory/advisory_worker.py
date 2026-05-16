@@ -6,6 +6,7 @@ This module provides:
 - Rate limiting and throttling
 - Retry logic with exponential backoff
 - Progress tracking and persistence
+- Full observability and failure diagnostics
 
 This is the ONLY module that should invoke LLM generation.
 UI modules must NEVER call LLM directly.
@@ -15,9 +16,38 @@ import os
 import sys
 import time
 import random
+import json
+import re
+import traceback
+import hashlib
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+
+def safe_preview(value: Any, limit: int = 500) -> str:
+    """
+    Safe debug serialization for arbitrary objects.
+    NEVER raises - always returns a string.
+    """
+    if value is None:
+        return "(None)"
+    try:
+        if isinstance(value, str):
+            return value[:limit] if len(value) > limit else value
+        if isinstance(value, dict):
+            return json.dumps(value, default=str)[:limit]
+        if isinstance(value, list):
+            return json.dumps(value, default=str)[:limit]
+        result = json.dumps(value, default=str, ensure_ascii=False)
+        return result[:limit] if len(result) > limit else result
+    except Exception:
+        try:
+            return str(value)[:limit]
+        except Exception:
+            return f"<unserializable: {type(value).__name__}>"
+
 
 from .advisory_models import (
     AdvisoryResult,
@@ -30,6 +60,297 @@ from .advisory_models import (
 )
 from .advisory_queue import get_advisory_queue
 from .advisory_cache import get_advisory_cache, store_advisory
+
+
+class AdvisoryFailureType(str, Enum):
+    """Taxonomy of advisory generation failures."""
+    INVALID_JSON = "INVALID_JSON"
+    MISSING_FIELDS = "MISSING_FIELDS"
+    INVALID_STATUS = "INVALID_STATUS"
+    EMPTY_RESPONSE = "EMPTY_RESPONSE"
+    MARKDOWN_WRAPPED = "MARKDOWN_WRAPPED"
+    SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
+    RATE_LIMIT = "RATE_LIMIT"
+    NETWORK_ERROR = "NETWORK_ERROR"
+    TIMEOUT = "TIMEOUT"
+    LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
+    PARSE_ERROR = "PARSE_ERROR"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class AdvisoryParseResult:
+    """Result of advisory parsing with full diagnostics."""
+    success: bool
+    failure_type: Optional[AdvisoryFailureType] = None
+    failure_reason: str = ""
+    raw_response: str = ""
+    normalized_response: Dict[str, Any] = field(default_factory=dict)
+    cache_key: str = ""
+    article_id: str = ""
+    protocol_version: str = "1.0"
+    stage: str = "IC"
+    timestamp: str = ""
+    model_used: str = ""
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+def _get_advisory_failure_log_path() -> Path:
+    """Get path for advisory failure logs."""
+    base_path = Path("data/logs/advisory_failures")
+    base_path.mkdir(parents=True, exist_ok=True)
+    return base_path
+
+
+def _persist_failure_artifact(parse_result: AdvisoryParseResult):
+    """Persist failure artifact to disk for debugging."""
+    try:
+        log_path = _get_advisory_failure_log_path()
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"failure_{parse_result.article_id}_{timestamp}.json"
+        filepath = log_path / filename
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(parse_result.to_dict(), f, indent=2, ensure_ascii=False)
+
+        print(f"  [PERSISTED] Failure artifact: {filepath.name}")
+    except Exception as e:
+        print(f"  [WARNING] Failed to persist failure artifact: {e}")
+
+
+def _log_advisory_debug(parse_result: AdvisoryParseResult):
+    """Log structured advisory debug information."""
+    print(f"\n{'='*60}")
+    print("[ADVISORY DEBUG]")
+    print(f"{'='*60}")
+    print(f"Article ID: {parse_result.article_id}")
+    print(f"Stage: {parse_result.stage}")
+    print(f"Protocol Version: {parse_result.protocol_version}")
+    print(f"Cache Key: {safe_preview(parse_result.cache_key, 20)}")
+
+    print(f"\nRAW RESPONSE")
+    print(f"------------------------------------------------------------")
+    print(safe_preview(parse_result.raw_response, 500))
+
+    print(f"\nNORMALIZED RESPONSE")
+    print(f"------------------------------------------------------------")
+    print(safe_preview(parse_result.normalized_response, 500))
+
+    print(f"\nPARSE STATUS")
+    print(f"------------------------------------------------------------")
+    print(f"SUCCESS" if parse_result.success else f"FAILED: {parse_result.failure_type.value}")
+
+    if parse_result.failure_reason:
+        print(f"\nFAILURE REASON")
+        print(f"------------------------------------------------------------")
+        print(parse_result.failure_reason)
+
+    print(f"\nFINAL STATUS")
+    print(f"------------------------------------------------------------")
+    print(f"COMPLETED" if parse_result.success else "FAILED")
+
+    if parse_result.model_used:
+        print(f"\nMODEL")
+        print(f"------------------------------------------------------------")
+        print(parse_result.model_used)
+
+    print(f"{'='*60}\n")
+
+
+def normalize_suggestion_response(suggestion: Any) -> tuple[Dict[str, Any], Optional[AdvisoryFailureType], str]:
+    """
+    Normalize LLM response to ensure consistent dict structure.
+    Handles all edge cases: raw string, markdown JSON, dict, malformed JSON.
+    Returns: (normalized_dict, failure_type, failure_reason)
+    """
+    if suggestion is None:
+        return _empty_suggestion_dict(), AdvisoryFailureType.EMPTY_RESPONSE, "Empty suggestion object"
+
+    if isinstance(suggestion, dict):
+        if not suggestion:
+            return _empty_suggestion_dict(), AdvisoryFailureType.EMPTY_RESPONSE, "Empty dict suggestion"
+        validation_result = _validate_response_schema(suggestion)
+        return suggestion, validation_result[0], validation_result[1]
+
+    if isinstance(suggestion, str):
+        return _parse_string_response_with_diagnostics(suggestion)
+
+    try:
+        result = suggestion.to_dict()
+        validation_result = _validate_response_schema(result)
+        return result, validation_result[0], validation_result[1]
+    except (AttributeError, TypeError) as e:
+        return _empty_suggestion_dict(), AdvisoryFailureType.PARSE_ERROR, f"to_dict() failed: {str(e)}"
+
+
+DECISION_NORMALIZATION_MAP = {
+    "exclude": "EXCLUDE",
+    "reject": "EXCLUDE",
+    "rejected": "EXCLUDE",
+    "no": "EXCLUDE",
+    "out": "EXCLUDE",
+    "include": "INCLUDE",
+    "accept": "INCLUDE",
+    "accepted": "INCLUDE",
+    "yes": "INCLUDE",
+    "in": "INCLUDE",
+    "skip": "SKIP",
+    "skipped": "SKIP",
+    "uncertain": "UNAVAILABLE",
+    "unclear": "UNAVAILABLE",
+    "review": "UNAVAILABLE",
+    "unavailable": "UNAVAILABLE",
+    "unavailable": "UNAVAILABLE",
+}
+
+
+def normalize_decision(decision_value: Any) -> str:
+    """Normalize decision value to canonical enum string."""
+    if decision_value is None:
+        return "UNAVAILABLE"
+
+    decision_str = str(decision_value).strip().lower()
+
+    if decision_str in DECISION_NORMALIZATION_MAP:
+        return DECISION_NORMALIZATION_MAP[decision_str]
+
+    if decision_str.upper() in ["INCLUDE", "EXCLUDE", "SKIP", "UNAVAILABLE"]:
+        return decision_str.upper()
+
+    return "UNAVAILABLE"
+
+
+def _validate_response_schema(response: Dict[str, Any]) -> tuple[Optional[AdvisoryFailureType], str]:
+    """Validate response has required schema fields."""
+    required_fields = ["decision", "confidence"]
+    missing = [f for f in required_fields if f not in response]
+
+    if missing:
+        return AdvisoryFailureType.MISSING_FIELDS, f"Missing fields: {missing}"
+
+    normalized_decision = normalize_decision(response.get("decision"))
+
+    if normalized_decision not in ["INCLUDE", "EXCLUDE", "SKIP", "UNAVAILABLE"]:
+        return AdvisoryFailureType.INVALID_STATUS, f"Invalid decision value: {response.get('decision')}"
+
+    try:
+        conf = float(response.get("confidence", 0))
+        if not (0.0 <= conf <= 1.0):
+            return AdvisoryFailureType.SCHEMA_MISMATCH, f"Confidence out of range: {conf}"
+    except (ValueError, TypeError):
+        return AdvisoryFailureType.SCHEMA_MISMATCH, "Confidence not a valid number"
+
+    return None, ""
+
+
+def _parse_string_response_with_diagnostics(content: str) -> tuple[Dict[str, Any], Optional[AdvisoryFailureType], str]:
+    """Parse string response with robust fallback and diagnostics."""
+    if not content or not content.strip():
+        return _empty_suggestion_dict(), AdvisoryFailureType.EMPTY_RESPONSE, "Empty string response"
+
+    original_content = content
+    content = content.strip()
+
+    is_markdown_wrapped = content.startswith("```") or content.startswith("```json")
+    if is_markdown_wrapped:
+        content_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+        if content_match:
+            content = content_match.group(1).strip()
+
+    json_match = re.search(r'\{[\s\S]*\}', content)
+    if json_match:
+        json_str = json_match.group(0)
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict):
+                validation_result = _validate_response_schema(parsed)
+                return parsed, validation_result[0], validation_result[1]
+        except json.JSONDecodeError as e:
+            pass
+
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            validation_result = _validate_response_schema(parsed)
+            return parsed, validation_result[0], validation_result[1]
+    except json.JSONDecodeError as e:
+        failure_reason = f"JSON parse failed: {str(e)[:100]}"
+        if is_markdown_wrapped:
+            return _empty_suggestion_dict(), AdvisoryFailureType.MARKDOWN_WRAPPED, failure_reason
+        return _empty_suggestion_dict(), AdvisoryFailureType.INVALID_JSON, failure_reason
+
+    return {
+        "decision": "UNAVAILABLE",
+        "confidence": 0.0,
+        "justification": f"Non-JSON response: {safe_preview(content, 100)}",
+        "criterion_evaluations": {},
+        "triggered_criteria": [],
+        "raw_response": safe_preview(original_content, 500)
+    }, AdvisoryFailureType.INVALID_JSON, "Could not parse as JSON"
+
+
+def _empty_suggestion_dict() -> Dict[str, Any]:
+    """Return empty suggestion structure."""
+    return {
+        "decision": "UNAVAILABLE",
+        "confidence": 0.0,
+        "justification": "Advisory generation failed",
+        "criterion_evaluations": {},
+        "triggered_criteria": [],
+        "error": "Failed to parse LLM response"
+    }
+
+
+def safe_extract_criterion_evaluations(suggestion_dict: Dict[str, Any]) -> tuple:
+    """
+    Safely extract criterion evaluations from suggestion dict.
+    Returns tuple of (criterion_evaluations_list, triggered_criteria)
+    NEVER raises exception.
+    """
+    criterion_evaluations = []
+    triggered_criteria = []
+
+    try:
+        eval_data = suggestion_dict.get("criterion_evaluations")
+    except Exception:
+        return [], []
+
+    if eval_data is None:
+        return [], []
+
+    try:
+        if isinstance(eval_data, dict):
+            for cid, eval_obj in eval_data.items():
+                if isinstance(eval_obj, dict):
+                    criterion_evaluations.append(CriterionEvaluation(
+                        criterion_id=eval_obj.get("criterion_id", cid),
+                        criterion_name=eval_obj.get("criterion_name", cid),
+                        satisfied=eval_obj.get("triggered", eval_obj.get("satisfied", False)),
+                        evidence=eval_obj.get("evidence", []),
+                        confidence=eval_obj.get("confidence", 0.0)
+                    ))
+                    if eval_obj.get("triggered", eval_obj.get("satisfied", False)):
+                        triggered_criteria.append(cid)
+
+        elif isinstance(eval_data, list):
+            for item in eval_data:
+                if isinstance(item, dict):
+                    cid = item.get("criterion_id", item.get("criterion", ""))
+                    criterion_evaluations.append(CriterionEvaluation(
+                        criterion_id=cid,
+                        criterion_name=cid,
+                        satisfied=item.get("triggered", item.get("satisfied", False)),
+                        evidence=item.get("evidence", []),
+                        confidence=item.get("confidence", 0.0)
+                    ))
+                    if item.get("triggered", item.get("satisfied", False)):
+                        triggered_criteria.append(cid)
+    except Exception:
+        pass
+
+    return criterion_evaluations, triggered_criteria
 
 
 class AdvisoryWorker:
@@ -60,43 +381,88 @@ class AdvisoryWorker:
                 self._llm = None
         return self._llm
     
+    PROCESSING_TIMEOUT_SECONDS = 120
+
     def process_item(self, item: QueueItem) -> AdvisoryResult:
         """
         Process a single queue item.
-        
+
         This is the main entry point for worker processing.
+        GUARANTEES terminal state transition (COMPLETED or FAILED).
         """
-        queue = get_advisory_queue(self.config)
-        
+        worker_stage = getattr(self, '_stage', 'ic')
+        item_stage = getattr(item, 'stage', 'ic')
+
+        print(f"[WORKER ITEM] WorkerStage: {worker_stage} | ItemStage: {item_stage} | Article: {item.article_id}")
+
+        if worker_stage != item_stage:
+            print(f"[DATA-PLANE VIOLATION] Worker stage={worker_stage} != Item stage={item_stage}")
+            raise RuntimeError(f"DATA-PLANE ISOLATION VIOLATION: Worker stage '{worker_stage}' cannot process item with stage '{item_stage}'")
+
+        stage = item_stage
+        print(f"[QUEUE] Stage: {stage} | Article: {item.article_id}")
+
+        queue = get_advisory_queue(self.config, stage=stage)
+        start_time = time.time()
+
         queue.mark_processing(item)
-        
+        print(f"[STATE] PENDING -> PROCESSING: {item.article_id} (stage={stage})")
+
         request = AdvisoryRequest(
             cache_key=item.cache_key,
             protocol_version=item.protocol_version,
             title="",
             abstract="",
             literature_type="WL",
-            metadata={"article_id": item.article_id}
+            metadata={"article_id": item.article_id, "stage": stage}
         )
-        
-        advisory = self._generate_with_retry(request)
-        
-        store_advisory(advisory)
-        
-        if advisory.error and "failed" in advisory.error.lower():
-            queue.mark_failed(item, advisory.error)
-        else:
-            queue.mark_completed(item)
-        
-        return advisory
+
+        try:
+            advisory = self._generate_with_retry(request, stage)
+            store_advisory(advisory, stage=stage)
+            print(f"[CACHE STORE] Stage: {stage} | CacheKey: {item.cache_key[:16]}...")
+
+            elapsed = time.time() - start_time
+            if advisory.error:
+                queue.mark_failed(item, advisory.error)
+                print(f"[STATE] PROCESSING -> FAILED: {item.article_id} ({elapsed:.1f}s) Error: {advisory.error[:50]}")
+            else:
+                queue.mark_completed(item)
+                print(f"[STATE] PROCESSING -> COMPLETED: {item.article_id} ({elapsed:.1f}s) Decision: {advisory.decision.value}")
+
+            return advisory
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            error_msg = f"Worker exception: {str(e)[:100]}"
+            print(f"[STATE] PROCESSING -> FAILED: {item.article_id} ({elapsed:.1f}s) Exception: {error_msg}")
+
+            failed_advisory = AdvisoryResult(
+                cache_key=request.cache_key,
+                protocol_version=request.protocol_version,
+                decision=AdvisoryDecision.UNAVAILABLE,
+                confidence=0.0,
+                justification=f"Worker exception: {str(e)}",
+                error=error_msg,
+                generated_at=datetime.utcnow().isoformat()
+            )
+            store_advisory(failed_advisory, stage=stage)
+            queue.mark_failed(item, error_msg)
+
+            return failed_advisory
+
+        finally:
+            elapsed = time.time() - start_time
+            if elapsed > self.PROCESSING_TIMEOUT_SECONDS:
+                print(f"[WATCHDOG] {item.article_id} processing exceeded {elapsed:.1f}s timeout")
     
-    def _generate_with_retry(self, request: AdvisoryRequest) -> AdvisoryResult:
+    def _generate_with_retry(self, request: AdvisoryRequest, stage: str = "ic") -> AdvisoryResult:
         """Generate advisory with retry logic."""
         last_error = None
-        
+
         for attempt in range(self.config.max_retries + 1):
             try:
-                advisory = self._generate_advisory(request)
+                advisory = self._generate_advisory(request, stage)
                 
                 if advisory.error and "429" in advisory.error:
                     if attempt < self.config.max_retries:
@@ -123,70 +489,151 @@ class AdvisoryWorker:
             protocol_version=request.protocol_version
         )
     
-    def _generate_advisory(self, request: AdvisoryRequest) -> AdvisoryResult:
-        """Generate advisory from LLM."""
+    def _generate_advisory(self, request: AdvisoryRequest, stage: str = "ic") -> AdvisoryResult:
+        """Generate advisory from LLM with full observability."""
         start_time = time.time()
-        
+        article_id = request.metadata.get("article_id", "unknown") if request.metadata else "unknown"
+        stage = stage or request.metadata.get("stage", "ic")
+        stage_upper = stage.upper()
+
         if not self.llm:
+            parse_result = AdvisoryParseResult(
+                success=False,
+                failure_type=AdvisoryFailureType.LLM_UNAVAILABLE,
+                failure_reason="LLM assistant not initialized",
+                raw_response="",
+                normalized_response={},
+                cache_key=request.cache_key,
+                article_id=article_id,
+                protocol_version=request.protocol_version,
+                stage=stage,
+                timestamp=datetime.utcnow().isoformat()
+            )
+            _log_advisory_debug(parse_result)
+            _persist_failure_artifact(parse_result)
+
             return AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
                 decision=AdvisoryDecision.UNAVAILABLE,
                 confidence=0.0,
                 justification="LLM not available",
-                error="LLM assistant not initialized",
+                error="LLM_UNAVAILABLE: LLM assistant not initialized",
                 generated_at=datetime.utcnow().isoformat()
             )
-        
+
         if not self.llm.is_available():
+            parse_result = AdvisoryParseResult(
+                success=False,
+                failure_type=AdvisoryFailureType.LLM_UNAVAILABLE,
+                failure_reason="LLM service unavailable",
+                raw_response="",
+                normalized_response={},
+                cache_key=request.cache_key,
+                article_id=article_id,
+                protocol_version=request.protocol_version,
+                stage=stage,
+                timestamp=datetime.utcnow().isoformat()
+            )
+            _log_advisory_debug(parse_result)
+            _persist_failure_artifact(parse_result)
+
             return AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
                 decision=AdvisoryDecision.UNAVAILABLE,
                 confidence=0.0,
                 justification="LLM service unavailable",
-                error="LLM not available",
+                error="LLM_UNAVAILABLE: LLM not available",
                 generated_at=datetime.utcnow().isoformat()
             )
-        
+
         if self._protocol_criteria is None:
             self._protocol_criteria = self._load_protocol_criteria()
-        
+
         title = request.title
         abstract = request.abstract
         literature_type = request.literature_type
         metadata = request.metadata
-        
+
+        stage_lower = stage.lower() if stage else "ic"
+        print(f"[WORKER] Stage: {stage_upper}")
+
+        raw_response = ""
+        model_used = "llama-3.3-70b-versatile"
+
         try:
-            suggestion = self.llm.suggest_ic(
-                title=title,
-                abstract=abstract,
-                literature_type=literature_type,
-                protocol_criteria=self._protocol_criteria,
-                metadata=metadata
+            if stage_lower == "ec":
+                from src.core.llm_assistant import LLMAssistant
+                if hasattr(self.llm, 'suggest_ec'):
+                    suggestion = self.llm.suggest_ec(
+                        title=title,
+                        abstract=abstract,
+                        literature_type=literature_type,
+                        protocol_criteria=self._protocol_criteria,
+                        metadata=metadata
+                    )
+                else:
+                    suggestion = self.llm.suggest_ic(
+                        title=title,
+                        abstract=abstract,
+                        literature_type=literature_type,
+                        protocol_criteria=self._protocol_criteria,
+                        metadata=metadata
+                    )
+            else:
+                suggestion = self.llm.suggest_ic(
+                    title=title,
+                    abstract=abstract,
+                    literature_type=literature_type,
+                    protocol_criteria=self._protocol_criteria,
+                    metadata=metadata
+                )
+
+            try:
+                raw_response = safe_preview(suggestion, 1000)
+            except Exception as e:
+                raw_response = f"<serialization_failed: {e}>"
+
+            suggestion_dict, failure_type, failure_reason = normalize_suggestion_response(suggestion)
+
+            normalized_decision = normalize_decision(suggestion_dict.get("decision", "UNAVAILABLE"))
+            is_success = failure_type is None and normalized_decision != "UNAVAILABLE"
+
+            parse_result = AdvisoryParseResult(
+                success=is_success,
+                failure_type=failure_type,
+                failure_reason=failure_reason,
+                raw_response=raw_response,
+                normalized_response=suggestion_dict,
+                cache_key=request.cache_key,
+                article_id=article_id,
+                protocol_version=request.protocol_version,
+                stage=stage,
+                timestamp=datetime.utcnow().isoformat(),
+                model_used=model_used
             )
-            
-            suggestion_dict = suggestion.to_dict()
-            
-            criterion_evaluations = []
-            triggered_criteria = []
-            
-            if "criterion_evaluations" in suggestion_dict:
-                for ce in suggestion_dict["criterion_evaluations"]:
-                    criterion_evaluations.append(CriterionEvaluation(
-                        criterion_id=ce.get("criterion_id", ""),
-                        criterion_name=ce.get("criterion_name", ""),
-                        satisfied=ce.get("satisfied", False),
-                        evidence=ce.get("evidence", ""),
-                        confidence=ce.get("confidence", 0.0)
-                    ))
-                    if ce.get("satisfied"):
-                        triggered_criteria.append(ce.get("criterion_id", ""))
-            
-            decision = AdvisoryDecision(suggestion_dict.get("decision", "UNAVAILABLE"))
-            
+            _log_advisory_debug(parse_result)
+
+            if not is_success:
+                _persist_failure_artifact(parse_result)
+
+            criterion_evaluations, triggered_criteria = safe_extract_criterion_evaluations(suggestion_dict)
+
+            decision_str = normalize_decision(suggestion_dict.get("decision", "UNAVAILABLE"))
+            try:
+                decision = AdvisoryDecision(decision_str)
+            except ValueError:
+                decision = AdvisoryDecision.UNAVAILABLE
+
             duration_ms = (time.time() - start_time) * 1000
-            
+
+            parse_error = suggestion_dict.get("error")
+            if failure_type:
+                parse_error = f"{failure_type.value}: {failure_reason}" if failure_reason else failure_type.value
+
+            error_msg = parse_error or (f"FAILED: {failure_type.value}" if failure_type else None)
+
             return AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
@@ -195,18 +642,36 @@ class AdvisoryWorker:
                 triggered_criteria=triggered_criteria,
                 criterion_evaluations=criterion_evaluations,
                 justification=suggestion_dict.get("justification", ""),
+                error=error_msg,
                 generated_at=datetime.utcnow().isoformat(),
                 generation_duration_ms=duration_ms
             )
-            
+
         except Exception as e:
+            tb = traceback.format_exc()
+            parse_result = AdvisoryParseResult(
+                success=False,
+                failure_type=AdvisoryFailureType.UNKNOWN,
+                failure_reason=f"Exception: {str(e)}",
+                raw_response=safe_preview(raw_response, 500) if raw_response else "",
+                normalized_response={},
+                cache_key=request.cache_key,
+                article_id=article_id,
+                protocol_version=request.protocol_version,
+                stage=stage,
+                timestamp=datetime.utcnow().isoformat(),
+                model_used=model_used
+            )
+            _log_advisory_debug(parse_result)
+            _persist_failure_artifact(parse_result)
+
             return AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
                 decision=AdvisoryDecision.UNAVAILABLE,
                 confidence=0.0,
                 justification=f"Generation failed: {str(e)}",
-                error=str(e),
+                error=f"UNKNOWN: {str(e)}",
                 generated_at=datetime.utcnow().isoformat()
             )
     
@@ -228,17 +693,20 @@ class AdvisoryWorker:
         except ImportError:
             return {}
     
-    def process_all(self, max_items: Optional[int] = None) -> Dict:
+    def process_all(self, max_items: Optional[int] = None, stage: str = "ic") -> Dict:
         """
         Process all pending queue items.
-        
+
         Args:
             max_items: Maximum items to process (None for all)
-            
+            stage: Advisory stage for queue access
+
         Returns:
             Processing summary
         """
-        queue = get_advisory_queue(self.config)
+        print(f"[WORKER PROCESS_ALL] Stage: {stage}")
+        self._stage = stage
+        queue = get_advisory_queue(self.config, stage=stage)
         
         processed = 0
         succeeded = 0

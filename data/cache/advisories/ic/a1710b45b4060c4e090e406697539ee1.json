@@ -1,0 +1,36 @@
+{
+  "cache_key": "a1710b45b4060c4e090e406697539ee1",
+  "protocol_version": "1.0",
+  "decision": "UNAVAILABLE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "IC1",
+      "criterion_name": "IC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "IC2",
+      "criterion_name": "IC2",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "IC3",
+      "criterion_name": "IC3",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "The metadata provided does not contain sufficient information to assess the inclusion criteria. The title, authors, and year are not provided, and the abstract is not available.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-16T19:09:30.871392",
+  "generation_duration_ms": 1517.0211791992188
+}

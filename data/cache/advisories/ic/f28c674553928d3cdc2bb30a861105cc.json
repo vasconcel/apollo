@@ -1,0 +1,36 @@
+{
+  "cache_key": "f28c674553928d3cdc2bb30a861105cc",
+  "protocol_version": "1.0",
+  "decision": "EXCLUDE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "IC1",
+      "criterion_name": "IC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "IC2",
+      "criterion_name": "IC2",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "IC3",
+      "criterion_name": "IC3",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "The article does not provide sufficient information to assess its relevance to the research question, and its literature type is white literature, which may not be empirical or recent.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-16T20:22:05.325659",
+  "generation_duration_ms": 2257.551670074463
+}

@@ -76,10 +76,10 @@ class AdvisoryQueue:
             QueueState with populated items
 
         Raises:
-            ValueError: If stage is not explicitly "ec" or "ic"
+            ValueError: If stage is not explicitly "ec", "ic", or "qc"
         """
-        if stage not in ("ec", "ic"):
-            raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+        if stage not in ("ec", "ic", "qc"):
+            raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
 
         print(f"[QUEUE BUILD] Stage: {stage}")
 
@@ -291,6 +291,7 @@ class AdvisoryQueue:
 
 _global_queue_ec: Optional[AdvisoryQueue] = None
 _global_queue_ic: Optional[AdvisoryQueue] = None
+_global_queue_qc: Optional[AdvisoryQueue] = None
 
 
 def lookup_queue(stage: str = "ic") -> Optional[AdvisoryQueue]:
@@ -306,12 +307,12 @@ def lookup_queue(stage: str = "ic") -> Optional[AdvisoryQueue]:
     Raises:
         ValueError: If stage is invalid
     """
-    if stage not in ("ec", "ic"):
-        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    if stage not in ("ec", "ic", "qc"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
 
     print(f"[LOOKUP QUEUE] Stage: {stage}")
 
-    global _global_queue_ec, _global_queue_ic
+    global _global_queue_ec, _global_queue_ic, _global_queue_qc
 
     if stage.lower() == "ec":
         if _global_queue_ec is None:
@@ -319,12 +320,18 @@ def lookup_queue(stage: str = "ic") -> Optional[AdvisoryQueue]:
             return None
         print(f"[LOOKUP QUEUE] Stage: ec | FOUND")
         return _global_queue_ec
-    else:
+    elif stage.lower() == "ic":
         if _global_queue_ic is None:
             print(f"[LOOKUP QUEUE] Stage: ic | MISSING")
             return None
         print(f"[LOOKUP QUEUE] Stage: ic | FOUND")
         return _global_queue_ic
+    else:
+        if _global_queue_qc is None:
+            print(f"[LOOKUP QUEUE] Stage: qc | MISSING")
+            return None
+        print(f"[LOOKUP QUEUE] Stage: qc | FOUND")
+        return _global_queue_qc
 
 
 def get_advisory_queue(config: Optional[AdvisoryConfig] = None, stage: str = "ic") -> AdvisoryQueue:
@@ -333,20 +340,20 @@ def get_advisory_queue(config: Optional[AdvisoryConfig] = None, stage: str = "ic
 
     Args:
         config: Optional configuration
-        stage: Advisory stage - MUST be "ec" or "ic"
+        stage: Advisory stage - MUST be "ec", "ic", or "qc"
 
     Returns:
         AdvisoryQueue instance for the specified stage
 
     Raises:
-        ValueError: If stage is not explicitly "ec" or "ic"
+        ValueError: If stage is not explicitly "ec", "ic", or "qc"
     """
-    if stage not in ("ec", "ic"):
-        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    if stage not in ("ec", "ic", "qc"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
 
     print(f"[QUEUE FACTORY] Requested Stage: {stage}")
 
-    global _global_queue_ec, _global_queue_ic
+    global _global_queue_ec, _global_queue_ic, _global_queue_qc
 
     stage_lower = stage.lower()
     if stage_lower == "ec":
@@ -356,25 +363,35 @@ def get_advisory_queue(config: Optional[AdvisoryConfig] = None, stage: str = "ic
         else:
             print(f"[QUEUE REUSE] Stage: ec")
         return _global_queue_ec
-    else:
+    elif stage_lower == "ic":
         if _global_queue_ic is None:
             print(f"[QUEUE CREATE] Stage: ic")
             _global_queue_ic = AdvisoryQueue(config, stage="ic")
         else:
             print(f"[QUEUE REUSE] Stage: ic")
         return _global_queue_ic
+    else:
+        if _global_queue_qc is None:
+            print(f"[QUEUE CREATE] Stage: qc")
+            _global_queue_qc = AdvisoryQueue(config, stage="qc")
+        else:
+            print(f"[QUEUE REUSE] Stage: qc")
+        return _global_queue_qc
 
 
 def reset_queue_for_stage(stage: str = "ic"):
     """Reset queue for specific stage - clears memory and disk state."""
-    global _global_queue_ec, _global_queue_ic
+    global _global_queue_ec, _global_queue_ic, _global_queue_qc
     stage_lower = stage.lower()
     if stage_lower == "ec":
         _global_queue_ec = None
         print(f"[QUEUE RESET] Stage: ec (memory released)")
-    else:
+    elif stage_lower == "ic":
         _global_queue_ic = None
         print(f"[QUEUE RESET] Stage: ic (memory released)")
+    else:
+        _global_queue_qc = None
+        print(f"[QUEUE RESET] Stage: qc (memory released)")
 
     queue_path = Path(f"data/cache/advisory_queue_{stage_lower}.json")
     if queue_path.exists():
@@ -397,8 +414,8 @@ def build_queue(
     skip_existing: bool = True
 ) -> QueueState:
     """Build advisory queue from articles."""
-    if stage not in ("ec", "ic"):
-        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    if stage not in ("ec", "ic", "qc"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
     queue = get_advisory_queue(stage=stage)
     print(f"[QUEUE BUILD] Built for stage: {stage}")
     return queue.build_from_articles(articles, protocol_version, stage, skip_existing)
@@ -409,8 +426,8 @@ def get_queue_stats(stage: str = "ic") -> Dict:
     Get queue statistics for specific stage.
     READ-ONLY - uses lookup to never create runtime.
     """
-    if stage not in ("ec", "ic"):
-        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    if stage not in ("ec", "ic", "qc"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
     print(f"[QUEUE STATS] Lookup for stage: {stage}")
     queue = lookup_queue(stage=stage)
     if queue is None:
@@ -421,8 +438,8 @@ def get_queue_stats(stage: str = "ic") -> Dict:
 
 def reset_failed_advisories(stage: str = "ic") -> int:
     """Reset failed items for retry."""
-    if stage not in ("ec", "ic"):
-        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    if stage not in ("ec", "ic", "qc"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
     print(f"[QUEUE RESET FAILED] For stage: {stage}")
     queue = get_advisory_queue(stage=stage)
     return queue.reset_failed()

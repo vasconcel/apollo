@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "failure_type": "UNKNOWN",
+  "failure_reason": "Exception: Unsupported stage for advisory generation: ic. Must be 'ec', 'ic', or 'qc'.",
+  "raw_response": "",
+  "normalized_response": {},
+  "cache_key": "c9fc20c66dee635a9dec7550de422a37",
+  "article_id": "15",
+  "protocol_version": "1.0",
+  "stage": "ic",
+  "timestamp": "2026-05-18T22:51:25.088069",
+  "model_used": "llama-3.3-70b-versatile"
+}

@@ -73,9 +73,12 @@ class AdvisoryWorkerOrchestrator:
 
         Runs independently from Streamlit reruns.
         """
+        print(f"[LIFECYCLE] start_worker called for stage: {self._stage}")
+        
         with self._start_lock:
             if self._is_running and self._worker_thread and self._worker_thread.is_alive():
-                print(f"[ORCHESTRATOR] Worker already running for stage: {self._stage}")
+                print(f"[LIFECYCLE] Worker already active: advisory-worker-{self._stage}")
+                print(f"[LIFECYCLE] Prevented duplicate worker spawn for: {self._stage}")
                 return
 
             print(f"[ORCHESTRATOR] Starting worker for stage: {self._stage}")
@@ -128,6 +131,7 @@ class AdvisoryWorkerOrchestrator:
 
 _global_orchestrator_ec: Optional[AdvisoryWorkerOrchestrator] = None
 _global_orchestrator_ic: Optional[AdvisoryWorkerOrchestrator] = None
+_global_orchestrator_qc: Optional[AdvisoryWorkerOrchestrator] = None
 
 
 def lookup_orchestrator(stage: str = "ic") -> Optional[AdvisoryWorkerOrchestrator]:
@@ -143,12 +147,12 @@ def lookup_orchestrator(stage: str = "ic") -> Optional[AdvisoryWorkerOrchestrato
     Raises:
         ValueError: If stage is invalid
     """
-    if stage not in ("ec", "ic"):
-        raise ValueError(f"Invalid stage: {stage}. Must be 'ec' or 'ic'.")
+    if stage not in ("ec", "ic", "qc"):
+        raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
 
     print(f"[LOOKUP ORCHESTRATOR] Stage: {stage}")
 
-    global _global_orchestrator_ec, _global_orchestrator_ic
+    global _global_orchestrator_ec, _global_orchestrator_ic, _global_orchestrator_qc
 
     stage_lower = stage.lower()
     if stage_lower == "ec":
@@ -157,17 +161,23 @@ def lookup_orchestrator(stage: str = "ic") -> Optional[AdvisoryWorkerOrchestrato
             return None
         print(f"[LOOKUP ORCHESTRATOR] Stage: ec | FOUND")
         return _global_orchestrator_ec
-    else:
+    elif stage_lower == "ic":
         if _global_orchestrator_ic is None:
             print(f"[LOOKUP ORCHESTRATOR] Stage: ic | MISSING")
             return None
         print(f"[LOOKUP ORCHESTRATOR] Stage: ic | FOUND")
         return _global_orchestrator_ic
+    else:
+        if _global_orchestrator_qc is None:
+            print(f"[LOOKUP ORCHESTRATOR] Stage: qc | MISSING")
+            return None
+        print(f"[LOOKUP ORCHESTRATOR] Stage: qc | FOUND")
+        return _global_orchestrator_qc
 
 
 def get_orchestrator(config: Optional[AdvisoryConfig] = None, stage: str = "ic") -> AdvisoryWorkerOrchestrator:
     """Get stage-scoped orchestrator instance - CREATES if absent."""
-    global _global_orchestrator_ec, _global_orchestrator_ic
+    global _global_orchestrator_ec, _global_orchestrator_ic, _global_orchestrator_qc
 
     stage_lower = stage.lower()
     if stage_lower == "ec":
@@ -177,24 +187,35 @@ def get_orchestrator(config: Optional[AdvisoryConfig] = None, stage: str = "ic")
         else:
             print(f"[ORCHESTRATOR REUSE] Stage: ec")
         return _global_orchestrator_ec
-    else:
+    elif stage_lower == "ic":
         if _global_orchestrator_ic is None:
             print(f"[ORCHESTRATOR CREATE] Stage: ic")
             _global_orchestrator_ic = AdvisoryWorkerOrchestrator(config, stage="ic")
         else:
             print(f"[ORCHESTRATOR REUSE] Stage: ic")
         return _global_orchestrator_ic
+    else:
+        if _global_orchestrator_qc is None:
+            print(f"[ORCHESTRATOR CREATE] Stage: qc")
+            _global_orchestrator_qc = AdvisoryWorkerOrchestrator(config, stage="qc")
+        else:
+            print(f"[ORCHESTRATOR REUSE] Stage: qc")
+        return _global_orchestrator_qc
 
 
 def reset_orchestrator_for_stage(stage: str = "ic"):
     """Reset orchestrator for specific stage."""
-    global _global_orchestrator_ec, _global_orchestrator_ic
-    if stage.lower() == "ec":
+    global _global_orchestrator_ec, _global_orchestrator_ic, _global_orchestrator_qc
+    stage_lower = stage.lower()
+    if stage_lower == "ec":
         _global_orchestrator_ec = None
         print(f"[ORCHESTRATOR RESET] Stage: ec")
-    else:
+    elif stage_lower == "ic":
         _global_orchestrator_ic = None
         print(f"[ORCHESTRATOR RESET] Stage: ic")
+    else:
+        _global_orchestrator_qc = None
+        print(f"[ORCHESTRATOR RESET] Stage: qc")
 
 
 def initialize_advisory_pipeline(
@@ -216,6 +237,14 @@ def initialize_advisory_pipeline(
     """
     print(f"[PIPELINE CREATE] Stage: {stage}")
     orchestrator = get_orchestrator(stage=stage)
+
+    try:
+        from src.advisory.advisory_scheduler import set_active_stage, get_advisory_scheduler
+        set_active_stage(stage)
+        scheduler_status = get_advisory_scheduler().get_status()
+        print(f"[PIPELINE] Scheduler updated: active={scheduler_status['active_stage']}")
+    except ImportError:
+        pass
 
     print(f"[PIPELINE] Initializing for stage: {stage}")
 

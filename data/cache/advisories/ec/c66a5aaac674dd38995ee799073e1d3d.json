@@ -1,0 +1,36 @@
+{
+  "cache_key": "c66a5aaac674dd38995ee799073e1d3d",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "EC1",
+      "criterion_name": "EC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC2",
+      "criterion_name": "EC2",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC6",
+      "criterion_name": "EC6",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "No exclusion criteria are met based on the provided metadata. The literature type is White Literature, which is peer-reviewed, and the year is not applicable as an exclusion criterion since it is not provided.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-18T22:51:39.057592",
+  "generation_duration_ms": 3683.1648349761963
+}

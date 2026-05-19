@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
+from types import MappingProxyType
 
 
 class ProtocolState(Enum):
@@ -122,6 +123,156 @@ class Criterion:
         )
 
 
+def _normalize_criteria_for_hash(criteria: Dict[str, Any]) -> str:
+    """
+    Normalize criteria dict for deterministic hashing.
+    
+    IMPORTANT: Must produce SAME hash regardless of dict ordering.
+    """
+    if not criteria:
+        return "[]"
+    
+    normalized_items = []
+    for cid in sorted(criteria.keys()):
+        c = criteria[cid]
+        if isinstance(c, dict):
+            normalized_items.append(f"{cid}:{c.get('description', '')}:{c.get('enabled', False)}")
+        elif hasattr(c, 'to_dict'):
+            d = c.to_dict()
+            normalized_items.append(f"{cid}:{d.get('description', '')}:{d.get('enabled', False)}")
+    
+    return "|" .join(normalized_items)
+
+
+@dataclass(frozen=True)
+class ProtocolSnapshot:
+    """
+    Immutable protocol snapshot for reproducibility.
+    
+    Created when protocol is LOCKED.
+    Never mutable after creation.
+    Hash is deterministic - same protocol = same hash.
+    """
+    version: str
+    hash: str
+    name: str
+    
+    ec_criteria: Dict[str, Dict] = field(default_factory=dict)
+    ic_criteria: Dict[str, Dict] = field(default_factory=dict)
+    qc_criteria: Dict[str, Dict] = field(default_factory=dict)
+    
+    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    protocol_state: str = "locked"
+
+    def to_dict(self) -> Dict:
+        return {
+            "version": self.version,
+            "hash": self.hash,
+            "name": self.name,
+            "ec_criteria": dict(self.ec_criteria),
+            "ic_criteria": dict(self.ic_criteria),
+            "qc_criteria": dict(self.qc_criteria),
+            "created_at": self.created_at,
+            "protocol_state": self.protocol_state
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> "ProtocolSnapshot":
+        return cls(**data)
+    
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+    
+    @staticmethod
+    def compute_hash(protocol_data: Dict) -> str:
+        """
+        Compute deterministic hash of protocol data.
+        
+        IMPORTANT: Hash must be order-independent for dicts.
+        """
+        ec_normalized = _normalize_criteria_for_hash(protocol_data.get("ec", {}))
+        ic_normalized = _normalize_criteria_for_hash(protocol_data.get("ic", {}))
+        qc_normalized = _normalize_criteria_for_hash(protocol_data.get("qc", {}))
+        
+        version = protocol_data.get("version", "1.0.0")
+        
+        hash_input = f"{version}|{ec_normalized}|{ic_normalized}|{qc_normalized}"
+        
+        return hashlib.sha256(hash_input.encode('utf-8')).hexdigest()[:16]
+    
+    @staticmethod
+    def create_from_protocol(protocol) -> "ProtocolSnapshot":
+        """
+        Create immutable snapshot from protocol object.
+        
+        This should be called when protocol is LOCKED.
+        """
+        ec_dict = {}
+        if hasattr(protocol, 'ec') and protocol.ec:
+            for k, v in protocol.ec.criteria.items():
+                if hasattr(v, 'to_dict'):
+                    ec_dict[k] = v.to_dict()
+                else:
+                    ec_dict[k] = {"id": k, "description": getattr(v, 'description', ''), "enabled": getattr(v, 'enabled', True)}
+        
+        ic_dict = {}
+        if hasattr(protocol, 'ic') and protocol.ic:
+            for k, v in protocol.ic.criteria.items():
+                if hasattr(v, 'to_dict'):
+                    ic_dict[k] = v.to_dict()
+                else:
+                    ic_dict[k] = {"id": k, "description": getattr(v, 'description', ''), "enabled": getattr(v, 'enabled', True)}
+        
+        qc_dict = {}
+        if hasattr(protocol, 'qc') and protocol.qc:
+            for k, v in protocol.qc.criteria.items():
+                if hasattr(v, 'to_dict'):
+                    qc_dict[k] = v.to_dict()
+                else:
+                    qc_dict[k] = {"id": k, "description": getattr(v, 'description', ''), "enabled": getattr(v, 'enabled', True)}
+        
+        protocol_data = {
+            "version": getattr(protocol, 'protocol_version', '1.0.0'),
+            "ec": ec_dict,
+            "ic": ic_dict,
+            "qc": qc_dict
+        }
+        
+        protocol_hash = getattr(protocol, 'protocol_hash', '') or ProtocolSnapshot.compute_hash(protocol_data)
+        
+        snapshot = ProtocolSnapshot(
+            version=getattr(protocol, 'protocol_version', '1.0.0'),
+            hash=protocol_hash,
+            name=getattr(protocol, 'name', 'Unnamed Protocol'),
+            ec_criteria=MappingProxyType(ec_dict),
+            ic_criteria=MappingProxyType(ic_dict),
+            qc_criteria=MappingProxyType(qc_dict),
+            protocol_state="locked"
+        )
+        
+        return snapshot
+    
+    def save_to_file(self, base_path: str = "data/protocol_snapshots") -> str:
+        """Save snapshot to file and return path."""
+        import os
+        os.makedirs(base_path, exist_ok=True)
+        
+        filename = f"protocol_v{self.version}_{self.hash}.json"
+        filepath = os.path.join(base_path, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(self.to_json())
+        
+        return filepath
+    
+    @staticmethod
+    def load_from_file(filepath: str) -> "ProtocolSnapshot":
+        """Load snapshot from file."""
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return ProtocolSnapshot.from_dict(data)
+
+
 @dataclass
 class ECProtocol:
     """Exclusion Criteria protocol."""
@@ -186,27 +337,6 @@ class ICProtocol:
         return "\n".join(lines) if lines else "No IC criteria enabled"
 
 
-@dataclass
-@dataclass
-class ProtocolSnapshot:
-    """Snapshot of protocol at a point in time."""
-    snapshot_id: str
-    created_at: str
-    stage: str  # "ec", "ic"
-    
-    ec_protocol: Dict
-    ic_protocol: Dict
-    
-    snapshot_hash: str = ""
-    
-    def __post_init__(self):
-        content = f"{self.snapshot_id}|{self.created_at}|{self.stage}|{json.dumps(self.ec_protocol, sort_keys=True)}"
-        self.snapshot_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-    
-    def to_dict(self) -> Dict:
-        return asdict(self)
-
-
 class DynamicProtocol:
     """
     Dynamic protocol that can be configured per session.
@@ -222,19 +352,21 @@ class DynamicProtocol:
     """
 
     def __init__(self, protocol_version: str = "1.0", template: Optional[Dict] = None):
-        self.protocol_version = protocol_version
+        self._protocol_version = protocol_version
         self.created_at = datetime.now().isoformat()
-        self.state = ProtocolState.DRAFT.value
-        self.locked_at: Optional[str] = None
-        self.protocol_hash: str = ""
+        self._state = ProtocolState.DRAFT.value
+        self._locked_at: Optional[str] = None
+        self._protocol_hash: str = ""
+        self._snapshot: Optional[ProtocolSnapshot] = None
 
         self.template_name: Optional[str] = None
         self.template_version: Optional[str] = None
 
-        self.ec = ECProtocol(criteria={})
-        self.ic = ICProtocol(criteria={})
-
         self._snapshots: List[ProtocolSnapshot] = []
+        self._locked: bool = False
+
+        self._ec: ECProtocol = ECProtocol(criteria={})
+        self._ic: ICProtocol = ICProtocol(criteria={})
 
         if template:
             self._apply_template(template)
@@ -267,6 +399,20 @@ class DynamicProtocol:
             "template_name": self.template_name,
             "template_version": self.template_version
         }
+    
+    def get_snapshot(self) -> Optional[ProtocolSnapshot]:
+        """Get the protocol snapshot (only available after lock)."""
+        return self._snapshot
+    
+    def get_protocol_info(self) -> Dict:
+        """Get comprehensive protocol info including snapshot details."""
+        info = self.get_summary()
+        if self._snapshot:
+            info["snapshot_hash"] = self._snapshot.hash
+            info["snapshot_version"] = self._snapshot.version
+            info["snapshot_created_at"] = self._snapshot.created_at
+            info["snapshot_path"] = f"data/protocol_snapshots/protocol_v{self._snapshot.version}_{self._snapshot.hash}.json"
+        return info
 
     def is_complete(self) -> tuple:
         """Check if protocol has minimum required criteria."""
@@ -282,9 +428,19 @@ class DynamicProtocol:
         return (len(errors) == 0, errors)
 
     def compute_hash(self) -> str:
-        """Compute hash of current protocol state for identification."""
-        content = json.dumps(self.to_dict(), sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+        """Compute deterministic hash of current protocol criteria."""
+        ec_data = {k: v.to_dict() for k, v in self.ec.criteria.items()}
+        ic_data = {k: v.to_dict() for k, v in self.ic.criteria.items()}
+        qc_data = {k: v.to_dict() for k, v in self.qc.criteria.items()} if hasattr(self, 'qc') and self.qc else {}
+        
+        protocol_data = {
+            "version": self.protocol_version,
+            "ec": ec_data,
+            "ic": ic_data,
+            "qc": qc_data
+        }
+        
+        return ProtocolSnapshot.compute_hash(protocol_data)
 
     def lock(self) -> None:
         """Lock the protocol, making it immutable for screening."""
@@ -292,15 +448,88 @@ class DynamicProtocol:
         if not is_complete:
             raise ValueError(f"Cannot lock incomplete protocol: {'; '.join(errors)}")
 
-        if self.state == ProtocolState.ACTIVE_SESSION.value:
+        if self._state == ProtocolState.ACTIVE_SESSION.value:
             raise ValueError("Cannot lock protocol with active session")
 
-        self.state = ProtocolState.LOCKED.value
-        self.locked_at = datetime.now().isoformat()
-        self.protocol_hash = self.compute_hash()
+        if self._state == ProtocolState.LOCKED.value:
+            raise ValueError("Protocol is already locked")
 
-        self.ec = ECProtocol(criteria=self.ec.criteria.copy())
-        self.ic = ICProtocol(criteria=self.ic.criteria.copy())
+        self._state = ProtocolState.LOCKED.value
+        self._locked = True
+        self._locked_at = datetime.now().isoformat()
+        self._protocol_hash = self.compute_hash()
+
+        self._ec_criteria = {k: v for k, v in self._ec.criteria.items()}
+        self._ic_criteria = {k: v for k, v in self._ic.criteria.items()}
+
+        self._ec = ECProtocol(criteria=MappingProxyType(self._ec_criteria))
+        self._ic = ICProtocol(criteria=MappingProxyType(self._ic_criteria))
+
+        snapshot = ProtocolSnapshot.create_from_protocol(self)
+        if snapshot:
+            self._snapshot = snapshot
+            snapshot_path = snapshot.save_to_file()
+            print(f"[PROTOCOL SNAPSHOT] Created and saved: {snapshot_path}")
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    @state.setter
+    def state(self, value: str) -> None:
+        if self._locked:
+            raise AttributeError("Locked protocols are immutable. State cannot be changed.")
+        self._state = value
+
+    @property
+    def protocol_version(self) -> str:
+        return self._protocol_version
+
+    @protocol_version.setter
+    def protocol_version(self, value: str) -> None:
+        if self._locked:
+            raise AttributeError("Locked protocols are immutable. Version cannot be changed.")
+        self._protocol_version = value
+
+    @property
+    def protocol_hash(self) -> str:
+        return self._protocol_hash
+
+    @protocol_hash.setter
+    def protocol_hash(self, value: str) -> None:
+        if self._locked:
+            raise AttributeError("Locked protocols are immutable. Hash cannot be changed.")
+        self._protocol_hash = value
+
+    @property
+    def locked_at(self) -> Optional[str]:
+        return self._locked_at
+
+    @locked_at.setter
+    def locked_at(self, value: str) -> None:
+        if self._locked:
+            raise AttributeError("Locked protocols are immutable. Lock timestamp cannot be changed.")
+        self._locked_at = value
+
+    @property
+    def ec(self) -> "ECProtocol":
+        return self._ec
+
+    @ec.setter
+    def ec(self, value: "ECProtocol") -> None:
+        if self._locked:
+            raise AttributeError("Locked protocols are immutable. EC criteria cannot be changed.")
+        self._ec = value
+
+    @property
+    def ic(self) -> "ICProtocol":
+        return self._ic
+
+    @ic.setter
+    def ic(self, value: "ICProtocol") -> None:
+        if self._locked:
+            raise AttributeError("Locked protocols are immutable. IC criteria cannot be changed.")
+        self._ic = value
 
     def unlock(self) -> "DynamicProtocol":
         """
@@ -395,7 +624,7 @@ class DynamicProtocol:
     
     def to_dict(self) -> Dict:
         """Export protocol as dictionary."""
-        return {
+        result = {
             "protocol_version": self.protocol_version,
             "created_at": self.created_at,
             "state": self.state,
@@ -406,6 +635,9 @@ class DynamicProtocol:
             "ec": self.ec.to_dict(),
             "ic": self.ic.to_dict()
         }
+        if self._snapshot:
+            result["snapshot"] = self._snapshot.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict) -> "DynamicProtocol":
@@ -415,23 +647,41 @@ class DynamicProtocol:
 
         protocol = cls(protocol_version=data.get("protocol_version", "1.0"))
         protocol.created_at = data.get("created_at", datetime.now().isoformat())
-        protocol.state = data.get("state", ProtocolState.DRAFT.value)
-        protocol.locked_at = data.get("locked_at")
-        protocol.protocol_hash = data.get("protocol_hash", "")
+
+        state = data.get("state", ProtocolState.DRAFT.value)
+        protocol._state = state
+
+        protocol._locked_at = data.get("locked_at")
+        protocol._protocol_hash = data.get("protocol_hash", "")
         protocol.template_name = data.get("template_name")
         protocol.template_version = data.get("template_version")
+
+        if state == ProtocolState.LOCKED.value:
+            protocol._locked = True
+            protocol._ec_criteria = {}
+            protocol._ic_criteria = {}
 
         if "ec" in data:
             ec_data = data["ec"]
             if isinstance(ec_data, dict):
-                protocol.ec = ECProtocol.from_dict(ec_data)
+                ec = ECProtocol.from_dict(ec_data)
+                if state == ProtocolState.LOCKED.value:
+                    protocol._ec = ECProtocol(criteria=MappingProxyType(dict(ec.criteria)))
+                    protocol._ec_criteria = {k: v for k, v in ec.criteria.items()}
+                else:
+                    protocol._ec = ec
             else:
                 raise ValueError("DynamicProtocol.from_dict: 'ec' must be dict")
 
         if "ic" in data:
             ic_data = data["ic"]
             if isinstance(ic_data, dict):
-                protocol.ic = ICProtocol.from_dict(ic_data)
+                ic = ICProtocol.from_dict(ic_data)
+                if state == ProtocolState.LOCKED.value:
+                    protocol._ic = ICProtocol(criteria=MappingProxyType(dict(ic.criteria)))
+                    protocol._ic_criteria = {k: v for k, v in ic.criteria.items()}
+                else:
+                    protocol._ic = ic
             else:
                 raise ValueError("DynamicProtocol.from_dict: 'ic' must be dict")
 

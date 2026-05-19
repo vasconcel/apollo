@@ -1,7 +1,8 @@
 """
-APOLLO Design System - Forensic Terminal / Industrial Research Aesthetic
+APOLLO Design System - Clean Academic Research Platform
 
-Centralized theme tokens for cohesive visual identity across all modules.
+Modern, professional, visually quiet interface for systematic literature review.
+Inspired by Linear, Notion, GitHub - not terminal/console aesthetics.
 """
 
 COLORS = {
@@ -56,20 +57,21 @@ TYPOGRAPHY = {
 }
 
 SPACING = {
-    "xs": "0.25rem",
-    "sm": "0.5rem",
-    "md": "1rem",
-    "lg": "1.5rem",
-    "xl": "2rem",
-    "card_padding": "1rem",
-    "section_gap": "1.5rem",
+    "xs": "4px",
+    "sm": "8px",
+    "md": "12px",
+    "lg": "16px",
+    "xl": "24px",
+    "xxl": "32px",
+    "card_padding": "16px",
+    "section_gap": "24px",
 }
 
 BORDERS = {
     "thin": "1px solid",
     "medium": "1px solid",
-    "radius": "0px",
-    "card_radius": "0px",
+    "radius": "6px",
+    "card_radius": "8px",
 }
 
 

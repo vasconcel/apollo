@@ -38,61 +38,30 @@ st.markdown(get_custom_css(), unsafe_allow_html=True)
 
 
 def render_apollo_header():
-    """Render APOLLO terminal-style header."""
-    cursor_html = '<span style="animation:blink 1s infinite;color:#00c8d7;">▋</span>'
-    
+    """Render APOLLO clean research platform header - compact."""
     st.markdown(f"""
-    <div style="border-bottom:1px solid #00c8d7;padding:1rem 0;margin-bottom:1.5rem;">
-        <div style="{TYPOGRAPHY['mono']};font-size:0.6rem;color:#009BA0;letter-spacing:0.25em;margin-bottom:0.5rem;">
-            ▸ AUDIT PIPELINE FOR LITERATURE OPERATIONS & LAYERED OBSERVATION
+    <div style="padding:0.5rem 0 1rem 0;margin-bottom:1rem;border-bottom:1px solid {COLORS['border_light']};">
+        <div style="font-family:{TYPOGRAPHY['sans']};font-size:0.65rem;color:{COLORS['cyan_dim']};letter-spacing:0.15em;margin-bottom:0.25rem;">
+            Systematic Literature Review Platform
         </div>
-        <h1 style="{TYPOGRAPHY['mono']};font-size:1.75rem;color:#E5E5E5;margin:0;letter-spacing:0.15em;">
-            APOLLO {cursor_html}
+        <h1 style="font-family:{TYPOGRAPHY['sans']};font-size:1.25rem;color:{COLORS['text_primary']};margin:0;font-weight:600;letter-spacing:0.05em;">
+            APOLLO
         </h1>
-        <div style="{TYPOGRAPHY['mono']};font-size:0.7rem;color:#4A4A4A;margin-top:0.5rem;">
-            APOLLO v2.0.0 Primal // 2026-05-13
+        <div style="font-family:{TYPOGRAPHY['sans']};font-size:0.7rem;color:{COLORS['text_muted']};margin-top:0.25rem;">
+            Version 2.0.0
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
 def render_sidebar():
-    """Render terminal-style sidebar - Telemetria Forense hierarchy."""
+    """Render clean sidebar navigation."""
     from src.ui.theme import COLORS, TYPOGRAPHY
-    
-    st.markdown("""
-    <style>
-    div[data-testid="stRadio"] > div {
-        gap: 0.25rem;
-    }
-    div[data-testid="stRadio"] > div > label {
-        background: #0D0D0D;
-        border: 1px solid #252525;
-        padding: 0.75rem 1rem;
-        margin: 0;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.75rem;
-        color: #808080;
-        transition: all 0.2s;
-    }
-    div[data-testid="stRadio"] > div > label:hover {
-        background: #111111;
-        border-color: #00c8d7;
-        color: #E5E5E5;
-    }
-    div[data-testid="stRadio"] > div > label[data-checked="true"] {
-        background: #00c8d7;
-        border-color: #00c8d7;
-        color: #000;
-        font-weight: 600;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
+
     with st.sidebar:
         st.markdown(f"""
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};letter-spacing:0.15em;padding:0.5rem 0;border-bottom:1px solid {COLORS['border_light']};margin-bottom:0.75rem;">
-            ▸ NAVIGATION
+        <div style="font-family:{TYPOGRAPHY['sans']};font-size:0.7rem;color:{COLORS['text_muted']};padding:0.5rem 0;border-bottom:1px solid {COLORS['border']};margin-bottom:0.75rem;letter-spacing:0.1em;text-transform:uppercase;">
+            NAVIGATION
         </div>
         """, unsafe_allow_html=True)
         
@@ -113,74 +82,74 @@ def render_sidebar():
         protocol = st.session_state.get("research_protocol")
         
         st.markdown(f"""
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};letter-spacing:0.1em;padding:1rem 0 0.5rem 0;border-bottom:1px solid {COLORS['border_light']};margin-top:1rem;">
-            ▸ ACTIVE PROTOCOL
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};letter-spacing:0.1em;padding:0.75rem 0 0.5rem 0;border-bottom:1px solid {COLORS['border_light']};margin-top:0.75rem;">
+            ACTIVE PROTOCOL
         </div>
         """, unsafe_allow_html=True)
-        
+
         if protocol:
             summary = protocol.get_summary()
             protocol_hash = summary.get('hash', 'N/A')[:12] if summary.get('hash') else 'N/A'
             active_stage = "EC" if view in ["EC Screening", "Protocol Configuration"] else "IC" if view == "IC Screening" else "—"
-            
+
             total_articles = len(session.articles) if session and session.articles else 0
             screened = session.ec_completed if session else 0
-            
+
             st.markdown(f'''
-            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.75rem;margin-bottom:0.5rem;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};">HASH</span>
-                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};">{protocol_hash}</span>
+            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.5rem;border-radius:6px;margin-bottom:0.5rem;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:0.35rem;">
+                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};">HASH</span>
+                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['cyan']};">{protocol_hash}</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};">STAGE</span>
-                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.7rem;color:{COLORS['warning']};font-weight:600;">{active_stage}</span>
+                <div style="display:flex;justify-content:space-between;margin-bottom:0.35rem;">
+                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};">STAGE</span>
+                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['warning']};font-weight:600;">{active_stage}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;">
-                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};">PROGRESS</span>
-                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_secondary']};">{screened}/{total_articles}</span>
+                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};">PROGRESS</span>
+                    <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_secondary']};">{screened}/{total_articles}</span>
                 </div>
             </div>
             ''', unsafe_allow_html=True)
         else:
             st.markdown(f'''
-            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.75rem;text-align:center;">
-                <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};">No protocol loaded</span>
+            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.5rem;border-radius:6px;text-align:center;">
+                <span style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};">No protocol loaded</span>
             </div>
             ''', unsafe_allow_html=True)
         
         if session and session.articles:
             wl_count = len(session.get_wl_articles())
             gl_count = len(session.get_gl_articles())
-            
+
             st.markdown(f'''
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem;">
-                <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.5rem;text-align:center;">
-                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};">WL</div>
-                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.8rem;color:{COLORS['success']};">{wl_count}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:0.5rem;">
+                <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.35rem;border-radius:6px;text-align:center;">
+                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.5rem;color:{COLORS['text_muted']};">WL</div>
+                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.75rem;color:{COLORS['success']};">{wl_count}</div>
                 </div>
-                <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.5rem;text-align:center;">
-                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};">GL</div>
-                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.8rem;color:{COLORS['warning']};">{gl_count}</div>
+                <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.35rem;border-radius:6px;text-align:center;">
+                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.5rem;color:{COLORS['text_muted']};">GL</div>
+                    <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.75rem;color:{COLORS['warning']};">{gl_count}</div>
                 </div>
             </div>
             ''', unsafe_allow_html=True)
-        
+
         st.markdown(f"""
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};letter-spacing:0.1em;padding:1rem 0 0.5rem 0;border-bottom:1px solid {COLORS['border_light']};margin-top:1rem;">
-            ▸ WORKFLOW
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};letter-spacing:0.1em;padding:0.75rem 0 0.5rem 0;border-bottom:1px solid {COLORS['border_light']};margin-top:0.75rem;">
+            WORKFLOW
         </div>
         """, unsafe_allow_html=True)
-        
+
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f'<span style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:#FF4757;">[EC]</span>', unsafe_allow_html=True)
+            st.markdown(f'<span style="font-family:{TYPOGRAPHY["mono"]};font-size:0.6rem;color:#FF4757;">[EC]</span>', unsafe_allow_html=True)
         with col2:
-            st.markdown(f'<span style="font-family:{TYPOGRAPHY["mono"]};font-size:0.65rem;color:#FFB020;">[IC]</span>', unsafe_allow_html=True)
-        
+            st.markdown(f'<span style="font-family:{TYPOGRAPHY["mono"]};font-size:0.6rem;color:#FFB020;">[IC]</span>', unsafe_allow_html=True)
+
         st.markdown(f'''
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.6rem;color:{COLORS['text_muted']};margin-top:1rem;">
-            <span style="color:{COLORS['success']};">●</span> SYSTEM ONLINE
+        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};margin-top:0.75rem;">
+            <span style="color:{COLORS['success']};">●</span> System Online
         </div>
         ''', unsafe_allow_html=True)
     

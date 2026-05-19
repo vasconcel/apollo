@@ -56,21 +56,23 @@ def render_article_decision_card(
     decision_semantic = get_semantic_color(current_decision.upper() if current_decision else "PENDING")
 
     st.markdown(f"""
-    <div style="
+    <div class="apollo-card" style="
         border: 1px solid #252525;
         background: #0D0D0D;
-        margin: 0.5rem 0;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        overflow: hidden;
     ">
-        <!-- Compact Header -->
-        <div style="
+        <!-- Header: Lit Type + Decision Badge -->
+        <div class="apollo-card-header" style="
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0.5rem 0.75rem;
+            padding: 12px 16px;
             border-bottom: 1px solid #1A1A1A;
             background: #111111;
         ">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 12px;">
                 {render_literature_type_badge_html(lit_type)}
                 <span style="
                     font-family: {TYPOGRAPHY['mono']};
@@ -83,43 +85,37 @@ def render_article_decision_card(
             {render_decision_badge_html(current_decision, decision_semantic)}
         </div>
 
-        <!-- PROVENANCE METADATA - Prominent, above title -->
-        <div style="
-            padding: 0.4rem 0.75rem;
-            border-bottom: 1px solid #1A1A1A;
-            background: #0A0A0A;
-        ">
-            {render_provenance_compact_html(article_review)}
-        </div>
-
-        <!-- Title - Compact -->
-        <div style="padding: 0.5rem 0.75rem;">
+        <!-- Body: Title + Authors + Year + Source -->
+        <div class="apollo-card-body" style="padding: 16px;">
             <h3 style="
                 font-family: {TYPOGRAPHY['sans']};
-                font-size: 0.9rem;
+                font-size: 0.95rem;
                 font-weight: 600;
                 color: #E5E5E5;
-                margin: 0 0 0.25rem 0;
+                margin: 0 0 8px 0;
                 line-height: 1.4;
             ">
                 {article_review.title if article_review.title and article_review.title != 'nan' else '[Title Unavailable]'}
             </h3>
             {render_authors_year_html(article_review.metadata)}
+            {render_source_lineage_html(article_review.metadata)}
         </div>
 
         <!-- Stage Decisions Summary -->
         {render_stage_decisions_summary(article_review)}
 
-        <!-- Metadata Completeness -->
+        <!-- Footer: Completeness + Audit -->
         <div style="
-            padding: 0.4rem 0.75rem;
+            padding: 12px 16px;
             border-top: 1px solid #1A1A1A;
+            background: #0A0A0A;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         ">
             {render_completeness_html(article_review.get_metadata_completeness())}
+            {render_audit_state_inline(article_review) if show_audit_state else ''}
         </div>
-
-        <!-- Audit State -->
-        {render_audit_state_section(article_review) if show_audit_state else ''}
 
         <!-- Notes -->
         {render_notes_section(article_review, current_stage) if article_review.ec_notes or article_review.ic_notes else ''}
@@ -204,22 +200,33 @@ def render_decision_badge_html(decision: str, semantic: dict) -> str:
 
 
 def render_authors_year_html(metadata: Dict) -> str:
-    """Render authors and year HTML."""
+    """Render authors and year inline - muted, compact."""
     authors = metadata.get("authors", "")
     year = metadata.get("year", "")
+    venue = metadata.get("source", "")
 
     author_display = authors if authors and authors != "nan" else "_Authors unavailable_"
-    year_display = year if year and year != "nan" else "_Year unknown_"
+    year_display = year if year and year != "nan" else ""
+    venue_display = venue if venue and venue != "nan" else ""
+
+    parts = []
+    if len(author_display) > 50:
+        parts.append(author_display[:50] + "...")
+    else:
+        parts.append(author_display)
+    if year_display:
+        parts.append(year_display)
+    if venue_display:
+        parts.append(venue_display)
 
     return f'''
-    <div style="
+    <div class="apollo-metadata-inline" style="
         font-family: {TYPOGRAPHY['mono']};
         font-size: 0.75rem;
         color: #808080;
+        margin-bottom: 8px;
     ">
-        <span style="color: #E5E5E5;">{author_display}</span>
-        <span style="margin: 0 0.5rem; color: #4A4A4A;">•</span>
-        <span style="color: #E5E5E5;">{year_display}</span>
+        {''.join([f'<span>{p}</span><span class="separator">·</span>' for p in parts])[:-36]}
     </div>
     '''
 
@@ -436,37 +443,28 @@ def render_provenance_compact_html(article_review) -> str:
 
 
 def render_completeness_html(completeness: str) -> str:
-    """Render metadata completeness HTML."""
-    if completeness == "complete":
-        semantic = get_semantic_color("METADATA_COMPLETE")
-        label = "Complete Metadata"
-    elif completeness == "partial":
-        semantic = get_semantic_color("METADATA_PARTIAL")
-        label = "Partial Metadata"
-    elif completeness == "minimal":
-        semantic = get_semantic_color("METADATA_MINIMAL")
-        label = "Minimal Metadata"
-    else:
-        semantic = get_semantic_color("PENDING")
-        label = "Unknown Completeness"
+    """Render metadata completeness - inline compact."""
+    completeness_map = {
+        "complete": ("✓", "#00D67E"),
+        "partial": ("~", "#FFB020"),
+        "minimal": ("!", "#FF4757"),
+        "unknown": ("—", "#808080")
+    }
+    symbol, color = completeness_map.get(completeness, ("—", "#808080"))
+    label = completeness.capitalize() if completeness != "unknown" else "Unknown"
 
     return f'''
-    <div style="
+    <span style="
         display: inline-flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.25rem 0.5rem;
-        border: 1px solid {semantic['border']};
-        background: {semantic['bg']};
+        gap: 4px;
+        font-family: {TYPOGRAPHY['mono']};
+        font-size: 0.65rem;
+        color: {color};
     ">
-        <span style="
-            font-family: {TYPOGRAPHY['mono']};
-            font-size: 0.6rem;
-            color: {semantic['text']};
-        ">
-            {label}
-        </span>
-    </div>
+        <span>{symbol}</span>
+        <span style="color: #808080;">{label}</span>
+    </span>
     '''
 
 
@@ -483,7 +481,7 @@ def render_audit_state_section(article_review) -> str:
 
     return f'''
     <div style="
-        padding: 0.4rem 0.75rem;
+        padding: 12px 16px;
         border-top: 1px solid #1A1A1A;
         background: #0A0A0A;
         display: flex;
@@ -503,6 +501,26 @@ def render_audit_state_section(article_review) -> str:
             color: #00c8d7;
         ">{' | '.join(timestamps)}</span>
     </div>
+    '''
+
+
+def render_audit_state_inline(article_review) -> str:
+    """Render audit state inline - for footer display."""
+    timestamps = []
+    if article_review.ec_timestamp:
+        timestamps.append(f"EC {article_review.ec_timestamp[:10]}")
+    if article_review.ic_timestamp:
+        timestamps.append(f"IC {article_review.ic_timestamp[:10]}")
+
+    if not timestamps:
+        return '<span style="font-family: {0}; font-size: 0.6rem; color: #4A4A4A;">—</span>'.format(TYPOGRAPHY['mono'])
+
+    return f'''
+    <span style="
+        font-family: {TYPOGRAPHY['mono']};
+        font-size: 0.6rem;
+        color: #00c8d7;
+    ">{' · '.join(timestamps)}</span>
     '''
 
 

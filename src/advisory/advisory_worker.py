@@ -26,6 +26,19 @@ from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
+
+VALID_STAGES = frozenset({"ec", "ic", "qc"})
+
+
+def normalize_stage(stage: Any) -> str:
+    """Centralized stage normalization - SINGLE SOURCE OF TRUTH."""
+    if stage is None:
+        return "ic"
+    stage_str = str(stage).strip().lower()
+    if stage_str not in VALID_STAGES:
+        raise ValueError(f"Unsupported stage: '{stage}'. Must be one of: {', '.join(sorted(VALID_STAGES))}")
+    return stage_str
+
 def safe_preview(value: Any, limit: int = 500) -> str:
     """
     Safe debug serialization for arbitrary objects.
@@ -420,7 +433,10 @@ class AdvisoryWorker:
         try:
             advisory = self._generate_with_retry(request, stage)
             store_advisory(advisory, stage=stage)
-            print(f"[CACHE STORE] Stage: {stage} | CacheKey: {item.cache_key[:16]}...")
+            if stage.lower() == "qc":
+                print(f"[QC CACHE STORE] Stage: qc | CacheKey: {item.cache_key[:16]}... | Decision: {advisory.decision.value}")
+            else:
+                print(f"[CACHE STORE] Stage: {stage} | CacheKey: {item.cache_key[:16]}...")
 
             elapsed = time.time() - start_time
             if advisory.error:
@@ -556,8 +572,8 @@ class AdvisoryWorker:
         literature_type = request.literature_type
         metadata = request.metadata
 
-        stage_lower = stage.lower() if stage else "ic"
-        print(f"[WORKER] Stage: {stage_upper}")
+        stage_lower = normalize_stage(stage)
+        print(f"[WORKER] Stage: {stage_lower}")
 
         raw_response = ""
         model_used = "llama-3.3-70b-versatile"
@@ -581,14 +597,26 @@ class AdvisoryWorker:
                         protocol_criteria=self._protocol_criteria,
                         metadata=metadata
                     )
+            elif stage_lower == "qc":
+                print(f"[QC ADVISORY GENERATION] Article: {article_id}")
+                if hasattr(self.llm, 'suggest_qc'):
+                    suggestion = self.llm.suggest_qc(
+                        title=title,
+                        abstract=abstract,
+                        literature_type=literature_type,
+                        protocol_criteria=self._load_protocol_criteria_qc(),
+                        metadata=metadata
+                    )
+                else:
+                    suggestion = self.llm.suggest(
+                        title=title,
+                        abstract=abstract,
+                        literature_type=literature_type,
+                        stage="qc",
+                        metadata=metadata
+                    )
             else:
-                suggestion = self.llm.suggest_ic(
-                    title=title,
-                    abstract=abstract,
-                    literature_type=literature_type,
-                    protocol_criteria=self._protocol_criteria,
-                    metadata=metadata
-                )
+                raise ValueError(f"Unsupported stage for advisory generation: {stage}. Must be 'ec', 'ic', or 'qc'.")
 
             try:
                 raw_response = safe_preview(suggestion, 1000)
@@ -693,6 +721,23 @@ class AdvisoryWorker:
         except ImportError:
             return {}
     
+    def _load_protocol_criteria_qc(self) -> Dict[str, str]:
+        """Load QC protocol criteria - MUST be independent from IC."""
+        try:
+            from src.ui.modules.qc_screening_view import get_protocol_qc_criteria
+            return get_protocol_qc_criteria()
+        except ImportError:
+            try:
+                from src.core.dynamic_protocol import ProtocolHandler
+                if hasattr(ProtocolHandler, 'get_qc_criteria'):
+                    return ProtocolHandler.get_qc_criteria()
+            except ImportError:
+                pass
+            return {
+                "QC1": "Quality assessment criteria",
+                "QC2": "Methodological rigor assessment"
+            }
+    
     def process_all(self, max_items: Optional[int] = None, stage: str = "ic") -> Dict:
         """
         Process all pending queue items.
@@ -706,6 +751,27 @@ class AdvisoryWorker:
         """
         print(f"[WORKER PROCESS_ALL] Stage: {stage}")
         self._stage = stage
+        
+        try:
+            from src.advisory.advisory_scheduler import get_advisory_scheduler, should_process_stage
+            
+            scheduler = get_advisory_scheduler()
+            scheduler_status = scheduler.get_status()
+            print(f"[WORKER PRIORITY] Active stage: {scheduler_status['active_stage']} | Worker states: {scheduler_status['worker_states']}")
+            
+            if not should_process_stage(stage):
+                print(f"[WORKER PRIORITY] Stage '{stage}' paused - active stage is '{scheduler_status['active_stage']}'")
+                return {
+                    "processed": 0,
+                    "succeeded": 0,
+                    "failed": 0,
+                    "remaining": 0,
+                    "status": "PAUSED",
+                    "active_stage": scheduler_status['active_stage']
+                }
+        except ImportError:
+            pass
+        
         queue = get_advisory_queue(self.config, stage=stage)
         
         processed = 0
@@ -719,6 +785,14 @@ class AdvisoryWorker:
             
             if max_items is not None and processed >= max_items:
                 break
+            
+            try:
+                from src.advisory.advisory_scheduler import should_process_stage, get_advisory_scheduler
+                if not should_process_stage(stage):
+                    print(f"[WORKER PRIORITY CHECK] Stage '{stage}' no longer active - pausing")
+                    break
+            except ImportError:
+                pass
             
             print(f"Processing: {item.article_id} ({item.cache_key[:8]}...)")
             
@@ -740,7 +814,8 @@ class AdvisoryWorker:
             "processed": processed,
             "succeeded": succeeded,
             "failed": failed,
-            "remaining": queue.state.pending
+            "remaining": queue.state.pending,
+            "status": "COMPLETED" if processed > 0 else "IDLE"
         }
     
     def process_single(

@@ -28,6 +28,9 @@ from src.advisory import (
     get_cache_stats,
     AdvisoryStatus
 )
+from src.advisory.advisory_scheduler import set_active_stage
+
+_st_cache_key_calls = 0
 from src.core.protocol_utils import get_protocol_value
 
 
@@ -70,6 +73,8 @@ def render_ic_screening():
     from src.core.dynamic_protocol import ProtocolState
     from src.core.screening_session import ScreeningSession
 
+    set_active_stage("ic")
+
     if "research_protocol" not in st.session_state or st.session_state.research_protocol is None:
         st.warning("⚠ No Research Protocol configured.")
         return
@@ -88,9 +93,9 @@ def render_ic_screening():
             protocol_version=protocol.protocol_version,
             researcher_id="researcher_1"
         )
-        st.session_state.apollo_session.stage = "ic"
 
     session = st.session_state.apollo_session
+    session.stage = "ic"
 
     if "advisory_pipeline_initialized_ic" not in st.session_state and session.articles:
         from src.advisory import initialize_advisory_pipeline
@@ -546,6 +551,8 @@ def render_ai_advisory_panel(article, current_idx: int):
         "1.0"
     )
     
+    stage = "ic"
+    
     if hasattr(article, 'title'):
         title = getattr(article, 'title', '')
         abstract = getattr(article, 'abstract', '')
@@ -553,12 +560,14 @@ def render_ai_advisory_panel(article, current_idx: int):
         title = article.get("title", "") if hasattr(article, 'get') else ""
         abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
     
-    advisory = get_advisory(title, abstract, protocol_version)
+    advisory = get_advisory(title, abstract, protocol_version, stage=stage)
     
-    status = get_advisory_status(title, abstract, protocol_version)
+    status = get_advisory_status(title, abstract, protocol_version, stage=stage)
     
     with st.container(border=True):
         with st.expander("🤖 AI ADVISORY", expanded=False):
+            print(f"[IC ADVISORY RENDER] Title: {title[:30]}... | Status: {status} | Decision: {advisory.decision.value if hasattr(advisory.decision, 'value') else 'N/A'} | Available: {advisory.is_available() if hasattr(advisory, 'is_available') else False}")
+            
             if status == AdvisoryStatus.COMPLETED and advisory.is_available():
                 st.caption(f"Status: {status.value} | Decision: {advisory.decision.value}")
                 advisory_dict = {
@@ -578,15 +587,22 @@ def render_ai_advisory_panel(article, current_idx: int):
                 }
                 render_suggestion_details(advisory_dict)
             else:
-                st.caption("AI advisory unavailable — manual screening fully operational")
                 if status == AdvisoryStatus.PENDING:
-                    st.caption("⏳ Advisory pending. Screening continues without AI.")
+                    st.caption("⏳ Advisory pending — manual screening operational")
+                    print(f"[IC ADVISORY STATE] PENDING | Article: {title[:30]}...")
                 elif status == AdvisoryStatus.PROCESSING:
-                    st.caption("🔄 Advisory generating...")
+                    st.caption("🔄 Advisory generating — please wait...")
+                    print(f"[IC ADVISORY STATE] PROCESSING | Article: {title[:30]}...")
                 elif status == AdvisoryStatus.FAILED:
-                    st.caption(f"⚠️ Advisory failed: {advisory.error or 'Unknown'}")
+                    error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
+                    st.caption(f"⚠️ Advisory failed: {error_msg}")
+                    print(f"[IC ADVISORY STATE] FAILED | Article: {title[:30]}... | Error: {error_msg}")
+                elif status == AdvisoryStatus.UNAVAILABLE:
+                    st.caption("○ Advisory unavailable — manual screening fully operational")
+                    print(f"[IC ADVISORY STATE] UNAVAILABLE | Article: {title[:30]}...")
                 else:
-                    st.caption("No advisory available")
+                    st.caption("○ No advisory generated — manual screening operational")
+                    print(f"[IC ADVISORY STATE] UNKNOWN | Article: {title[:30]}... | Status: {status}")
 
 
 
@@ -614,7 +630,21 @@ def get_ic_codes() -> Dict[str, str]:
 
 
 def render_suggestion_details(suggestion: Dict):
-    """Render detailed LLM suggestion in terminal style with criterion-by-criterion view."""
+    """
+    Render detailed LLM suggestion in terminal style with criterion-by-criterion view.
+    
+    DEFENSIVE VALIDATION: Added type checking to handle malformed advisory structures.
+    """
+    if not isinstance(suggestion, dict):
+        print(f"[ADVISORY RENDER ERROR] Invalid suggestion type: {type(suggestion).__name__}")
+        st.warning("Advisory data unavailable - manual review required")
+        return
+    
+    if not suggestion:
+        print(f"[ADVISORY RENDER ERROR] Empty suggestion dict")
+        st.warning("Advisory empty - manual review required")
+        return
+    
     decision = suggestion.get("decision", "").upper()
     confidence = suggestion.get("confidence", 0)
     is_fallback = suggestion.get("is_fallback", False)
@@ -657,16 +687,22 @@ def render_suggestion_details(suggestion: Dict):
         st.markdown(f"**Justification:** {suggestion.get('justification', 'N/A')}")
 
     criterion_evals = suggestion.get("criterion_evaluations", {})
+    
+    if not isinstance(criterion_evals, dict):
+        print(f"[ADVISORY RENDER ERROR] Invalid criterion_evaluations type: {type(criterion_evals).__name__}")
+        criterion_evals = {}
+    
     triggered_list = suggestion.get("triggered_criteria", [])
 
     if isinstance(triggered_list, dict):
         triggered_dict = {k: v for k, v in triggered_list.items() if v}
     else:
         triggered_dict = {}
-        for cid in triggered_list:
-            eval_data = criterion_evals.get(cid, {})
-            if eval_data.get("triggered"):
-                triggered_dict[cid] = eval_data.get("justification", "")
+        if isinstance(triggered_list, list):
+            for cid in triggered_list:
+                eval_data = criterion_evals.get(cid, {})
+                if isinstance(eval_data, dict) and eval_data.get("triggered"):
+                    triggered_dict[cid] = eval_data.get("justification", "")
 
     if triggered_dict:
         criteria_panel(triggered_dict, title="TRIGGERED CRITERIA")
@@ -675,10 +711,15 @@ def render_suggestion_details(suggestion: Dict):
         ic_criteria = get_protocol_ic_criteria()
         
         with st.expander("CRITERION EVALUATIONS"):
-            for cid, eval_data in criterion_evals.items():
-                triggered = eval_data.get("triggered", False)
-                eval_justification = eval_data.get("justification", "")
-                ambiguity = eval_data.get("ambiguity_detected", False)
+            if not isinstance(criterion_evals, dict):
+                st.caption("Criterion evaluation data unavailable")
+            else:
+                for cid, eval_data in criterion_evals.items():
+                    if not isinstance(eval_data, dict):
+                        continue
+                    triggered = eval_data.get("triggered", False)
+                    eval_justification = eval_data.get("justification", "")
+                    ambiguity = eval_data.get("ambiguity_detected", False)
                 
                 official_def = ic_criteria.get(cid, "No definition available")
                 eval_confidence = "✓" if triggered else "✗"

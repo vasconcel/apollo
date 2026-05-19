@@ -14,33 +14,31 @@ from src.ui.theme import (
 
 
 def terminal_header(title: str, subtitle: str = "", status: str = None):
-    """Render terminal-style header with scanlines and cursor."""
+    """Render clean section header."""
     status_html = ""
     if status:
-        status_html = f'<span style="color:{COLORS["cyan_dim"]};margin-left:1rem;">● {status}</span>'
-    
-    cursor_html = '<span style="animation:blink 1s infinite;">▋</span>'
-    
+        status_html = f'<span style="color:{COLORS["cyan_dim"]};margin-left:0.75rem;font-size:0.8rem;">• {status}</span>'
+
     st.markdown(f"""
-    <div style="border-bottom:1px solid {COLORS['border_accent']};padding-bottom:1rem;margin-bottom:1.5rem;">
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan_dim']};letter-spacing:0.2em;margin-bottom:0.5rem;">
-            ▸ APOLLO OPERATIONS CONSOLE {status_html}
+    <div style="padding-bottom:1rem;margin-bottom:1.5rem;border-bottom:1px solid {COLORS['border_light']};">
+        <div style="font-family:{TYPOGRAPHY['sans']};font-size:0.7rem;color:{COLORS['text_muted']};margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.1em;">
+            APOLLO {status_html}
         </div>
-        <h1 style="font-family:{TYPOGRAPHY['mono']};font-size:1.5rem;color:{COLORS['text_primary']};margin:0;letter-spacing:0.1em;">
-            {title} {cursor_html}
-        </h1>
-        {f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.75rem;color:{COLORS["text_muted"]};margin-top:0.5rem;">{subtitle}</div>' if subtitle else ''}
+        <h2 style="font-family:{TYPOGRAPHY['sans']};font-size:1.25rem;color:{COLORS['text_primary']};margin:0;font-weight:600;">
+            {title}
+        </h2>
+        {f'<div style="font-family:{TYPOGRAPHY["sans"]};font-size:0.875rem;color:{COLORS["text_secondary"]};margin-top:0.5rem;">{subtitle}</div>' if subtitle else ''}
     </div>
     """, unsafe_allow_html=True)
 
 
 def section_header(title: str, description: str = ""):
-    """Render section header with optional description."""
-    desc_html = f'<div style="font-family:{TYPOGRAPHY["mono"]};font-size:0.7rem;color:{COLORS["text_muted"]};margin-top:0.25rem;">{description}</div>' if description else ""
+    """Render clean section header."""
+    desc_html = f'<div style="font-family:{TYPOGRAPHY["sans"]};font-size:0.8rem;color:{COLORS["text_secondary"]};margin-top:0.25rem;">{description}</div>' if description else ""
     st.markdown(f"""
     <div style="margin: 1.5rem 0 1rem 0;">
-        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};letter-spacing:0.15em;border-bottom:1px solid {COLORS['border']};padding-bottom:0.5rem;display:inline-block;">
-            ▸ {title.upper()}
+        <div style="font-family:{TYPOGRAPHY['sans']};font-size:0.75rem;color:{COLORS['cyan']};font-weight:500;letter-spacing:0.05em;padding-bottom:0.5rem;display:inline-block;border-bottom:2px solid {COLORS['cyan']};">
+            {title.upper()}
         </div>
         {desc_html}
     </div>

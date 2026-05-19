@@ -21,6 +21,14 @@ from datetime import datetime
 
 from src.core.criteria_registry import EC_DESCRIPTIONS, IC_DESCRIPTIONS
 
+QC_DESCRIPTIONS = {
+    "QC1": "Methodological quality - study design appropriate",
+    "QC2": "Methodological quality - data collection robust",
+    "QC3": "Methodological quality - analysis transparent",
+    "QC4": "Methodological quality - results reproducible",
+    "QC5": "Reporting quality - complete documentation"
+}
+
 WL_CANONICAL = "White Literature"
 GL_CANONICAL = "Grey Literature"
 
@@ -238,6 +246,8 @@ class LLMAssistant:
             return self.suggest_ec(title, abstract, literature_type, year, metadata=metadata)
         elif stage == "ic":
             return self.suggest_ic(title, abstract, literature_type, metadata=metadata)
+        elif stage == "qc":
+            return self.suggest_qc(title, abstract, literature_type, metadata=metadata)
         return self._fallback_advisory(stage, "Invalid stage", metadata or {})
 
     def suggest_ec(
@@ -354,6 +364,118 @@ class LLMAssistant:
         )
 
         return self._call_structured_llm(prompt, "ic", canonical_lit, metadata)
+
+    def suggest_qc(
+        self,
+        title: str,
+        abstract: str,
+        literature_type: str = "WL",
+        protocol_criteria: Optional[Dict[str, str]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> StructuredAdvisory:
+        """
+        Structured QC advisory with criterion-by-criterion evaluation.
+        
+        QC stage: Quality Criteria assessment - independent from EC/IC.
+        """
+        criteria = protocol_criteria if protocol_criteria else QC_DESCRIPTIONS
+        metadata = metadata or {}
+
+        canonical_lit = normalize_literature_label(literature_type)
+
+        prompt = self._build_qc_prompt(
+            title=title,
+            abstract=abstract,
+            literature_type=canonical_lit,
+            criteria=criteria,
+            metadata=metadata
+        )
+
+        return self._call_structured_llm(prompt, "qc", canonical_lit, metadata)
+
+    def _build_qc_prompt(
+        self,
+        title: str,
+        abstract: str,
+        literature_type: str,
+        criteria: Dict[str, str],
+        metadata: Dict[str, Any]
+    ) -> str:
+        """
+        Build structured QC prompt with EXPLICIT quality assessment criteria.
+        QC is independent methodology - does NOT reuse IC or EC criteria.
+        """
+        title_sanitized = str(title).replace('"', '\\"').replace('\n', ' ').replace('\r', ' ')[:300] if title else ""
+        abstract_sanitized = str(abstract)[:800].replace('"', '\\"').replace('\n', ' ').replace('\r', ' ') if abstract else "NOT PROVIDED"
+        
+        authors_value = metadata.get("authors", "")
+        has_authors = bool(authors_value and authors_value != "nan" and str(authors_value).strip())
+        authors_display = str(authors_value).replace('"', '\\"').replace('\n', ' ').replace('\r', ' ')[:200] if has_authors else "NOT PROVIDED"
+        
+        year_value = metadata.get("year")
+        has_year = year_value is not None and str(year_value) not in ("", "nan", "NOT PROVIDED")
+        year_str = str(year_value) if has_year else "NOT PROVIDED"
+        
+        abstract_available = bool(abstract and abstract.strip() and abstract != "nan" and len(abstract.strip()) > 10)
+        
+        criteria_blocks = "\n".join([
+            f'    "{cid}": {{"triggered": false, "evidence": [], "justification": "", "ambiguity_detected": false}}'
+            for cid in criteria.keys()
+        ])
+
+        prompt = f"""SYSTEM CONTEXT:
+You are a systematic review quality assessor.
+
+Task: Evaluate the methodological quality of a research paper for potential inclusion in a systematic review.
+
+LITERATURE TYPE: {literature_type}
+METHODOLOGY: Quality Criteria Assessment (INDEPENDENT from Inclusion Criteria)
+
+CRITICAL METADATA GROUNDING (HALLUCINATION PREVENTION):
+- Title: "{title_sanitized}" (ALWAYS USE THIS)
+- Year: {year_str}
+- Authors: {authors_display}
+- Abstract: {"AVAILABLE" if abstract_available else "NOT AVAILABLE"}
+
+QUALITY CRITERIA (protocol-authoritative):
+{chr(10).join([f"- {k}: {v}" for k, v in criteria.items()])}
+
+QUALITY ASSESSMENT INSTRUCTIONS:
+1. Evaluate each QC criterion independently
+2. Determine if each criterion is MET (not triggered) or NOT MET (triggered)
+3. Provide evidence from title/abstract where possible
+4. If evidence is insufficient, note ambiguity but do NOT fabricate quality issues
+5. QC is about methodological rigor - NOT relevance (that's IC stage)
+
+{("Abstract available for detailed quality assessment." if abstract_available else "WARNING: No abstract available - perform title-only quality assessment if possible.")}
+
+STRUCTURED OUTPUT REQUIRED:
+Return ONLY valid JSON:
+
+{{
+  "decision": "include" or "exclude",
+  "confidence": 0.0-1.0,
+  "justification": "2-3 sentence explanation of quality assessment",
+  "reasoning_summary": "concise summary of quality evaluation process",
+  "triggered_criteria": ["list of QC criterion IDs with issues"],
+  "non_triggered_criteria": ["list of QC criterion IDs without issues"],
+  "criterion_evaluations": {{
+{criteria_blocks}
+  }},
+  "ambiguity_flags": [],
+  "evidence_extracts": ["verbatim text extracts from title/abstract relevant to quality"],
+  "metadata_grounding": {{
+    "title_used": true,
+    "year_used": {str(has_year).lower()},
+    "authors_used": {str(has_authors).lower()},
+    "abstract_used": {str(abstract_available).lower()},
+    "literature_type_used": true
+  }}
+}}
+
+Return ONLY valid JSON."""
+
+        return prompt
 
     def _build_ec_prompt(
         self,

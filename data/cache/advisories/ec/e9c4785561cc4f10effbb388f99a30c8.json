@@ -1,0 +1,40 @@
+{
+  "cache_key": "e9c4785561cc4f10effbb388f99a30c8",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "EC1",
+      "criterion_name": "EC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC2",
+      "criterion_name": "EC2",
+      "satisfied": false,
+      "evidence": [
+        "Cannot be evaluated at Title/Abstract screening stage. Proceeding with metadata analysis."
+      ],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC6",
+      "criterion_name": "EC6",
+      "satisfied": false,
+      "evidence": [
+        "Handled by system deterministic engine."
+      ],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "The provided metadata does not contain any information that triggers the exclusion criteria. The literature type is White Literature, which is peer-reviewed, but this information alone does not trigger any exclusion criteria.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-19T18:31:30.336635",
+  "generation_duration_ms": 2086.1446857452393
+}

@@ -18,7 +18,7 @@ import json
 import hashlib
 import time
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from datetime import datetime
 
 from .advisory_models import (
@@ -27,6 +27,55 @@ from .advisory_models import (
     AdvisoryDecision,
     AdvisoryStatus
 )
+
+
+def validate_advisory_structure(advisory: Any) -> tuple[bool, str, Optional[Dict]]:
+    """
+    Validate advisory structure and return normalized form.
+    
+    Returns:
+        (is_valid, error_message, normalized_dict)
+    """
+    if advisory is None:
+        return False, "Advisory is None", None
+    
+    if not isinstance(advisory, AdvisoryResult):
+        return False, f"Invalid advisory type: {type(advisory).__name__}", None
+    
+    try:
+        decision_val = advisory.decision.value if hasattr(advisory.decision, 'value') else str(advisory.decision)
+        confidence_val = float(advisory.confidence) if advisory.confidence is not None else 0.0
+        
+        normalized = {
+            "stage": getattr(advisory, 'stage', 'unknown'),
+            "decision": decision_val,
+            "confidence": confidence_val,
+            "triggered_criteria": list(advisory.triggered_criteria) if advisory.triggered_criteria else [],
+            "non_triggered_criteria": list(getattr(advisory, 'non_triggered_criteria', [])) if hasattr(advisory, 'non_triggered_criteria') else [],
+            "criterion_evaluations": {},
+            "justification": str(advisory.justification) if advisory.justification else "",
+            "is_fallback": bool(advisory.is_fallback),
+            "is_placeholder": bool(advisory.is_placeholder),
+            "error": str(advisory.error) if advisory.error else None,
+            "generated_at": str(advisory.generated_at) if advisory.generated_at else None
+        }
+        
+        if advisory.criterion_evaluations:
+            for ce in advisory.criterion_evaluations:
+                if hasattr(ce, 'criterion_id'):
+                    normalized["criterion_evaluations"][ce.criterion_id] = {
+                        "criterion_name": getattr(ce, 'criterion_name', ce.criterion_id),
+                        "satisfied": getattr(ce, 'satisfied', False),
+                        "triggered": getattr(ce, 'triggered', getattr(ce, 'satisfied', False)),
+                        "evidence": getattr(ce, 'evidence', []),
+                        "confidence": getattr(ce, 'confidence', 0.0),
+                        "justification": getattr(ce, 'justification', "")
+                    }
+        
+        return True, "", normalized
+        
+    except Exception as e:
+        return False, f"Validation error: {str(e)}", None
 
 
 class AdvisoryCache:
@@ -61,18 +110,23 @@ class AdvisoryCache:
         NEVER generates or retries - strictly read-only.
         """
         if not cache_key:
+            print(f"[CACHE GET] Stage: {stage} | Key: NONE (empty)")
             return AdvisoryResult.create_unavailable("No cache key provided")
         
         session_key = self._session_key(cache_key, protocol_version, stage)
         
         if session_key in self._session_cache:
-            return self._session_cache[session_key]
+            cached = self._session_cache[session_key]
+            print(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Session HIT")
+            return cached
         
         disk_advisory = self._load_from_disk(cache_key, stage)
         if disk_advisory is not None:
             self._session_cache[session_key] = disk_advisory
+            print(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Disk HIT")
             return disk_advisory
         
+        print(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | MISS (not generated)")
         return AdvisoryResult.create_unavailable("Advisory not yet generated")
     
     def get_for_article(
@@ -88,6 +142,7 @@ class AdvisoryCache:
             Computes cache key from content, then delegates to get().
             """
             cache_key = self._compute_cache_key(title, abstract, protocol_version)
+            print(f"[CACHE GET ARTICLE] Stage: {stage} | Title: {title[:30] if title else 'empty'}... | Key: {cache_key[:16]}...")
             return self.get(cache_key, protocol_version, stage)
     
     def set(self, advisory: AdvisoryResult, stage: str = "ic") -> None:
@@ -212,14 +267,20 @@ class AdvisoryCache:
         disk_path = self._disk_path(cache_key, stage)
         
         if not disk_path.exists():
+            print(f"[CACHE DISK] Stage: {stage} | Key: {cache_key[:16]}... | File not found: {disk_path}")
             return None
         
         try:
             with open(disk_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return AdvisoryResult.from_dict(data)
+            advisory = AdvisoryResult.from_dict(data)
+            print(f"[CACHE DISK] Stage: {stage} | Key: {cache_key[:16]}... | Loaded successfully")
+            return advisory
+        except json.JSONDecodeError as e:
+            print(f"[CACHE DISK ERROR] Stage: {stage} | Key: {cache_key[:16]}... | JSON parse error: {e}")
+            return None
         except Exception as e:
-            print(f"Warning: Failed to load advisory from disk: {e}")
+            print(f"[CACHE DISK ERROR] Stage: {stage} | Key: {cache_key[:16]}... | Load error: {e}")
             return None
     
     def _save_to_disk(self, advisory: AdvisoryResult, stage: str = "ic") -> None:
@@ -350,3 +411,27 @@ def get_ec_advisory_status(
 ) -> AdvisoryStatus:
     """Get status of EC advisory (convenience wrapper)."""
     return get_advisory_status(title, abstract, protocol_version, stage="ec")
+
+
+def get_qc_advisory(
+    title: str,
+    abstract: str,
+    protocol_version: str = "1.0"
+) -> AdvisoryResult:
+    """
+    Get QC advisory for article (convenience wrapper).
+
+    Uses stage="qc" to separate from EC/IC advisories.
+    """
+    print(f"[QC ADVISORY API] Title: {title[:30] if title else 'empty'}... | Protocol: {protocol_version}")
+    return get_advisory(title, abstract, protocol_version, stage="qc")
+
+
+def get_qc_advisory_status(
+    title: str,
+    abstract: str,
+    protocol_version: str = "1.0"
+) -> AdvisoryStatus:
+    """Get status of QC advisory (convenience wrapper)."""
+    print(f"[QC ADVISORY STATUS API] Title: {title[:30] if title else 'empty'}... | Protocol: {protocol_version}")
+    return get_advisory_status(title, abstract, protocol_version, stage="qc")

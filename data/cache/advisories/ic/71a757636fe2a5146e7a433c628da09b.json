@@ -5,10 +5,10 @@
   "confidence": 0.0,
   "triggered_criteria": [],
   "criterion_evaluations": [],
-  "justification": "Generation failed: 'str' object has no attribute 'get'",
-  "error": "'str' object has no attribute 'get'",
+  "justification": "Generation failed: Unsupported stage for advisory generation: ic. Must be 'ec', 'ic', or 'qc'.",
+  "error": "UNKNOWN: Unsupported stage for advisory generation: ic. Must be 'ec', 'ic', or 'qc'.",
   "is_fallback": false,
   "is_placeholder": false,
-  "generated_at": "2026-05-16T18:32:29.986418",
+  "generated_at": "2026-05-18T22:51:34.347021",
   "generation_duration_ms": null
 }

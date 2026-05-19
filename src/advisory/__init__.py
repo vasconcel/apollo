@@ -43,11 +43,14 @@ from .advisory_cache import (
     get_advisory_by_key,
     get_ec_advisory,
     get_ec_advisory_status,
+    get_qc_advisory,
+    get_qc_advisory_status,
     has_advisory,
     store_advisory,
     get_advisory_status,
     get_cache_stats,
-    list_cached_advisories
+    list_cached_advisories,
+    validate_advisory_structure
 )
 
 from .advisory_queue import (
@@ -72,6 +75,15 @@ from .advisory_orchestrator import (
     is_advisory_generation_active
 )
 
+from .advisory_scheduler import (
+    AdvisoryScheduler,
+    get_advisory_scheduler,
+    set_active_stage,
+    get_active_stage,
+    should_process_stage,
+    get_worker_state
+)
+
 __all__ = [
     # Models
     "AdvisoryStatus",
@@ -87,11 +99,16 @@ __all__ = [
     "get_advisory_cache",
     "get_advisory",
     "get_advisory_by_key",
+    "get_ec_advisory",
+    "get_ec_advisory_status",
+    "get_qc_advisory",
+    "get_qc_advisory_status",
     "has_advisory",
     "store_advisory",
     "get_advisory_status",
     "get_cache_stats",
     "list_cached_advisories",
+    "validate_advisory_structure",
     
     # Queue
     "get_advisory_queue",
@@ -110,5 +127,13 @@ __all__ = [
     "initialize_advisory_pipeline",
     "get_advisory_pipeline_status",
     "start_background_generation",
-    "is_advisory_generation_active"
+    "is_advisory_generation_active",
+    
+    # Scheduler
+    "AdvisoryScheduler",
+    "get_advisory_scheduler",
+    "set_active_stage",
+    "get_active_stage",
+    "should_process_stage",
+    "get_worker_state"
 ]

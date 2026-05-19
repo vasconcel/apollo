@@ -1,0 +1,36 @@
+{
+  "cache_key": "c2642cf2c7c7748094d143460f6e7159",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 1.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "EC1",
+      "criterion_name": "EC1",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC2",
+      "criterion_name": "EC2",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC6",
+      "criterion_name": "EC6",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    }
+  ],
+  "justification": "The provided metadata does not contain sufficient information to trigger any exclusion criteria. The literature type is classified as White Literature, which is peer-reviewed, but no other relevant details are available.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-19T18:31:35.190571",
+  "generation_duration_ms": 1770.5047130584717
+}

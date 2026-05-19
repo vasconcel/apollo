@@ -24,6 +24,7 @@ from src.ui.components import (
 )
 from src.ui.theme import COLORS, TYPOGRAPHY
 from src.core.protocol_utils import get_protocol_value
+from src.advisory.advisory_scheduler import set_active_stage
 
 
 def render_advisory_status_banner():
@@ -74,6 +75,8 @@ def render_ec_screening():
     from src.core.dynamic_protocol import ProtocolState
     from src.core.screening_session import ScreeningSession
 
+    set_active_stage("ec")
+
     if "research_protocol" not in st.session_state or st.session_state.research_protocol is None:
         st.warning("⚠ No Research Protocol configured.")
         return
@@ -92,9 +95,9 @@ def render_ec_screening():
             protocol_version=protocol.protocol_version,
             researcher_id="researcher_1"
         )
-        st.session_state.apollo_session.stage = "ec"
 
     session = st.session_state.apollo_session
+    session.stage = "ec"
 
     if "advisory_pipeline_initialized_ec" not in st.session_state and session.articles:
         from src.advisory import initialize_advisory_pipeline
@@ -513,15 +516,22 @@ def render_ai_advisory_panel(article, current_idx: int):
                 render_suggestion_details(advisory_dict)
             else:
                 print(f"[UI ADVISORY FALLBACK] Status: {status} | Decision: {advisory.decision if hasattr(advisory, 'decision') else 'N/A'}")
-                st.caption("AI advisory unavailable — manual screening fully operational")
                 if status == AdvisoryStatus.PENDING:
-                    st.caption("⏳ Advisory pending. Screening continues without AI.")
+                    st.caption("⏳ Advisory pending — manual screening operational")
+                    print(f"[EC ADVISORY STATE] PENDING | Status: {status}")
                 elif status == AdvisoryStatus.PROCESSING:
-                    st.caption("🔄 Advisory generating...")
+                    st.caption("🔄 Advisory generating — please wait...")
+                    print(f"[EC ADVISORY STATE] PROCESSING | Status: {status}")
                 elif status == AdvisoryStatus.FAILED:
-                    st.caption(f"⚠️ Advisory failed: {advisory.error or 'Unknown'}")
+                    error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
+                    st.caption(f"⚠️ Advisory failed: {error_msg}")
+                    print(f"[EC ADVISORY STATE] FAILED | Error: {error_msg}")
+                elif status == AdvisoryStatus.UNAVAILABLE:
+                    st.caption("○ Advisory unavailable — manual screening fully operational")
+                    print(f"[EC ADVISORY STATE] UNAVAILABLE | Status: {status}")
                 else:
-                    st.caption("No advisory available")
+                    st.caption("○ No advisory generated — manual screening operational")
+                    print(f"[EC ADVISORY STATE] UNKNOWN | Status: {status}")
 
 
 
@@ -595,7 +605,21 @@ def get_ec_codes() -> Dict[str, str]:
 
 
 def render_suggestion_details(suggestion: Dict):
-    """Render LLM advisory as clean recommendation - researcher-focused."""
+    """
+    Render LLM advisory as clean recommendation - researcher-focused.
+    
+    DEFENSIVE VALIDATION: Added type checking to handle malformed advisory structures.
+    """
+    if not isinstance(suggestion, dict):
+        print(f"[ADVISORY RENDER ERROR] Invalid suggestion type: {type(suggestion).__name__}")
+        st.warning("Advisory data unavailable - manual review required")
+        return
+    
+    if not suggestion:
+        print(f"[ADVISORY RENDER ERROR] Empty suggestion dict")
+        st.warning("Advisory empty - manual review required")
+        return
+    
     decision = suggestion.get("decision", "").upper()
 
     if decision == "INCLUDE":
@@ -634,29 +658,35 @@ def render_suggestion_details(suggestion: Dict):
 
     criterion_evals = suggestion.get("criterion_evaluations", {})
     if criterion_evals:
-        ec_criteria = get_protocol_ec_criteria()
-        triggered = {k: v for k, v in criterion_evals.items() if v.get("triggered")}
+        if not isinstance(criterion_evals, dict):
+            print(f"[ADVISORY RENDER ERROR] Invalid criterion_evaluations type in EC: {type(criterion_evals).__name__}")
+            st.caption("Criterion evaluation data unavailable")
+        else:
+            ec_criteria = get_protocol_ec_criteria()
+            triggered = {k: v for k, v in criterion_evals.items() if isinstance(v, dict) and v.get("triggered")}
 
-        if triggered:
-            st.markdown("**Triggered Criteria**")
-            for cid, eval_data in triggered.items():
-                eval_justification = eval_data.get("justification", "")
-                official_def = ec_criteria.get(cid, "")
-                display_text = eval_justification[:100] if eval_justification else official_def
-                st.markdown(f"• **{cid}** — {display_text}")
+            if triggered:
+                st.markdown("**Triggered Criteria**")
+                for cid, eval_data in triggered.items():
+                    eval_justification = eval_data.get("justification", "")
+                    official_def = ec_criteria.get(cid, "")
+                    display_text = eval_justification[:100] if eval_justification else official_def
+                    st.markdown(f"• **{cid}** — {display_text}")
 
-        with st.expander("All Criteria Analysis", expanded=False):
-            for cid, eval_data in criterion_evals.items():
-                triggered = eval_data.get("triggered", False)
-                eval_justification = eval_data.get("justification", "")
-                official_def = ec_criteria.get(cid, "No definition")
+            with st.expander("All Criteria Analysis", expanded=False):
+                for cid, eval_data in criterion_evals.items():
+                    if not isinstance(eval_data, dict):
+                        continue
+                    triggered = eval_data.get("triggered", False)
+                    eval_justification = eval_data.get("justification", "")
+                    official_def = ec_criteria.get(cid, "No definition")
 
-                status_icon = "✗" if triggered else "✓"
-                status_color = COLORS["error"] if triggered else COLORS["text_muted"]
+                    status_icon = "✗" if triggered else "✓"
+                    status_color = COLORS["error"] if triggered else COLORS["text_muted"]
 
-                st.markdown(f"**{status_icon} {cid}** — {official_def}")
-                if eval_justification:
-                    st.caption(f"_{eval_justification}_")
+                    st.markdown(f"**{status_icon} {cid}** — {official_def}")
+                    if eval_justification:
+                        st.caption(f"_{eval_justification}_")
 
     st.caption("*Human reviewer makes final eligibility decision*")
 

@@ -1,0 +1,14 @@
+{
+  "cache_key": "duplicate_test_key",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 0.9,
+  "triggered_criteria": [],
+  "criterion_evaluations": [],
+  "justification": "First store",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": null,
+  "generation_duration_ms": null
+}

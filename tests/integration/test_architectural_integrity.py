@@ -1314,3 +1314,93 @@ class TestStressAndDeterminism:
 
         checksum_after = session2.compute_checksum()
         assert original_checksum == checksum_after
+
+
+class TestAdvisoryLayerBoundary:
+    """Verify advisory layer never imports from UI layer.
+
+    Dependency direction MUST be:
+        UI -> Core -> Advisory
+    NEVER:
+        Advisory -> UI
+    """
+
+    ADVISORY_MODULES = [
+        "src/advisory/advisory_worker.py",
+    ]
+
+    FORBIDDEN_IMPORTS = [
+        "src.ui",
+        "streamlit",
+    ]
+
+    @staticmethod
+    def _is_top_level_import(line: str, content_lines: list) -> bool:
+        """Check if an import statement is at module level (not inside a function)."""
+        line_idx = content_lines.index(line) if line in content_lines else -1
+        if line_idx < 0:
+            return False
+        # Scan backwards from this line to see if we're inside a function body
+        # Simple heuristic: look for 'def ' or 'class ' between start and this line
+        # without encountering a return to indent level 0
+        for i in range(line_idx):
+            prev = content_lines[i]
+            stripped = prev.strip()
+            if stripped.startswith(('def ', 'class ', '@')):
+                # Found a function/class definition before this import
+                # Check if there's an indent change
+                return False
+            if stripped == '' and i > 0:
+                continue
+        return True
+
+    def test_advisory_worker_no_ui_imports(self):
+        """Advisory worker must not import from src.ui.* or streamlit at module level."""
+        base = Path(__file__).parent.parent
+
+        for mod_path in self.ADVISORY_MODULES:
+            full_path = base / mod_path
+            assert full_path.exists(), f"Missing advisory module: {mod_path}"
+
+            content = full_path.read_text(encoding="utf-8")
+            content_lines = content.splitlines()
+            for forbidden in self.FORBIDDEN_IMPORTS:
+                import_lines = [
+                    line for line in content_lines
+                    if line.strip().startswith(("import ", "from "))
+                ]
+                for line in import_lines:
+                    # Only flag top-level imports (not lazy imports inside functions)
+                    if not self._is_top_level_import(line, content_lines):
+                        continue
+                    assert forbidden not in line, (
+                        f"LAYER VIOLATION: {mod_path} top-level imports '{forbidden}'. "
+                        f"Advisory layer must not depend on UI layer. "
+                        f"Offending line: {line.strip()}"
+                    )
+
+    def test_all_advisory_modules_no_ui_imports(self):
+        """All advisory modules must not import from src.ui.* or streamlit at module level."""
+        base = Path(__file__).parent.parent
+        advisory_dir = base / "src/advisory"
+        if not advisory_dir.exists():
+            return
+
+        for py_file in advisory_dir.rglob("*.py"):
+            if py_file.name.startswith("__"):
+                continue
+            content = py_file.read_text(encoding="utf-8")
+            content_lines = content.splitlines()
+            import_lines = [
+                line for line in content_lines
+                if line.strip().startswith(("import ", "from "))
+            ]
+            for line in import_lines:
+                if not self._is_top_level_import(line, content_lines):
+                    continue
+                for forbidden in self.FORBIDDEN_IMPORTS:
+                    assert forbidden not in line, (
+                        f"LAYER VIOLATION: {py_file.relative_to(base)} top-level imports '{forbidden}'. "
+                        f"Advisory layer must not depend on UI layer. "
+                        f"Offending line: {line.strip()}"
+                    )

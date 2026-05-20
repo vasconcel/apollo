@@ -21,6 +21,9 @@ from src.core.session_persistence_service import SessionPersistenceService
 from src.core.session_ingestion_service import SessionIngestionService
 from src.core.session_audit_service import SessionAuditService
 from src.core.session_decision_service import SessionDecisionService
+from src.core.session_orchestration_service import SessionOrchestrationService
+from src.core.workflow_state_service import WorkflowStateService
+from src.core.session_state import SessionState
 
 
 class SessionStage(Enum):
@@ -190,41 +193,100 @@ class ArticleReview:
         )
 
 
-@dataclass
-class ScreeningSession:
-    """Screening session state with workflow rules and dynamic protocol."""
-    session_id: str
-    created_at: str
-    protocol_version: str = "1.0"
-    stage: str = SessionStage.EC.value
-    
-    articles: List[ArticleReview] = field(default_factory=list)
-    
-    dynamic_protocol: Optional[Dict] = field(default_factory=lambda: None)
-    
-    current_index: int = 0
-    total_count: int = 0
-    
-    ec_completed: int = 0
-    ic_completed: int = 0
-    qc_completed: int = 0
+_STATE_FIELD_ALIASES = {
+    "_audit_chain": "audit_chain",
+    "_snapshots": "snapshots",
+}
 
-    included_count: int = 0
-    excluded_count: int = 0
-    skip_count: int = 0
-    discussion_count: int = 0
-    
-    researcher_id: str = "researcher_1"
-    last_saved: str = ""
-    
-    schema_version: str = "2.0"
-    autosave_enabled: bool = False
-    _audit_chain: List[Dict] = field(default_factory=list)
-    
+_REVERSE_FIELD_ALIASES = {v: k for k, v in _STATE_FIELD_ALIASES.items()}
+
+
+class ScreeningSession:
+    """Screening session with workflow rules and dynamic protocol.
+
+    Public compatibility façade that owns a SessionState internally.
+    All mutable state is delegated to self.state.
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        created_at: str,
+        protocol_version: str = "1.0",
+        stage: Optional[str] = None,
+        articles: Optional[List[ArticleReview]] = None,
+        dynamic_protocol: Optional[Dict] = None,
+        current_index: int = 0,
+        total_count: int = 0,
+        ec_completed: int = 0,
+        ic_completed: int = 0,
+        qc_completed: int = 0,
+        included_count: int = 0,
+        excluded_count: int = 0,
+        skip_count: int = 0,
+        discussion_count: int = 0,
+        researcher_id: str = "researcher_1",
+        last_saved: str = "",
+        schema_version: str = "2.0",
+        autosave_enabled: bool = False,
+    ):
+        if stage is None:
+            stage = SessionStage.EC.value
+        # Use __dict__ directly to bypass __setattr__ delegation
+        self.__dict__["state"] = SessionState(
+            session_id=session_id,
+            created_at=created_at,
+            protocol_version=protocol_version,
+            stage=stage,
+            articles=articles or [],
+            dynamic_protocol=dynamic_protocol,
+            current_index=current_index,
+            total_count=total_count,
+            ec_completed=ec_completed,
+            ic_completed=ic_completed,
+            qc_completed=qc_completed,
+            included_count=included_count,
+            excluded_count=excluded_count,
+            skip_count=skip_count,
+            discussion_count=discussion_count,
+            researcher_id=researcher_id,
+            last_saved=last_saved,
+            schema_version=schema_version,
+            autosave_enabled=autosave_enabled,
+        )
+
+    # --- Backward-compatible field access via __getattr__/__setattr__ ---
+
+    def __getattr__(self, name: str):
+        if name == "state":
+            return self.__dict__["state"]
+        state = self.__dict__.get("state")
+        if state is not None:
+            target = _STATE_FIELD_ALIASES.get(name, name)
+            if hasattr(state, target):
+                return getattr(state, target)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    def __setattr__(self, name: str, value):
+        if name == "state":
+            self.__dict__["state"] = value
+            return
+        state = self.__dict__.get("state")
+        if state is not None:
+            target = _STATE_FIELD_ALIASES.get(name, name)
+            if hasattr(state, target):
+                setattr(state, target, value)
+                return
+        self.__dict__[name] = value
+
+    # --- Orchestration methods (delegate to services, operate on self.state) ---
+
     def add_articles(self, article_records: List) -> None:
         """Add articles to session via IngestionService."""
-        self.articles = SessionIngestionService.add_articles(article_records)
-        self.total_count = len(self.articles)
+        self.state.articles = SessionIngestionService.add_articles(article_records)
+        self.state.total_count = len(self.state.articles)
 
     def ingest_from_upload(
         self,
@@ -235,84 +297,85 @@ class ScreeningSession:
         articles = SessionIngestionService.ingest_from_bytes(
             uploaded_file.getvalue(), uploaded_file.name, stage,
         )
-        self.articles = articles
-        self.total_count = len(articles)
+        self.state.articles = articles
+        self.state.total_count = len(articles)
         return articles
-    
+
     def get_current_article(self) -> Optional[ArticleReview]:
         """Get current article for review."""
-        return NavigationService.get_current_article(self.articles, self.current_index)
-    
+        return NavigationService.get_current_article(
+            self.state.articles, self.state.current_index,
+        )
+
     def can_review_current_at_stage(self, stage: str) -> bool:
         """Check if current article can be reviewed at this stage."""
-        return NavigationService.can_review_current_at_stage(self.articles, self.current_index, stage)
-    
+        return NavigationService.can_review_current_at_stage(
+            self.state.articles, self.state.current_index, stage,
+        )
+
     def record_decision(
         self,
         decision: str,
         notes: str = "",
         llm_suggestion: Optional[Dict] = None
     ) -> bool:
-        """Record researcher decision at current stage via DecisionService."""
-        article = self.get_current_article()
-        if not article:
-            return False
-
-        result = SessionDecisionService.apply_review_decision(
-            article, self.stage, decision, notes, llm_suggestion,
-            self.researcher_id, self.dynamic_protocol, self._audit_chain,
+        """Record researcher decision. Delegates coordination to OrchestrationService."""
+        result = SessionOrchestrationService.record_decision(
+            self.state.articles, self.state.current_index,
+            self.state.stage, decision, notes, llm_suggestion,
+            self.state.researcher_id, self.state.dynamic_protocol,
+            self.state.audit_chain,
         )
-
-        if not result["success"]:
+        if result is None:
             return False
-
-        for key, value in result["article_field_updates"].items():
-            setattr(article, key, value)
-
-        for counter, delta in result["counter_increments"].items():
-            setattr(self, counter, getattr(self, counter) + delta)
-
-        self.last_saved = result["timestamp"]
-        self._audit_chain.append(result["audit_event"])
-
-        if result["protocol_snapshot"]:
-            if not hasattr(self, "_snapshots"):
-                self._snapshots = []
-            self._snapshots.append(result["protocol_snapshot"])
-
+        self._apply_decision_side_effects(result)
         return True
-    
+
+    def _apply_decision_side_effects(self, result: Dict) -> None:
+        """Apply state-level side effects from a decision result dict."""
+        for counter, delta in result["counter_increments"].items():
+            setattr(self.state, counter, getattr(self.state, counter) + delta)
+        self.state.last_saved = result["timestamp"]
+        self.state.audit_chain.append(result["audit_event"])
+        if result.get("protocol_snapshot"):
+            self.state.snapshots.append(result["protocol_snapshot"])
+
     def _append_audit_event(self, article: ArticleReview, decision: str, notes: str, stage: str) -> None:
         """Append immutable audit event to chain via AuditService."""
         event = SessionAuditService.append_event(
-            self._audit_chain, self.researcher_id, article, decision, notes, stage,
+            self.state.audit_chain, self.state.researcher_id,
+            article, decision, notes, stage,
         )
-        self._audit_chain.append(event)
-    
+        self.state.audit_chain.append(event)
+
     def verify_audit_chain(self) -> tuple:
         """Verify audit chain integrity via AuditService."""
-        return SessionAuditService.verify_chain(self._audit_chain)
+        return SessionAuditService.verify_chain(self.state.audit_chain)
 
     def detect_tampering(self) -> tuple:
         """Detect tampering in audit chain via AuditService."""
-        return SessionAuditService.detect_tampering(self._audit_chain)
+        return SessionAuditService.detect_tampering(self.state.audit_chain)
 
     def get_audit_events(self) -> List[Dict]:
         """Get all audit events in order via AuditService."""
-        return SessionAuditService.get_events(self._audit_chain)
-    
+        return SessionAuditService.get_events(self.state.audit_chain)
+
     def skip_unreviewable(self) -> bool:
         """Skip articles that can't be reviewed at current stage."""
-        new_index = NavigationService.skip_unreviewable(self.articles, self.current_index, self.stage)
-        if new_index != self.current_index:
-            self.current_index = new_index
+        new_index = NavigationService.skip_unreviewable(
+            self.state.articles, self.state.current_index, self.state.stage,
+        )
+        if new_index != self.state.current_index:
+            self.state.current_index = new_index
             return True
         return False
-    
+
     def advance(self, skip: bool = False) -> None:
         """Move to next article with workflow rules."""
-        self.current_index = NavigationService.advance(self.articles, self.current_index, self.stage, skip)
-    
+        self.state.current_index = NavigationService.advance(
+            self.state.articles, self.state.current_index, self.state.stage, skip,
+        )
+
     def apply_decision(
         self,
         article_id: str,
@@ -323,207 +386,204 @@ class ScreeningSession:
     ) -> bool:
         """
         Apply a decision to a specific article by article_id.
-        Locates article, temporarily sets index, and records decision.
+        Locates article, delegates to OrchestrationService, applies side effects.
         """
-        for idx, article in enumerate(self.articles):
-            if article.article_id == article_id:
-                saved_index = self.current_index
-                self.current_index = idx
-                result = self.record_decision(decision, notes, llm_suggestion)
-                self.current_index = saved_index
-                return result
-        return False
-    
+        result, saved_index = SessionOrchestrationService.apply_decision_by_id(
+            self.state.articles, self.state.current_index,
+            article_id, stage, decision, notes, llm_suggestion,
+            self.state.researcher_id, self.state.dynamic_protocol,
+            self.state.audit_chain,
+        )
+        self.state.current_index = saved_index
+        if result is None:
+            return False
+        self._apply_decision_side_effects(result)
+        return True
+
     def get_discussion_articles(self) -> List[ArticleReview]:
         """Get all articles needing discussion."""
-        return SessionQueryService.get_discussion_articles(self.articles)
-    
+        return SessionQueryService.get_discussion_articles(self.state.articles)
+
     def get_skipped_articles(self) -> List[ArticleReview]:
         """Get all skipped articles."""
-        return SessionQueryService.get_skipped_articles(self.articles, self.stage)
-    
+        return SessionQueryService.get_skipped_articles(
+            self.state.articles, self.state.stage,
+        )
+
     def get_ec_included_articles(self) -> List[ArticleReview]:
         """Get articles that passed EC."""
-        return SessionQueryService.get_ec_included_articles(self.articles)
-    
+        return SessionQueryService.get_ec_included_articles(self.state.articles)
+
     def get_ic_included_articles(self) -> List[ArticleReview]:
         """Get articles that passed IC."""
-        return SessionQueryService.get_ic_included_articles(self.articles)
-    
+        return SessionQueryService.get_ic_included_articles(self.state.articles)
+
     def get_wl_articles(self) -> List[ArticleReview]:
-        """
-        Get White Literature articles only.
-        """
-        return SessionQueryService.get_wl_articles(self.articles)
-    
+        """Get White Literature articles only."""
+        return SessionQueryService.get_wl_articles(self.state.articles)
+
     def get_gl_articles(self) -> List[ArticleReview]:
-        """
-        Get Grey Literature articles only.
-        """
-        return SessionQueryService.get_gl_articles(self.articles)
-    
+        """Get Grey Literature articles only."""
+        return SessionQueryService.get_gl_articles(self.state.articles)
+
     def filter_articles(self, literature_type: Optional[str] = None,
                         stage_decision: Optional[str] = None) -> List[ArticleReview]:
-        """
-        Filter articles by literature type and/or stage decision.
-        """
+        """Filter articles by literature type and/or stage decision."""
         return SessionQueryService.filter_articles(
-            self.articles, self.stage, literature_type, stage_decision,
+            self.state.articles, self.state.stage,
+            literature_type, stage_decision,
         )
-    
+
     def get_wl_progress(self) -> Dict:
         """Get WL-specific progress statistics."""
-        return SessionQueryService.get_wl_progress(self.articles)
-    
+        return SessionQueryService.get_wl_progress(self.state.articles)
+
     def get_gl_progress(self) -> Dict:
         """Get GL-specific progress statistics."""
-        return SessionQueryService.get_gl_progress(self.articles)
-    
+        return SessionQueryService.get_gl_progress(self.state.articles)
+
     def get_pending_for_stage(self, stage: str) -> int:
         """Get count of pending articles for stage."""
         return SessionQueryService.get_pending_for_stage(
-            self.articles, stage,
-            self.ec_completed, self.ic_completed, self.skip_count,
+            self.state.articles, stage,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.skip_count,
         )
-    
+
     def is_complete(self) -> bool:
         """Check if session is complete."""
-        return NavigationService.is_complete(self.current_index, self.total_count, self.stage)
-    
-    def _get_stage_field(self, stage: str) -> str:
-        """Get stage field name."""
-        stage_map = {
-            SessionStage.EC.value: "ec_stage",
-            SessionStage.IC.value: "ic_stage"
-        }
-        return stage_map.get(stage, "")
-    
+        return NavigationService.is_complete(
+            self.state.current_index, self.state.total_count, self.state.stage,
+        )
+
     def get_progress(self) -> Dict:
         """Get progress stats."""
         return SessionQueryService.get_progress(
-            self.articles, self.current_index, self.total_count, self.stage,
-            self.ec_completed, self.ic_completed,
-            self.included_count, self.excluded_count,
-            self.skip_count, self.discussion_count,
+            self.state.articles, self.state.current_index, self.state.total_count,
+            self.state.stage,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.included_count, self.state.excluded_count,
+            self.state.skip_count, self.state.discussion_count,
         )
-    
+
     def save(self, output_dir: str = "sessions") -> str:
         """Save session state to file with hash for integrity."""
         path = SessionPersistenceService.save(
             output_dir,
-            self.session_id, self.created_at, self.protocol_version, self.stage,
-            self.current_index, self.total_count,
-            self.ec_completed, self.ic_completed,
-            self.included_count, self.excluded_count,
-            self.skip_count, self.discussion_count,
-            self.researcher_id, self.last_saved,
-            self.articles,
+            self.state.session_id, self.state.created_at,
+            self.state.protocol_version, self.state.stage,
+            self.state.current_index, self.state.total_count,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.included_count, self.state.excluded_count,
+            self.state.skip_count, self.state.discussion_count,
+            self.state.researcher_id, self.state.last_saved,
+            self.state.articles,
         )
-        self.last_saved = datetime.now().isoformat()
+        self.state.last_saved = datetime.now().isoformat()
         return path
-    
+
     def save_to_json(self, path: str) -> str:
-        """
-        Deterministic JSON persistence with full audit chain.
-        """
+        """Deterministic JSON persistence with full audit chain."""
         result = SessionPersistenceService.save_to_json(
             path,
-            self.session_id, self.created_at, self.protocol_version, self.stage,
-            self.current_index, self.total_count,
-            self.ec_completed, self.ic_completed,
-            self.included_count, self.excluded_count,
-            self.skip_count, self.discussion_count,
-            self.researcher_id, self.last_saved,
-            self.schema_version,
-            self.articles,
-            self.dynamic_protocol,
-            self._audit_chain,
-            self.autosave_enabled,
+            self.state.session_id, self.state.created_at,
+            self.state.protocol_version, self.state.stage,
+            self.state.current_index, self.state.total_count,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.included_count, self.state.excluded_count,
+            self.state.skip_count, self.state.discussion_count,
+            self.state.researcher_id, self.state.last_saved,
+            self.state.schema_version,
+            self.state.articles,
+            self.state.dynamic_protocol,
+            self.state.audit_chain,
+            self.state.autosave_enabled,
         )
-        self.last_saved = datetime.now().isoformat()
+        self.state.last_saved = datetime.now().isoformat()
         return result
-    
+
     def load_from_json(self, path: str) -> bool:
-        """
-        Load session from deterministic JSON with validation.
-        """
+        """Load session from deterministic JSON with validation."""
         result = SessionPersistenceService.load_from_json(path)
         if result is None:
             return False
 
-        self.session_id = result["session_id"]
-        self.created_at = result["created_at"]
-        self.protocol_version = result["protocol_version"]
-        self.stage = result["stage"]
-        self.current_index = result["current_index"]
-        self.total_count = result["total_count"]
-        self.ec_completed = result["ec_completed"]
-        self.ic_completed = result["ic_completed"]
-        self.included_count = result["included_count"]
-        self.excluded_count = result["excluded_count"]
-        self.skip_count = result["skip_count"]
-        self.discussion_count = result["discussion_count"]
-        self.researcher_id = result["researcher_id"]
-        self.last_saved = result["last_saved"]
-        self.schema_version = result["schema_version"]
-        self.autosave_enabled = result["autosave_enabled"]
+        self.state.session_id = result["session_id"]
+        self.state.created_at = result["created_at"]
+        self.state.protocol_version = result["protocol_version"]
+        self.state.stage = result["stage"]
+        self.state.current_index = result["current_index"]
+        self.state.total_count = result["total_count"]
+        self.state.ec_completed = result["ec_completed"]
+        self.state.ic_completed = result["ic_completed"]
+        self.state.included_count = result["included_count"]
+        self.state.excluded_count = result["excluded_count"]
+        self.state.skip_count = result["skip_count"]
+        self.state.discussion_count = result["discussion_count"]
+        self.state.researcher_id = result["researcher_id"]
+        self.state.last_saved = result["last_saved"]
+        self.state.schema_version = result["schema_version"]
+        self.state.autosave_enabled = result["autosave_enabled"]
 
-        self.articles = [ArticleReview(**a) for a in result["articles"]]
+        self.state.articles = [ArticleReview(**a) for a in result["articles"]]
 
         dp = result["dynamic_protocol"]
         if dp is not None and isinstance(dp, dict):
             try:
                 from src.core.dynamic_protocol import DynamicProtocol
                 DynamicProtocol.from_dict(dp)
-                self.dynamic_protocol = dp
+                self.state.dynamic_protocol = dp
             except (TypeError, ValueError):
-                self.dynamic_protocol = None
+                self.state.dynamic_protocol = None
 
-        self._audit_chain = result["audit_chain"]
+        self.state.audit_chain = result["audit_chain"]
 
         return True
-    
+
     def compute_checksum(self) -> str:
         """Compute SHA256 checksum of session canonical JSON."""
         full_data = SessionPersistenceService.to_dict_full(
-            self.session_id, self.created_at, self.protocol_version, self.stage,
-            self.current_index, self.total_count,
-            self.ec_completed, self.ic_completed,
-            self.included_count, self.excluded_count,
-            self.skip_count, self.discussion_count,
-            self.researcher_id, self.last_saved,
-            self.schema_version,
-            self.articles,
-            self.dynamic_protocol,
+            self.state.session_id, self.state.created_at,
+            self.state.protocol_version, self.state.stage,
+            self.state.current_index, self.state.total_count,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.included_count, self.state.excluded_count,
+            self.state.skip_count, self.state.discussion_count,
+            self.state.researcher_id, self.state.last_saved,
+            self.state.schema_version,
+            self.state.articles,
+            self.state.dynamic_protocol,
         )
         return SessionPersistenceService.compute_checksum(full_data)
-    
+
     def _to_dict_full(self) -> Dict:
         """Convert to dictionary with full metadata lineage."""
         return SessionPersistenceService.to_dict_full(
-            self.session_id, self.created_at, self.protocol_version, self.stage,
-            self.current_index, self.total_count,
-            self.ec_completed, self.ic_completed,
-            self.included_count, self.excluded_count,
-            self.skip_count, self.discussion_count,
-            self.researcher_id, self.last_saved,
-            self.schema_version,
-            self.articles,
-            self.dynamic_protocol,
+            self.state.session_id, self.state.created_at,
+            self.state.protocol_version, self.state.stage,
+            self.state.current_index, self.state.total_count,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.included_count, self.state.excluded_count,
+            self.state.skip_count, self.state.discussion_count,
+            self.state.researcher_id, self.state.last_saved,
+            self.state.schema_version,
+            self.state.articles,
+            self.state.dynamic_protocol,
         )
-    
+
     def _to_dict(self) -> Dict:
         """Convert to dictionary."""
         return SessionPersistenceService.to_dict(
-            self.session_id, self.created_at, self.protocol_version, self.stage,
-            self.current_index, self.total_count,
-            self.ec_completed, self.ic_completed,
-            self.included_count, self.excluded_count,
-            self.skip_count, self.discussion_count,
-            self.researcher_id, self.last_saved,
-            self.articles,
+            self.state.session_id, self.state.created_at,
+            self.state.protocol_version, self.state.stage,
+            self.state.current_index, self.state.total_count,
+            self.state.ec_completed, self.state.ic_completed,
+            self.state.included_count, self.state.excluded_count,
+            self.state.skip_count, self.state.discussion_count,
+            self.state.researcher_id, self.state.last_saved,
+            self.state.articles,
         )
-    
+
     @classmethod
     def load(cls, session_id: str, output_dir: str = "sessions") -> Optional["ScreeningSession"]:
         """Load session state from file with validation."""
@@ -548,10 +608,10 @@ class ScreeningSession:
             researcher_id=data.get("researcher_id", "researcher_1"),
             last_saved=data.get("last_saved", ""),
             schema_version=data.get("schema_version", "2.0"),
-            autosave_enabled=data.get("autosave_enabled", False)
+            autosave_enabled=data.get("autosave_enabled", False),
         )
 
-        session.articles = [
+        session.state.articles = [
             ArticleReview(**a) for a in data.get("articles", [])
         ]
 
@@ -560,11 +620,11 @@ class ScreeningSession:
             try:
                 from src.core.dynamic_protocol import DynamicProtocol
                 DynamicProtocol.from_dict(dp)
-                session.dynamic_protocol = dp
+                session.state.dynamic_protocol = dp
             except (TypeError, ValueError):
-                session.dynamic_protocol = None
+                session.state.dynamic_protocol = None
 
-        session._audit_chain = data.get("audit_chain", [])
+        session.state.audit_chain = data.get("audit_chain", [])
 
         return session
 

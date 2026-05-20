@@ -16,14 +16,18 @@
       "criterion_id": "EC2",
       "criterion_name": "EC2",
       "satisfied": false,
-      "evidence": [],
+      "evidence": [
+        "Cannot be evaluated at Title/Abstract screening stage. Proceeding with metadata analysis."
+      ],
       "confidence": 0.0
     },
     {
       "criterion_id": "EC6",
       "criterion_name": "EC6",
       "satisfied": false,
-      "evidence": [],
+      "evidence": [
+        "Handled by system deterministic engine."
+      ],
       "confidence": 0.0
     }
   ],
@@ -31,6 +35,10 @@
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
-  "generated_at": "2026-05-20T01:26:37.321159",
-  "generation_duration_ms": 2728.154182434082
+  "risk_classification": "UNKNOWN",
+  "risk_reason": "",
+  "validation_queue": "UNKNOWN",
+  "requires_validation": false,
+  "generated_at": "2026-05-20T04:30:33.951567",
+  "generation_duration_ms": 2927.9305934906006
 }

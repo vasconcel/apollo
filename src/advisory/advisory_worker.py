@@ -379,12 +379,22 @@ class AdvisoryWorker:
     - Exponential backoff
     - Retry logic
     - Progress persistence
+    
+    Protocol criteria are loaded from the protocol object passed at init
+    or via set_protocol(). This eliminates the previous dependency on
+    Streamlit UI modules for criteria retrieval.
     """
     
-    def __init__(self, config: Optional[AdvisoryConfig] = None):
+    def __init__(self, config: Optional[AdvisoryConfig] = None, protocol=None):
         self.config = config or AdvisoryConfig()
         self._llm = None
         self._protocol_criteria: Optional[Dict] = None
+        self._protocol = protocol
+    
+    def set_protocol(self, protocol) -> None:
+        """Set the protocol object for criteria retrieval."""
+        self._protocol = protocol
+        self._protocol_criteria = None
     
     @property
     def llm(self):
@@ -775,25 +785,19 @@ class AdvisoryWorker:
         return max(0.1, capped_backoff + jitter)
     
     def _load_protocol_criteria(self) -> Dict[str, str]:
-        """Load protocol criteria."""
+        """Load IC protocol criteria via protocol query service."""
         try:
-            from src.ui.modules.ic_screening_view import get_protocol_ic_criteria
-            return get_protocol_ic_criteria()
+            from src.core.protocol_query_service import get_ic_criteria
+            return get_ic_criteria(self._protocol)
         except ImportError:
             return {}
     
     def _load_protocol_criteria_qc(self) -> Dict[str, str]:
-        """Load QC protocol criteria - MUST be independent from IC."""
+        """Load QC protocol criteria via protocol query service - MUST be independent from IC."""
         try:
-            from src.ui.modules.qc_screening_view import get_protocol_qc_criteria
-            return get_protocol_qc_criteria()
+            from src.core.protocol_query_service import get_qc_criteria
+            return get_qc_criteria(self._protocol)
         except ImportError:
-            try:
-                from src.core.dynamic_protocol import ProtocolHandler
-                if hasattr(ProtocolHandler, 'get_qc_criteria'):
-                    return ProtocolHandler.get_qc_criteria()
-            except ImportError:
-                pass
             return {
                 "QC1": "Quality assessment criteria",
                 "QC2": "Methodological rigor assessment"

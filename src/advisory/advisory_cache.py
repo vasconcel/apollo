@@ -143,10 +143,15 @@ class AdvisoryCache:
     def __init__(self, config: Optional[AdvisoryConfig] = None):
         self.config = config or AdvisoryConfig()
         self._session_cache: Dict[str, AdvisoryResult] = {}
+        self.entries: Dict[str, AdvisoryResult] = {}  # Alias for backward compatibility
         
         self._cache_dir = Path(self.config.cache_dir)
         if self.config.enable_disk_cache:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def __len__(self) -> int:
+        """Return number of cached advisories in session cache."""
+        return len(self._session_cache)
     
     def get(self, cache_key: str, protocol_version: str = "1.0", stage: str = "ic") -> AdvisoryResult:
         """

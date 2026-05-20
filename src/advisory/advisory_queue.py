@@ -49,6 +49,11 @@ class AdvisoryQueue:
         if self.config.enable_queue_state:
             self._queue_path.parent.mkdir(parents=True, exist_ok=True)
     
+    def __len__(self) -> int:
+        """Return total number of items in queue (pending + processing + completed)."""
+        state = self.state
+        return state.pending + state.processing + state.completed
+    
     @property
     def state(self) -> QueueState:
         """Get current queue state (lazy load)."""

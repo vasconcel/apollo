@@ -9,6 +9,7 @@ Contains no Streamlit, advisory, or persistence logic.
 from typing import List, Optional, Any
 
 from src.core.logging_config import get_logger
+from src.core.workflow_state_service import WorkflowStateService
 
 logger = get_logger("session_navigation")
 
@@ -108,6 +109,5 @@ class NavigationService:
 
     @staticmethod
     def _stage_field(stage: str) -> str:
-        """Get stage field name ('ec' -> 'ec_stage', 'ic' -> 'ic_stage')."""
-        stage_map = {"ec": "ec_stage", "ic": "ic_stage"}
-        return stage_map.get(stage, "")
+        """Get stage field name, delegated to canonical WorkflowStateService."""
+        return WorkflowStateService.stage_field(stage)

@@ -42,19 +42,11 @@ from src.core.protocol_utils import get_protocol_value
 
 
 def _get_protocol_ic_criteria_cached() -> Dict[str, str]:
-    """Get IC criteria from protocol - cached to avoid repeated access."""
+    """Get IC criteria from protocol - routes through protocol_query_service."""
+    from src.core.protocol_query_service import get_ic_criteria
     if "research_protocol" in st.session_state and st.session_state.research_protocol:
-        protocol = st.session_state.research_protocol
-        return {
-            k: v.description
-            for k, v in protocol.ic.criteria.items()
-            if v.enabled
-        }
-    return {
-        "IC1": "Addresses R&S practices",
-        "IC2": "Reports empirical findings",
-        "IC3": "Focuses on software industry context"
-    }
+        return get_ic_criteria(st.session_state.research_protocol)
+    return get_ic_criteria(None)
 
 
 def _record_ic_decision(session, article, current_idx: int, decision: str):
@@ -115,7 +107,8 @@ def render_ic_screening():
             articles=session.articles,
             protocol_version=pv,
             stage="ic",
-            auto_start=True
+            auto_start=True,
+            protocol=protocol
         )
 
         st.session_state["advisory_pipeline_initialized_ic"] = True
@@ -637,19 +630,11 @@ def render_ai_advisory_panel(article, current_idx: int):
 
 
 def get_protocol_ic_criteria() -> Dict[str, str]:
-    """Get IC criteria from current protocol."""
+    """Get IC criteria from current protocol - routes through protocol_query_service."""
+    from src.core.protocol_query_service import get_ic_criteria
     if "research_protocol" in st.session_state and st.session_state.research_protocol:
-        protocol = st.session_state.research_protocol
-        return {
-            k: v.description
-            for k, v in protocol.ic.criteria.items()
-            if v.enabled
-        }
-    return {
-        "IC1": "Addresses R&S practices",
-        "IC2": "Reports empirical findings",
-        "IC3": "Focuses on software industry context"
-    }
+        return get_ic_criteria(st.session_state.research_protocol)
+    return get_ic_criteria(None)
 
 
 def get_ic_codes() -> Dict[str, str]:

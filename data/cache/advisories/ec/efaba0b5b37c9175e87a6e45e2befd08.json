@@ -31,6 +31,10 @@
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
-  "generated_at": "2026-05-20T01:26:42.434856",
-  "generation_duration_ms": 2031.7647457122803
+  "risk_classification": "UNKNOWN",
+  "risk_reason": "",
+  "validation_queue": "UNKNOWN",
+  "requires_validation": false,
+  "generated_at": "2026-05-20T04:30:39.155068",
+  "generation_duration_ms": 2117.932081222534
 }

@@ -31,21 +31,29 @@ class AdvisoryWorkerOrchestrator:
     - Session integration
     """
     
-    def __init__(self, config: Optional[AdvisoryConfig] = None, stage: str = "ic"):
+    def __init__(self, config: Optional[AdvisoryConfig] = None, stage: str = "ic", protocol=None):
         self.config = config or AdvisoryConfig()
         self._stage = stage
+        self._protocol = protocol
         self._worker: Optional[AdvisoryWorker] = None
         self._worker_thread: Optional[threading.Thread] = None
         self._is_running = False
         self._start_lock = threading.Lock()
         print(f"[ORCHESTRATOR INIT] Stage: {stage}")
     
-    def initialize_queue(self, articles: List, protocol_version: str = "1.0", stage: str = "ic") -> Dict:
+    def set_protocol(self, protocol) -> None:
+        """Set the protocol object for criteria retrieval."""
+        self._protocol = protocol
+
+    def initialize_queue(self, articles: List, protocol_version: str = "1.0", stage: str = "ic", protocol=None) -> Dict:
         """
         Initialize advisory queue from articles.
 
         Called automatically after session creation/upload.
         """
+        if protocol is not None:
+            self._protocol = protocol
+
         print(f"[ORCHESTRATOR] Getting queue for stage: {stage}")
         queue = get_advisory_queue(self.config, stage=stage)
         print(f"[ORCHESTRATOR] Queue retrieved: {id(queue)}")
@@ -82,7 +90,7 @@ class AdvisoryWorkerOrchestrator:
                 return
 
             print(f"[ORCHESTRATOR] Starting worker for stage: {self._stage}")
-            self._worker = AdvisoryWorker(self.config)
+            self._worker = AdvisoryWorker(self.config, protocol=self._protocol)
             self._is_running = True
 
             def run_worker_loop():
@@ -223,7 +231,8 @@ def initialize_advisory_pipeline(
     protocol_version: str = "1.0",
     stage: str = "ic",
     auto_start: bool = True,
-    max_items: Optional[int] = None
+    max_items: Optional[int] = None,
+    protocol=None
 ) -> Dict:
     """
     Initialize advisory pipeline after session creation.
@@ -248,7 +257,7 @@ def initialize_advisory_pipeline(
 
     print(f"[PIPELINE] Initializing for stage: {stage}")
 
-    stats = orchestrator.initialize_queue(articles, protocol_version, stage=stage)
+    stats = orchestrator.initialize_queue(articles, protocol_version, stage=stage, protocol=protocol)
 
     if auto_start:
         orchestrator.start_worker(max_items)

@@ -156,7 +156,7 @@ class TestScreeningSessionDecisionDelegation:
 
     def test_record_decision_delegates(self):
         source = inspect.getsource(ScreeningSession.record_decision)
-        assert "SessionDecisionService.apply_review_decision" in source
+        assert "SessionOrchestrationService.record_decision" in source
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ class TestDecisionArchitecturalBoundary:
 
     def test_screening_session_delegates_to_decision(self):
         source = inspect.getsource(ScreeningSession.record_decision)
-        assert "SessionDecisionService.apply_review_decision" in source
+        assert "SessionOrchestrationService.record_decision" in source
 
     def test_session_decision_service_is_stateless(self):
         s1 = SessionDecisionService()

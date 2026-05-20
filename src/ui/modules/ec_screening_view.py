@@ -43,6 +43,27 @@ def validate_session_index(articles_count: int, current_index: int) -> int:
     return current_index
 
 
+def add_runtime_event(event_type: str, message: str) -> None:
+    """
+    Add a runtime event to session state for observability.
+    Thread-safe, append-only, bounded memory.
+    """
+    from datetime import datetime
+    if "runtime_events" not in st.session_state:
+        st.session_state.runtime_events = []
+    
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    event = f"[{timestamp}] {event_type}: {message}"
+    
+    events = st.session_state.runtime_events
+    events.append(event)
+    
+    if len(events) > 50:
+        events[:] = events[-50:]
+    
+    st.session_state.runtime_events = events
+
+
 def reset_session_for_new_articles(session, articles_count: int):
     """
     Reset session state when article set changes to prevent stale indexes.
@@ -157,7 +178,8 @@ def render_ec_screening():
             articles=session.articles,
             protocol_version=pv,
             stage="ec",
-            auto_start=True
+            auto_start=True,
+            protocol=protocol
         )
 
         st.session_state["advisory_pipeline_initialized_ec"] = True
@@ -282,18 +304,53 @@ def render_screening_workspace(session):
             st.caption(f"Wrong includes: {cal_summary.get('false_inclusion', 0)}")
 
         with st.expander("⚡ OPERATIONAL TELEMETRY", expanded=False):
-            telemetry_col1, telemetry_col2, telemetry_col3 = st.columns(3)
+            telemetry_col1, telemetry_col2, telemetry_col3, telemetry_col4 = st.columns(4)
             with telemetry_col1:
-                st.metric("Total Papers", total)
+                st.metric("Total", total)
             with telemetry_col2:
                 st.metric("Reviewed", reviewed)
             with telemetry_col3:
-                st.metric("Pending Review", total - reviewed)
+                st.metric("Pending", total - reviewed)
+            with telemetry_col4:
+                from src.advisory.advisory_orchestrator import get_advisory_pipeline_status
+                try:
+                    pipeline_status = get_advisory_pipeline_status("ec")
+                    st.metric("Active Workers", pipeline_status.get("workers_active", 0))
+                except:
+                    st.metric("Active Workers", 0)
             
             from src.advisory.advisory_cache import get_advisory_cache
             cache = get_advisory_cache()
-            cache_size = len(cache) if cache else 0
-            st.caption(f"Advisory cache entries: {cache_size}")
+            cache_size = len(cache)
+            
+            from src.advisory.advisory_queue import get_advisory_queue
+            queue = get_advisory_queue()
+            queue_size = len(queue) if queue else 0
+            
+            t2_col1, t2_col2, t2_col3, t2_col4 = st.columns(4)
+            with t2_col1:
+                st.metric("Cache", cache_size)
+            with t2_col2:
+                st.metric("Queue", queue_size)
+            with t2_col3:
+                if queue_size > 0:
+                    pending = sum(1 for item in queue.queue if hasattr(item, 'status') and str(getattr(item, 'status', '')).upper() == 'PENDING')
+                    st.metric("Pending", pending)
+                else:
+                    st.metric("Pending", 0)
+            with t2_col4:
+                from src.advisory.calibration_tracker import get_calibration_summary
+                cal = get_calibration_summary()
+                escalations = cal.get('critical_overrides', 0) + cal.get('high_overrides', 0)
+                st.metric("Escalations", escalations)
+            
+            if "runtime_events" not in st.session_state:
+                st.session_state.runtime_events = []
+            
+            if len(st.session_state.runtime_events) > 0:
+                with st.expander("📜 RUNTIME EVENTS", expanded=False):
+                    for event in list(st.session_state.runtime_events)[-10:]:
+                        st.caption(event)
 
     col_mode, col_queue = st.columns([1, 2])
     with col_mode:
@@ -931,20 +988,11 @@ def _extract_year_robust(source) -> Optional[int]:
 
 
 def get_protocol_ec_criteria() -> Dict[str, str]:
-    """Get EC criteria from current protocol."""
+    """Get EC criteria from current protocol - routes through protocol_query_service."""
+    from src.core.protocol_query_service import get_ec_criteria
     if "research_protocol" in st.session_state and st.session_state.research_protocol:
-        protocol = st.session_state.research_protocol
-        return {
-            k: v.description
-            for k, v in protocol.ec.criteria.items()
-            if v.enabled
-        }
-    return {
-        "EC1": "Not empirical SE research",
-        "EC2": "Published before 2015",
-        "EC3": "Not peer-reviewed - WL sources must be peer-reviewed academic publications",
-        "EC4": "Duplicate publication"
-    }
+        return get_ec_criteria(st.session_state.research_protocol)
+    return get_ec_criteria(None)
 
 
 def get_ec_codes() -> Dict[str, str]:

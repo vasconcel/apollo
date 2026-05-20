@@ -12,12 +12,15 @@ Architectural boundaries tested:
 - Hash chaining, tamper detection, and event ordering are unchanged
 """
 
-import ast
-import inspect
-from pathlib import Path
-
 import pytest
 
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 from src.core.screening_session import (
     ScreeningSession, ArticleReview, SessionStage,
 )
@@ -198,21 +201,20 @@ class TestSessionAuditService:
 
 class TestScreeningSessionAuditDelegation:
 
-    def test_append_audit_event_delegates(self):
-        source = inspect.getsource(ScreeningSession._append_audit_event)
-        assert "SessionAuditService.append_event" in source
-
     def test_verify_audit_chain_delegates(self):
-        source = inspect.getsource(ScreeningSession.verify_audit_chain)
-        assert "SessionAuditService.verify_chain" in source
+        assert "SessionAuditService.verify_chain" in get_source(
+            ScreeningSession.verify_audit_chain
+        )
 
     def test_detect_tampering_delegates(self):
-        source = inspect.getsource(ScreeningSession.detect_tampering)
-        assert "SessionAuditService.detect_tampering" in source
+        assert "SessionAuditService.detect_tampering" in get_source(
+            ScreeningSession.detect_tampering
+        )
 
     def test_get_audit_events_delegates(self):
-        source = inspect.getsource(ScreeningSession.get_audit_events)
-        assert "SessionAuditService.get_events" in source
+        assert "SessionAuditService.get_events" in get_source(
+            ScreeningSession.get_audit_events
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -326,48 +328,30 @@ class TestAuditArchitecturalBoundary:
     ]
 
     def test_no_forbidden_imports_in_source(self):
-        source = inspect.getsource(SessionAuditService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"SessionAuditService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(SessionAuditService),
+            self.IMPORT_BLACKLIST,
+            "SessionAuditService",
+        )
 
     def test_module_ast_no_forbidden_imports(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_audit_service.py"
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, "src", "core", "session_audit_service.py"),
+            self.IMPORT_BLACKLIST,
+            "session_audit_service.py",
         )
-        tree = ast.parse(svc_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for banned in self.IMPORT_BLACKLIST:
-                    if banned.startswith("src."):
-                        assert not module.startswith(banned), (
-                            f"Forbidden import '{module}' in audit service"
-                        )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        if not banned.startswith("src."):
-                            assert alias.name != banned, (
-                                f"Forbidden import '{alias.name}'"
-                            )
 
     def test_screening_session_delegates_to_audit(self):
         for method_name in [
-            "_append_audit_event",
             "verify_audit_chain",
             "detect_tampering",
             "get_audit_events",
         ]:
             method = getattr(ScreeningSession, method_name)
-            source = inspect.getsource(method)
+            source = get_source(method)
             assert "SessionAuditService." in source, (
                 f"{method_name} should delegate to SessionAuditService"
             )
 
     def test_session_audit_service_is_stateless(self):
-        s1 = SessionAuditService()
-        s2 = SessionAuditService()
-        assert type(s1) == type(s2)
+        assert_is_stateless(SessionAuditService)

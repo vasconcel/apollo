@@ -14,11 +14,14 @@ Architectural boundaries tested:
 - No mutation of input article collections
 """
 
-import ast
-import inspect
-from pathlib import Path
-
 import pytest
+
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    get_source,
+    resolve_source_path,
+)
 
 from src.core.screening_session import (
     ScreeningSession, ArticleReview, SessionStage, ReviewDecision,
@@ -369,48 +372,28 @@ class TestSessionQueryArchitecturalBoundary:
 
     def test_no_forbidden_imports_in_source(self):
         """Source-level check for forbidden imports."""
-        source = inspect.getsource(SessionQueryService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"SessionQueryService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(SessionQueryService),
+            self.IMPORT_BLACKLIST,
+            "SessionQueryService",
+        )
 
     def test_module_ast_no_import_from_ui(self):
         """AST-level check: session_query_service.py has no forbidden imports."""
-        qs_path = (
-            Path(__file__).parent.parent
-            / 'src' / 'core' / 'session_query_service.py'
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, 'src', 'core', 'session_query_service.py'),
+            self.IMPORT_BLACKLIST,
+            "session_query_service.py",
         )
-        tree = ast.parse(qs_path.read_text(encoding='utf-8'))
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ''
-                for banned in self.IMPORT_BLACKLIST:
-                    assert not module.startswith(banned), (
-                        f"session_query_service.py must not import '{module}'"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        assert not alias.name.startswith(banned), (
-                            f"session_query_service.py must not import "
-                            f"'{alias.name}'"
-                        )
 
     def test_no_persistence_in_source(self):
         """No persistence-related code in query service."""
-        qs_path = (
-            Path(__file__).parent.parent
-            / 'src' / 'core' / 'session_query_service.py'
-        )
-        source = qs_path.read_text(encoding='utf-8')
+        source = resolve_source_path(
+            __file__, 'src', 'core', 'session_query_service.py'
+        ).read_text(encoding='utf-8')
         persistence_hints = ['json.dump', 'json.load', '.save(', '.load(',
                              'open(']
-        for hint in persistence_hints:
-            assert hint not in source, (
-                f"SessionQueryService must not contain '{hint}'"
-            )
+        assert_source_lacks(source, persistence_hints, "SessionQueryService")
 
     def test_screening_session_delegates_to_query_service(self):
         """ScreeningSession query methods should call SessionQueryService."""
@@ -429,7 +412,7 @@ class TestSessionQueryArchitecturalBoundary:
         ]
         for method_name in query_methods:
             method = getattr(ScreeningSession, method_name)
-            source = inspect.getsource(method)
+            source = get_source(method)
             assert 'SessionQueryService.' in source, (
                 f"{method_name} should delegate to SessionQueryService"
             )

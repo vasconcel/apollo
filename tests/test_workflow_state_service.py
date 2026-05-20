@@ -13,12 +13,15 @@ Architectural boundaries tested:
 - Completion checks are consistent
 """
 
-import ast
-import inspect
-from pathlib import Path
-
 import pytest
 
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 from src.core.workflow_state_service import WorkflowStateService
 
 
@@ -150,56 +153,34 @@ class TestWorkflowArchitecturalBoundary:
     ]
 
     def test_no_forbidden_imports_in_source(self):
-        source = inspect.getsource(WorkflowStateService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"WorkflowStateService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(WorkflowStateService),
+            self.IMPORT_BLACKLIST,
+            "WorkflowStateService",
+        )
 
     def test_module_ast_no_forbidden_imports(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "workflow_state_service.py"
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, "src", "core", "workflow_state_service.py"),
+            self.IMPORT_BLACKLIST,
+            "workflow_state_service.py",
         )
-        tree = ast.parse(svc_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for banned in self.IMPORT_BLACKLIST:
-                    if banned.startswith("src."):
-                        assert not module.startswith(banned), (
-                            f"Forbidden import '{module}' in workflow service"
-                        )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        if not banned.startswith("src."):
-                            assert alias.name != banned, (
-                                f"Forbidden import '{alias.name}'"
-                            )
 
     def test_workflow_state_service_is_stateless(self):
-        s1 = WorkflowStateService()
-        s2 = WorkflowStateService()
-        assert type(s1) == type(s2)
+        assert_is_stateless(WorkflowStateService)
 
     def test_screening_session_imports_workflow_service(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "screening_session.py"
-        )
-        source = svc_path.read_text(encoding="utf-8")
+        source = resolve_source_path(
+            __file__, "src", "core", "screening_session.py"
+        ).read_text(encoding="utf-8")
         assert "from src.core.workflow_state_service import" in source
 
     def test_no_persistence_in_source(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "workflow_state_service.py"
+        source = get_source(WorkflowStateService)
+        assert_source_lacks(
+            source, ["SessionPersistenceService", "save", "load"],
+            "WorkflowStateService",
         )
-        source = svc_path.read_text(encoding="utf-8")
-        assert "SessionPersistenceService" not in source
-        assert "save" not in source
-        assert "load" not in source
 
 
 # ---------------------------------------------------------------------------
@@ -210,46 +191,39 @@ class TestWorkflowConsolidation:
 
     def test_navigation_service_delegates_to_workflow(self):
         from src.core.session_navigation import NavigationService
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_navigation.py"
-        )
-        source = svc_path.read_text(encoding="utf-8")
+        source = resolve_source_path(
+            __file__, "src", "core", "session_navigation.py"
+        ).read_text(encoding="utf-8")
         assert "WorkflowStateService.stage_field(stage)" in source
 
     def test_session_query_service_delegates_to_workflow(self):
         from src.core.session_query_service import SessionQueryService
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_query_service.py"
-        )
-        source = svc_path.read_text(encoding="utf-8")
+        source = resolve_source_path(
+            __file__, "src", "core", "session_query_service.py"
+        ).read_text(encoding="utf-8")
         assert "WorkflowStateService.stage_field(stage)" in source
 
     def test_navigation_service_no_hardcoded_stage_map(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_navigation.py"
-        )
-        source = svc_path.read_text(encoding="utf-8")
+        source = resolve_source_path(
+            __file__, "src", "core", "session_navigation.py"
+        ).read_text(encoding="utf-8")
         assert '"ec": "ec_stage"' not in source
 
     def test_session_query_no_hardcoded_stage_map(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_query_service.py"
-        )
-        source = svc_path.read_text(encoding="utf-8")
+        source = resolve_source_path(
+            __file__, "src", "core", "session_query_service.py"
+        ).read_text(encoding="utf-8")
         assert '"ec": "ec_stage"' not in source
 
     def test_only_workflow_has_stage_field_map(self):
-        wf_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "workflow_state_service.py"
-        )
-        wf_source = wf_path.read_text(encoding="utf-8")
+        from pathlib import Path
+        wf_source = resolve_source_path(
+            __file__, "src", "core", "workflow_state_service.py"
+        ).read_text(encoding="utf-8")
         assert '"ec": "ec_stage"' in wf_source
-        core_dir = Path(__file__).parent.parent / "src" / "core"
+        core_dir = Path(
+            resolve_source_path(__file__, "src", "core")
+        )
         for py_file in core_dir.glob("*.py"):
             if py_file.name == "workflow_state_service.py":
                 continue

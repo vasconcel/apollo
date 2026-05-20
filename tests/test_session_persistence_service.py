@@ -12,15 +12,20 @@ Architectural boundaries tested:
 - Serialization format unchanged
 """
 
-import ast
-import inspect
 import json
 import os
 import tempfile
 import hashlib
-from pathlib import Path
 
 import pytest
+
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 
 from src.core.screening_session import (
     ScreeningSession, ArticleReview, SessionStage,
@@ -455,31 +460,18 @@ class TestPersistenceArchitecturalBoundary:
     IMPORT_BLACKLIST = ['src.ui', 'streamlit', 'src.advisory']
 
     def test_no_forbidden_imports_in_source(self):
-        source = inspect.getsource(SessionPersistenceService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"SessionPersistenceService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(SessionPersistenceService),
+            self.IMPORT_BLACKLIST,
+            "SessionPersistenceService",
+        )
 
     def test_module_ast_no_forbidden_imports(self):
-        ps_path = (
-            Path(__file__).parent.parent
-            / 'src' / 'core' / 'session_persistence_service.py'
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, 'src', 'core', 'session_persistence_service.py'),
+            self.IMPORT_BLACKLIST,
+            "session_persistence_service.py",
         )
-        tree = ast.parse(ps_path.read_text(encoding='utf-8'))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ''
-                for banned in self.IMPORT_BLACKLIST:
-                    assert not module.startswith(banned), (
-                        f"Forbidden import '{module}' in persistence service"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        assert not alias.name.startswith(banned), (
-                            f"Forbidden import '{alias.name}'"
-                        )
 
     def test_screening_session_delegates_to_persistence(self):
         """Verify delegation for persistence methods."""
@@ -487,7 +479,7 @@ class TestPersistenceArchitecturalBoundary:
                    'compute_checksum', '_to_dict', '_to_dict_full']
         for method_name in methods:
             method = getattr(ScreeningSession, method_name)
-            source = inspect.getsource(method)
+            source = get_source(method)
             assert 'SessionPersistenceService.' in source, (
                 f"{method_name} should delegate to SessionPersistenceService"
             )
@@ -496,13 +488,11 @@ class TestPersistenceArchitecturalBoundary:
         from src.core.screening_session import (
             list_sessions, recover_session,
         )
-        assert 'SessionPersistenceService.list_sessions' in inspect.getsource(list_sessions)
-        assert 'SessionPersistenceService.recover_session' in inspect.getsource(recover_session)
+        assert 'SessionPersistenceService.list_sessions' in get_source(list_sessions)
+        assert 'SessionPersistenceService.recover_session' in get_source(recover_session)
 
     def test_session_persistence_service_is_stateless(self):
-        s1 = SessionPersistenceService()
-        s2 = SessionPersistenceService()
-        assert type(s1) == type(s2)
+        assert_is_stateless(SessionPersistenceService)
 
 
 # ---------------------------------------------------------------------------

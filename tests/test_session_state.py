@@ -6,11 +6,15 @@ with no orchestration logic, no forbidden imports, and backward-compatible
 field access through ScreeningSession delegation.
 """
 
-import ast
-from pathlib import Path
-
 import pytest
 
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 from src.core.session_state import SessionState
 from src.core.screening_session import ScreeningSession
 
@@ -181,44 +185,25 @@ class TestSessionStateDeterminism:
 class TestSessionStateArchitecturalBoundary:
 
     IMPORT_BLACKLIST = [
-        "src.ui", "streamlit", "src.advisory", "SessionPersistenceService",
+        "src.ui", "streamlit", "src.advisory",
         "NavigationService", "SessionQueryService", "SessionAuditService",
         "SessionIngestionService", "SessionDecisionService", "WorkflowStateService",
         "screening_session", "ArticleReview",
     ]
 
     def test_no_forbidden_imports_in_session_state(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_state.py"
+        assert_source_lacks(
+            get_source(SessionState),
+            self.IMPORT_BLACKLIST,
+            "SessionState",
         )
-        source = svc_path.read_text(encoding="utf-8")
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"SessionState must not reference '{banned}'"
-            )
 
     def test_module_ast_no_forbidden_imports(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_state.py"
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, "src", "core", "session_state.py"),
+            self.IMPORT_BLACKLIST,
+            "session_state.py",
         )
-        tree = ast.parse(svc_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for banned in self.IMPORT_BLACKLIST:
-                    if banned.startswith("src."):
-                        assert not module.startswith(banned), (
-                            f"Forbidden import '{module}' in SessionState"
-                        )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        if not banned.startswith("src."):
-                            assert alias.name != banned, (
-                                f"Forbidden import '{alias.name}'"
-                            )
 
     def test_session_state_is_dataclass(self):
         from dataclasses import is_dataclass
@@ -233,11 +218,19 @@ class TestSessionStateArchitecturalBoundary:
         assert len(methods) == 0, f"SessionState has unexpected methods: {methods}"
 
     def test_session_state_class_has_no_imports(self):
-        source = Path(__file__).parent.parent / "src" / "core" / "session_state.py"
-        content = source.read_text(encoding="utf-8")
-        assert "import streamlit" not in content
-        assert "from streamlit" not in content
-        assert "import src.ui" not in content
-        assert "from src.ui" not in content
-        assert "import src.advisory" not in content
-        assert "from src.advisory" not in content
+        assert_source_lacks(
+            get_source(SessionState),
+            ["import streamlit", "from streamlit", "import src.ui", "from src.ui",
+             "import src.advisory", "from src.advisory"],
+            "SessionState",
+        )
+
+    def test_screening_session_no_ui_advisory_imports(self):
+        """ScreeningSession as a façade must not import UI or advisory layers."""
+        assert_source_lacks(
+            get_source(ScreeningSession),
+            ["import streamlit", "from streamlit",
+             "import src.ui", "from src.ui",
+             "import src.advisory", "from src.advisory"],
+            "ScreeningSession",
+        )

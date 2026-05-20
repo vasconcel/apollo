@@ -6,12 +6,15 @@ multi-service decision workflows, remains stateless, and
 preserves all behavioral invariants.
 """
 
-import ast
-import inspect
-from pathlib import Path
-
 import pytest
 
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 from src.core.session_orchestration_service import SessionOrchestrationService
 from src.core.screening_session import ScreeningSession, ArticleReview
 
@@ -291,61 +294,43 @@ class TestOrchestrationArchitecturalBoundary:
     ]
 
     def test_no_forbidden_imports_in_source(self):
-        source = inspect.getsource(SessionOrchestrationService)
-        for banned in self.FORBIDDEN_IMPORTS:
-            assert banned not in source, (
-                f"SessionOrchestrationService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(SessionOrchestrationService),
+            self.FORBIDDEN_IMPORTS,
+            "SessionOrchestrationService",
+        )
 
     def test_module_ast_no_forbidden_imports(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_orchestration_service.py"
+        assert_module_ast_lacks_imports(
+            resolve_source_path(
+                __file__, "src", "core", "session_orchestration_service.py"
+            ),
+            self.FORBIDDEN_IMPORTS,
+            "session_orchestration_service.py",
         )
-        tree = ast.parse(svc_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for banned in self.FORBIDDEN_IMPORTS:
-                    if banned.startswith("src."):
-                        assert not module.startswith(banned), (
-                            f"Forbidden import '{module}'"
-                        )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.FORBIDDEN_IMPORTS:
-                        if not banned.startswith("src."):
-                            assert alias.name != banned, (
-                                f"Forbidden import '{alias.name}'"
-                            )
 
     def test_service_is_stateless(self):
-        s1 = SessionOrchestrationService()
-        s2 = SessionOrchestrationService()
-        assert type(s1) == type(s2)
+        assert_is_stateless(SessionOrchestrationService)
 
     def test_screening_session_delegates_to_orchestration(self):
-        source = inspect.getsource(ScreeningSession.record_decision)
-        assert "SessionOrchestrationService.record_decision" in source
+        assert "SessionOrchestrationService.record_decision" in get_source(
+            ScreeningSession.record_decision
+        )
 
     def test_screening_session_apply_decision_delegates(self):
-        source = inspect.getsource(ScreeningSession.apply_decision)
-        assert "SessionOrchestrationService.apply_decision_by_id" in source
+        assert "SessionOrchestrationService.apply_decision_by_id" in get_source(
+            ScreeningSession.apply_decision
+        )
 
     def test_no_persistence_in_source(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_orchestration_service.py"
+        assert_source_lacks(
+            get_source(SessionOrchestrationService),
+            ["SessionPersistenceService"],
+            "SessionOrchestrationService",
         )
-        source = svc_path.read_text(encoding="utf-8")
-        assert "SessionPersistenceService" not in source
 
     def test_dependency_direction(self):
         """OrchestrationService must depend on navigation + decision only."""
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_orchestration_service.py"
-        )
-        source = svc_path.read_text(encoding="utf-8")
+        source = get_source(SessionOrchestrationService)
         assert "NavigationService" in source
         assert "SessionDecisionService" in source

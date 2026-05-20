@@ -12,11 +12,15 @@ Architectural boundaries tested:
 - Metadata normalization helpers are deterministic
 """
 
-import ast
-import inspect
-from pathlib import Path
-
 import pytest
+
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 
 from src.core.screening_session import (
     ScreeningSession, ArticleReview, SessionStage,
@@ -155,11 +159,11 @@ class TestScreeningSessionIngestionDelegation:
     """ScreeningSession methods must delegate to SessionIngestionService."""
 
     def test_add_articles_delegates(self):
-        source = inspect.getsource(ScreeningSession.add_articles)
+        source = get_source(ScreeningSession.add_articles)
         assert 'SessionIngestionService.add_articles' in source
 
     def test_ingest_from_upload_delegates(self):
-        source = inspect.getsource(ScreeningSession.ingest_from_upload)
+        source = get_source(ScreeningSession.ingest_from_upload)
         assert 'SessionIngestionService.ingest_from_bytes' in source
 
 
@@ -196,46 +200,34 @@ class TestIngestionArchitecturalBoundary:
     IMPORT_BLACKLIST = ['src.ui', 'streamlit', 'src.advisory']
 
     def test_no_forbidden_imports_in_source(self):
-        source = inspect.getsource(SessionIngestionService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"SessionIngestionService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(SessionIngestionService),
+            self.IMPORT_BLACKLIST,
+            "SessionIngestionService",
+        )
 
     def test_module_ast_no_forbidden_imports(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / 'src' / 'core' / 'session_ingestion_service.py'
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, 'src', 'core', 'session_ingestion_service.py'),
+            self.IMPORT_BLACKLIST,
+            "session_ingestion_service.py",
         )
-        tree = ast.parse(svc_path.read_text(encoding='utf-8'))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ''
-                for banned in self.IMPORT_BLACKLIST:
-                    assert not module.startswith(banned), (
-                        f"Forbidden import '{module}' in ingestion service"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        assert not alias.name.startswith(banned), (
-                            f"Forbidden import '{alias.name}'"
-                        )
 
     def test_no_persistence_in_source(self):
-        source = inspect.getsource(SessionIngestionService)
-        assert 'SessionPersistenceService' not in source
+        assert_source_lacks(
+            get_source(SessionIngestionService),
+            ['SessionPersistenceService'],
+            "SessionIngestionService",
+        )
 
     def test_screening_session_delegates_to_ingestion(self):
         """Verify delegation for add_articles and ingest_from_upload."""
         for method_name in ['add_articles', 'ingest_from_upload']:
             method = getattr(ScreeningSession, method_name)
-            source = inspect.getsource(method)
+            source = get_source(method)
             assert 'SessionIngestionService.' in source, (
                 f"{method_name} should delegate to SessionIngestionService"
             )
 
     def test_session_ingestion_service_is_stateless(self):
-        s1 = SessionIngestionService()
-        s2 = SessionIngestionService()
-        assert type(s1) == type(s2)
+        assert_is_stateless(SessionIngestionService)

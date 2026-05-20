@@ -12,12 +12,14 @@ Architectural boundaries tested:
 - Serialization format is unchanged
 """
 
-import ast
-import inspect
-import sys
-from pathlib import Path
-
 import pytest
+
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    get_source,
+    resolve_source_path,
+)
 
 from src.core.screening_session import (
     ScreeningSession, ArticleReview, SessionStage,
@@ -258,44 +260,32 @@ class TestNavigationArchitecturalBoundary:
 
     def test_no_ui_imports(self):
         """NavigationService should not import from UI layer."""
-        source = inspect.getsource(NavigationService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"NavigationService must not import '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(NavigationService),
+            self.IMPORT_BLACKLIST,
+            "NavigationService",
+        )
 
     def test_module_ast_no_import_from_ui(self):
         """AST-level check: session_navigation.py has no UI/advisory imports."""
-        nav_path = Path(__file__).parent.parent / 'src' / 'core' / 'session_navigation.py'
-        tree = ast.parse(nav_path.read_text(encoding='utf-8'))
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ''
-                for banned in self.IMPORT_BLACKLIST:
-                    assert not module.startswith(banned), (
-                        f"session_navigation.py must not import '{module}'"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        assert not alias.name.startswith(banned), (
-                            f"session_navigation.py must not import '{alias.name}'"
-                        )
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, 'src', 'core', 'session_navigation.py'),
+            self.IMPORT_BLACKLIST,
+            "session_navigation.py",
+        )
 
     def test_screening_session_delegates_to_navigation(self):
         """ScreeningSession should call NavigationService for navigation."""
-        source = inspect.getsource(ScreeningSession.get_current_article)
-        assert 'NavigationService.get_current_article' in source
-
-        source = inspect.getsource(ScreeningSession.advance)
-        assert 'NavigationService.advance' in source
-
-        source = inspect.getsource(ScreeningSession.skip_unreviewable)
-        assert 'NavigationService.skip_unreviewable' in source
-
-        source = inspect.getsource(ScreeningSession.is_complete)
-        assert 'NavigationService.is_complete' in source
+        assert 'NavigationService.get_current_article' in get_source(
+            ScreeningSession.get_current_article
+        )
+        assert 'NavigationService.advance' in get_source(ScreeningSession.advance)
+        assert 'NavigationService.skip_unreviewable' in get_source(
+            ScreeningSession.skip_unreviewable
+        )
+        assert 'NavigationService.is_complete' in get_source(
+            ScreeningSession.is_complete
+        )
 
 
 # ---------------------------------------------------------------------------

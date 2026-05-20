@@ -198,9 +198,6 @@ _STATE_FIELD_ALIASES = {
     "_snapshots": "snapshots",
 }
 
-_REVERSE_FIELD_ALIASES = {v: k for k, v in _STATE_FIELD_ALIASES.items()}
-
-
 class ScreeningSession:
     """Screening session with workflow rules and dynamic protocol.
 
@@ -339,14 +336,6 @@ class ScreeningSession:
         self.state.audit_chain.append(result["audit_event"])
         if result.get("protocol_snapshot"):
             self.state.snapshots.append(result["protocol_snapshot"])
-
-    def _append_audit_event(self, article: ArticleReview, decision: str, notes: str, stage: str) -> None:
-        """Append immutable audit event to chain via AuditService."""
-        event = SessionAuditService.append_event(
-            self.state.audit_chain, self.state.researcher_id,
-            article, decision, notes, stage,
-        )
-        self.state.audit_chain.append(event)
 
     def verify_audit_chain(self) -> tuple:
         """Verify audit chain integrity via AuditService."""

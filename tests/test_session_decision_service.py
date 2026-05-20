@@ -12,11 +12,15 @@ Architectural boundaries tested:
 - Stage enforcement, audit coordination, and counter updates are unchanged
 """
 
-import ast
-import inspect
-from pathlib import Path
-
 import pytest
+
+from src.core.architectural_fitness import (
+    assert_source_lacks,
+    assert_module_ast_lacks_imports,
+    assert_is_stateless,
+    get_source,
+    resolve_source_path,
+)
 
 from src.core.screening_session import (
     ScreeningSession, ArticleReview, SessionStage,
@@ -155,8 +159,9 @@ class TestSessionDecisionService:
 class TestScreeningSessionDecisionDelegation:
 
     def test_record_decision_delegates(self):
-        source = inspect.getsource(ScreeningSession.record_decision)
-        assert "SessionOrchestrationService.record_decision" in source
+        assert "SessionOrchestrationService.record_decision" in get_source(
+            ScreeningSession.record_decision
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -292,39 +297,23 @@ class TestDecisionArchitecturalBoundary:
     ]
 
     def test_no_forbidden_imports_in_source(self):
-        source = inspect.getsource(SessionDecisionService)
-        for banned in self.IMPORT_BLACKLIST:
-            assert banned not in source, (
-                f"SessionDecisionService must not reference '{banned}'"
-            )
+        assert_source_lacks(
+            get_source(SessionDecisionService),
+            self.IMPORT_BLACKLIST,
+            "SessionDecisionService",
+        )
 
     def test_module_ast_no_forbidden_imports(self):
-        svc_path = (
-            Path(__file__).parent.parent
-            / "src" / "core" / "session_decision_service.py"
+        assert_module_ast_lacks_imports(
+            resolve_source_path(__file__, "src", "core", "session_decision_service.py"),
+            self.IMPORT_BLACKLIST,
+            "session_decision_service.py",
         )
-        tree = ast.parse(svc_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                for banned in self.IMPORT_BLACKLIST:
-                    if banned.startswith("src."):
-                        assert not module.startswith(banned), (
-                            f"Forbidden import '{module}' in decision service"
-                        )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    for banned in self.IMPORT_BLACKLIST:
-                        if not banned.startswith("src."):
-                            assert alias.name != banned, (
-                                f"Forbidden import '{alias.name}'"
-                            )
 
     def test_screening_session_delegates_to_decision(self):
-        source = inspect.getsource(ScreeningSession.record_decision)
-        assert "SessionOrchestrationService.record_decision" in source
+        assert "SessionOrchestrationService.record_decision" in get_source(
+            ScreeningSession.record_decision
+        )
 
     def test_session_decision_service_is_stateless(self):
-        s1 = SessionDecisionService()
-        s2 = SessionDecisionService()
-        assert type(s1) == type(s2)
+        assert_is_stateless(SessionDecisionService)

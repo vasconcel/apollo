@@ -71,7 +71,9 @@ from .advisory_models import (
     AdvisoryDecision,
     CriterionEvaluation,
     QueueItem,
-    AdvisoryStatus
+    AdvisoryStatus,
+    validate_grounding,
+    compute_hallucination_risk
 )
 from .advisory_queue import get_advisory_queue
 from .advisory_cache import get_advisory_cache, store_advisory
@@ -537,7 +539,10 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification="LLM not available",
                 error="LLM_UNAVAILABLE: LLM assistant not initialized",
-                generated_at=datetime.utcnow().isoformat()
+                generated_at=datetime.utcnow().isoformat(),
+                hallucination_risk_score=1.0,
+                grounding_strength=0.0,
+                unsupported_claims_detected=True
             )
 
         if not self.llm.is_available():
@@ -563,7 +568,10 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification="LLM service unavailable",
                 error="LLM_UNAVAILABLE: LLM not available",
-                generated_at=datetime.utcnow().isoformat()
+                generated_at=datetime.utcnow().isoformat(),
+                hallucination_risk_score=1.0,
+                grounding_strength=0.0,
+                unsupported_claims_detected=True
             )
 
         if self._protocol_criteria is None:
@@ -684,6 +692,29 @@ class AdvisoryWorker:
 
             error_msg = parse_error or (f"FAILED: {safe_enum_value(failure_type)}" if failure_type else None)
 
+            justification = suggestion_dict.get("justification", "")
+            grounding_strength, evidence_snippets, criterion_grounding, unsupported_detected = validate_grounding(
+                justification=justification,
+                title=title,
+                abstract=abstract or "",
+                criterion_evaluations=criterion_evaluations,
+                metadata=metadata
+            )
+
+            metadata_completeness = 0.0
+            if metadata:
+                fields_present = sum(1 for v in metadata.values() if v)
+                metadata_completeness = min(fields_present / 10.0, 1.0)
+
+            hallucination_risk = compute_hallucination_risk(
+                is_fallback=False,
+                grounding_strength=grounding_strength,
+                unsupported_claims=unsupported_detected,
+                confidence=suggestion_dict.get("confidence", 0.0),
+                metadata_completeness=metadata_completeness,
+                error=error_msg
+            )
+
             return AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
@@ -691,10 +722,15 @@ class AdvisoryWorker:
                 confidence=suggestion_dict.get("confidence", 0.0),
                 triggered_criteria=triggered_criteria,
                 criterion_evaluations=criterion_evaluations,
-                justification=suggestion_dict.get("justification", ""),
+                justification=justification,
                 error=error_msg,
                 generated_at=datetime.utcnow().isoformat(),
-                generation_duration_ms=duration_ms
+                generation_duration_ms=duration_ms,
+                grounding_evidence=evidence_snippets,
+                criterion_grounding=criterion_grounding,
+                grounding_strength=grounding_strength,
+                unsupported_claims_detected=unsupported_detected,
+                hallucination_risk_score=hallucination_risk
             )
 
         except Exception as e:
@@ -722,7 +758,10 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification=f"Generation failed: {str(e)}",
                 error=f"UNKNOWN: {str(e)}",
-                generated_at=datetime.utcnow().isoformat()
+                generated_at=datetime.utcnow().isoformat(),
+                hallucination_risk_score=1.0,
+                grounding_strength=0.0,
+                unsupported_claims_detected=True
             )
     
     def _calculate_backoff(self, attempt: int) -> float:

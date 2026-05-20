@@ -68,6 +68,113 @@ class AdvisoryDecision(str, Enum):
     INSUFFICIENT_METADATA = "INSUFFICIENT_METADATA"
 
 
+class RiskClassification(str, Enum):
+    """Risk classification for advisory decisions."""
+    LOW_RISK = "LOW_RISK"
+    MEDIUM_RISK = "MEDIUM_RISK"
+    HIGH_RISK = "HIGH_RISK"
+    CRITICAL_REVIEW = "CRITICAL_REVIEW"
+
+
+class ValidationQueue(str, Enum):
+    """Human validation queue categorization."""
+    AUTO_ACCEPT_CANDIDATES = "AUTO_ACCEPT_CANDIDATES"
+    AUTO_EXCLUDE_CANDIDATES = "AUTO_EXCLUDE_CANDIDATES"
+    PRIORITY_REVIEW = "PRIORITY_REVIEW"
+    CRITICAL_REVIEW = "CRITICAL_REVIEW"
+
+
+class ScreeningMode(str, Enum):
+    """Operational screening modes."""
+    STRICT_MODE = "STRICT_MODE"
+    BALANCED_MODE = "BALANCED_MODE"
+    ACCELERATED_MODE = "ACCELERATED_MODE"
+
+
+class OverrideReason(str, Enum):
+    """Human override rationale categories."""
+    AMBIGUOUS_ABSTRACT = "ambiguous_abstract"
+    CRITERION_MISCLASSIFICATION = "criterion_misclassification"
+    DUPLICATE_ERROR = "duplicate_error"
+    METADATA_INSUFFICIENCY = "metadata_insufficiency"
+    PROTOCOL_INTERPRETATION = "protocol_interpretation"
+    FALSE_EXCLUSION_RISK = "false_exclusion_risk"
+    FALSE_INCLUSION_RISK = "false_inclusion_risk"
+    OTHER = "other"
+
+
+@dataclass
+class CalibrationEvent:
+    """
+    Calibration event - tracks disagreement between AI advisory and human decision.
+
+    Used to build empirical calibration dataset for future reliability estimation.
+    """
+    article_id: str
+    protocol_version: str
+    stage: str
+
+    ai_decision: str
+    human_decision: str
+    ai_confidence: float
+
+    metadata_completeness: float
+    risk_classification: str
+    ambiguity_detected: bool
+    fallback_used: bool
+    triggered_criteria: List[str] = field(default_factory=list)
+    validation_queue: str = ""
+
+    disagreement: bool = False
+    override_reason: str = ""
+    override_severity: str = ""
+
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for JSONL persistence."""
+        return {
+            "article_id": self.article_id,
+            "protocol_version": self.protocol_version,
+            "stage": self.stage,
+            "ai_decision": self.ai_decision,
+            "human_decision": self.human_decision,
+            "ai_confidence": self.ai_confidence,
+            "metadata_completeness": self.metadata_completeness,
+            "risk_classification": self.risk_classification,
+            "ambiguity_detected": self.ambiguity_detected,
+            "fallback_used": self.fallback_used,
+            "triggered_criteria": self.triggered_criteria,
+            "validation_queue": self.validation_queue,
+            "disagreement": self.disagreement,
+            "override_reason": self.override_reason,
+            "override_severity": self.override_severity,
+            "timestamp": self.timestamp
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CalibrationEvent":
+        """Deserialize from dictionary."""
+        return cls(
+            article_id=data.get("article_id", ""),
+            protocol_version=data.get("protocol_version", "1.0"),
+            stage=data.get("stage", ""),
+            ai_decision=data.get("ai_decision", ""),
+            human_decision=data.get("human_decision", ""),
+            ai_confidence=data.get("ai_confidence", 0.0),
+            metadata_completeness=data.get("metadata_completeness", 0.0),
+            risk_classification=data.get("risk_classification", ""),
+            ambiguity_detected=data.get("ambiguity_detected", False),
+            fallback_used=data.get("fallback_used", False),
+            triggered_criteria=data.get("triggered_criteria", []),
+            validation_queue=data.get("validation_queue", ""),
+            disagreement=data.get("disagreement", False),
+            override_reason=data.get("override_reason", ""),
+            override_severity=data.get("override_severity", ""),
+            timestamp=data.get("timestamp", datetime.utcnow().isoformat())
+        )
+
+
 def compute_metadata_completeness(title: str, abstract: str, metadata: dict = None) -> float:
     """
     Calculate metadata completeness score for confidence calibration.
@@ -129,6 +236,285 @@ def calibrate_confidence(base_confidence: float, metadata_completeness: float) -
         return base_confidence
 
 
+def compute_risk_classification(
+    confidence: float,
+    metadata_completeness: float,
+    decision: AdvisoryDecision,
+    is_fallback: bool = False,
+    error: str = None,
+    ambiguity_detected: bool = False,
+    criterion_grounding_score: float = 1.0
+) -> tuple[RiskClassification, str]:
+    """
+    Compute risk classification for an advisory - DETERMINISTIC.
+
+    Returns tuple of (RiskClassification, reason)
+
+    Risk factors:
+    - Confidence level
+    - Metadata completeness
+    - Fallback usage (indicates parsing issues)
+    - Error presence (advisory generation failed)
+    - Ambiguity signals
+    - Criterion grounding strength
+    """
+    reasons = []
+
+    if is_fallback or error:
+        return RiskClassification.CRITICAL_REVIEW, "Advisory generation failed or used fallback"
+
+    if decision == AdvisoryDecision.INSUFFICIENT_METADATA:
+        return RiskClassification.CRITICAL_REVIEW, "Insufficient metadata for reliable evaluation"
+
+    if decision == AdvisoryDecision.UNAVAILABLE:
+        return RiskClassification.CRITICAL_REVIEW, "Advisory unavailable"
+
+    if criterion_grounding_score < 0.5:
+        reasons.append("weak_criterion_grounding")
+        return RiskClassification.HIGH_RISK, f"Weak criterion grounding: {criterion_grounding_score:.2f}"
+
+    if ambiguity_detected:
+        reasons.append("ambiguity_detected")
+        if confidence < 0.7 or metadata_completeness < 0.5:
+            return RiskClassification.HIGH_RISK, "Ambiguity with low confidence/metadata"
+
+    if metadata_completeness < 0.3:
+        reasons.append("sparse_metadata")
+        if confidence < 0.8:
+            return RiskClassification.HIGH_RISK, "Sparse metadata with moderate confidence"
+        return RiskClassification.MEDIUM_RISK, "Sparse metadata but high confidence"
+
+    if confidence < 0.5:
+        reasons.append("low_confidence")
+        return RiskClassification.HIGH_RISK, f"Low confidence: {confidence:.2f}"
+
+    if metadata_completeness < 0.5 and confidence < 0.7:
+        reasons.append("moderate_uncertainty")
+        return RiskClassification.MEDIUM_RISK, "Moderate uncertainty in both confidence and metadata"
+
+    if confidence >= 0.85 and metadata_completeness >= 0.7 and criterion_grounding_score >= 0.8:
+        return RiskClassification.LOW_RISK, "High confidence, complete metadata, strong grounding"
+
+    if confidence >= 0.7 and metadata_completeness >= 0.5:
+        return RiskClassification.MEDIUM_RISK, "Adequate confidence and metadata"
+
+    return RiskClassification.MEDIUM_RISK, "Default medium risk classification"
+
+
+def get_validation_queue(
+    risk_classification: RiskClassification,
+    decision: AdvisoryDecision,
+    sampling_deterministic_hash: str = ""
+) -> ValidationQueue:
+    """
+    Map risk classification to validation queue - DETERMINISTIC.
+
+    Returns the appropriate queue for human validation.
+    """
+    if risk_classification == RiskClassification.CRITICAL_REVIEW:
+        return ValidationQueue.CRITICAL_REVIEW
+
+    if risk_classification == RiskClassification.HIGH_RISK:
+        return ValidationQueue.PRIORITY_REVIEW
+
+    if risk_classification == RiskClassification.MEDIUM_RISK:
+        return ValidationQueue.PRIORITY_REVIEW
+
+    if decision == AdvisoryDecision.INCLUDE:
+        return ValidationQueue.AUTO_ACCEPT_CANDIDATES
+    else:
+        return ValidationQueue.AUTO_EXCLUDE_CANDIDATES
+
+
+def validate_grounding(
+    justification: str,
+    title: str,
+    abstract: str,
+    criterion_evaluations: List["CriterionEvaluation"],
+    metadata: dict = None
+) -> tuple[float, List[str], Dict[str, str], bool]:
+    """
+    Validate that advisory rationale is grounded in source evidence.
+
+    Returns:
+        (grounding_strength, evidence_snippets, criterion_grounding, unsupported_detected)
+
+    Grounding Strength: 0.0-1.0
+    Evidence Snippets: List of extracted text supporting decision
+    Criterion Grounding: {criterion_id: matched_evidence}
+    Unsupported Detected: True if significant claims lack source support
+    """
+    if not justification or not title:
+        return 0.0, [], {}, True
+
+    evidence_snippets = []
+    criterion_grounding = {}
+    total_grounded = 0
+
+    source_text = f"{title} {abstract or ''}".lower()
+    if metadata:
+        for key, value in metadata.items():
+            if value and isinstance(value, str):
+                source_text += f" {value}".lower()
+
+    justification_words = set(justification.lower().split())
+    source_words = set(source_text.split())
+
+    grounded_words = justification_words & source_words
+    grounding_ratio = len(grounded_words) / len(justification_words) if justification_words else 0.0
+
+    if grounding_ratio >= 0.6:
+        grounding_strength = 0.9
+    elif grounding_ratio >= 0.4:
+        grounding_strength = 0.7
+    elif grounding_ratio >= 0.2:
+        grounding_strength = 0.5
+    else:
+        grounding_strength = 0.3
+
+    for ce in criterion_evaluations:
+        if ce.evidence and ce.evidence.lower() in source_text:
+            criterion_grounding[ce.criterion_id] = ce.evidence
+            total_grounded += 1
+
+    if grounding_strength < 0.5 or total_grounded < len(criterion_evaluations) * 0.5:
+        unsupported_detected = True
+    else:
+        unsupported_detected = False
+
+    if abstract and len(abstract.split()) < 20:
+        grounding_strength = min(grounding_strength, 0.5)
+
+    if len(justification.split()) > 100:
+        grounding_strength = min(grounding_strength, 0.7)
+
+    return grounding_strength, evidence_snippets, criterion_grounding, unsupported_detected
+
+
+def compute_hallucination_risk(
+    is_fallback: bool,
+    grounding_strength: float,
+    unsupported_claims: bool,
+    confidence: float,
+    metadata_completeness: float,
+    error: str = None
+) -> float:
+    """
+    Compute deterministic hallucination risk score (0.0-1.0).
+
+    HIGH RISK (>= 0.7):
+    - Fallback mode triggered
+    - Low grounding strength
+    - Unsupported claims detected
+    - Very high confidence with sparse metadata
+
+    LOW RISK (<= 0.3):
+    - Strong grounding
+    - Complete metadata
+    - No errors
+    """
+    risk_score = 0.0
+
+    if is_fallback:
+        risk_score += 0.4
+
+    if grounding_strength < 0.5:
+        risk_score += 0.3
+    elif grounding_strength < 0.7:
+        risk_score += 0.1
+
+    if unsupported_claims:
+        risk_score += 0.3
+
+    if confidence > 0.9 and metadata_completeness < 0.3:
+        risk_score += 0.2
+
+    if error:
+        risk_score += 0.2
+
+    return min(risk_score, 1.0)
+
+
+def should_validate(
+    risk_classification: RiskClassification,
+    decision: AdvisoryDecision,
+    sampling_rate: float = 0.05,  # TODO: Make configurable via protocol settings
+    deterministic_hash: str = ""
+) -> bool:
+    """
+    Determine if advisory requires human validation - DETERMINISTIC.
+
+    Uses stable hash for reproducible sampling.
+
+    Args:
+        risk_classification: Risk level of the advisory
+        decision: The advisory decision
+        sampling_rate: Rate for random-looking but deterministic sampling (0.0-1.0)
+        deterministic_hash: Stable hash for reproducibility
+    """
+    import hashlib
+
+    if risk_classification in (RiskClassification.HIGH_RISK, RiskClassification.CRITICAL_REVIEW):
+        return True
+
+    if risk_classification == RiskClassification.MEDIUM_RISK:
+        return True
+
+    if not deterministic_hash:
+        return False
+
+    hash_input = f"{deterministic_hash}_{decision.value}_{risk_classification.value}"
+    hash_value = int(hashlib.md5(hash_input.encode()).hexdigest()[:8], 16)
+    normalized = (hash_value % 10000) / 10000.0
+
+    return normalized < sampling_rate
+
+
+def populate_risk_classification(
+    advisory: AdvisoryResult,
+    metadata_completeness: float = 0.0,
+    criterion_grounding_score: float = 1.0,
+    ambiguity_detected: bool = False,
+    deterministic_hash: str = "",
+    sampling_rate: float = 0.05
+) -> AdvisoryResult:
+    """
+    Populate risk classification and validation fields on an AdvisoryResult.
+
+    This is called after advisory generation to add risk-based routing.
+
+    Returns the advisory with populated risk_classification, risk_reason,
+    validation_queue, and requires_validation fields.
+    """
+    risk_class, risk_reason = compute_risk_classification(
+        confidence=advisory.confidence,
+        metadata_completeness=metadata_completeness,
+        decision=advisory.decision,
+        is_fallback=advisory.is_fallback,
+        error=advisory.error,
+        ambiguity_detected=ambiguity_detected,
+        criterion_grounding_score=criterion_grounding_score
+    )
+
+    advisory.risk_classification = risk_class
+    advisory.risk_reason = risk_reason
+
+    advisory.validation_queue = get_validation_queue(
+        risk_classification=risk_class,
+        decision=advisory.decision,
+        deterministic_hash=deterministic_hash
+    )
+
+    advisory.requires_validation = should_validate(
+        risk_classification=risk_class,
+        decision=advisory.decision,
+        sampling_rate=sampling_rate,
+        deterministic_hash=deterministic_hash
+    )
+
+    return advisory
+
+
 @dataclass
 class CriterionEvaluation:
     """Single criterion evaluation from LLM."""
@@ -147,19 +533,30 @@ class AdvisoryResult:
     """
     cache_key: str
     protocol_version: str
-    
+
     decision: AdvisoryDecision
     confidence: float
-    
+
     triggered_criteria: List[str] = field(default_factory=list)
     criterion_evaluations: List[CriterionEvaluation] = field(default_factory=list)
-    
+
     justification: str = ""
     error: Optional[str] = None
-    
+
     is_fallback: bool = False
     is_placeholder: bool = False
-    
+
+    risk_classification: Optional[RiskClassification] = None
+    risk_reason: str = ""
+    validation_queue: Optional[ValidationQueue] = None
+    requires_validation: bool = False
+
+    grounding_evidence: List[str] = field(default_factory=list)
+    criterion_grounding: Dict[str, str] = field(default_factory=dict)
+    grounding_strength: float = 0.0
+    unsupported_claims_detected: bool = False
+    hallucination_risk_score: float = 0.0
+
     generated_at: Optional[str] = None
     generation_duration_ms: Optional[float] = None
     
@@ -185,6 +582,10 @@ class AdvisoryResult:
             "error": self.error,
             "is_fallback": bool(self.is_fallback),
             "is_placeholder": bool(self.is_placeholder),
+            "risk_classification": safe_enum_value(self.risk_classification, "UNKNOWN"),
+            "risk_reason": self.risk_reason or "",
+            "validation_queue": safe_enum_value(self.validation_queue, "UNKNOWN"),
+            "requires_validation": bool(self.requires_validation),
             "generated_at": self.generated_at,
             "generation_duration_ms": self.generation_duration_ms
         }

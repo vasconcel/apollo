@@ -25,6 +25,31 @@ from src.ui.components import (
 from src.ui.theme import COLORS, TYPOGRAPHY
 from src.core.protocol_utils import get_protocol_value
 from src.advisory.advisory_scheduler import set_active_stage
+from src.advisory.calibration_tracker import log_calibration_event, get_calibration_stats
+from src.advisory.queue_manager import compute_queue_summary, get_cached_queue_summary, filter_articles_by_queue, ReviewMode, clear_queue_cache
+
+
+def validate_session_index(articles_count: int, current_index: int) -> int:
+    """
+    Validate and fix session index to prevent out-of-bounds navigation.
+    Returns safe index within valid range.
+    """
+    if articles_count == 0:
+        return 0
+    if current_index < 0:
+        return 0
+    if current_index >= articles_count:
+        return max(0, articles_count - 1)
+    return current_index
+
+
+def reset_session_for_new_articles(session, articles_count: int):
+    """
+    Reset session state when article set changes to prevent stale indexes.
+    """
+    session.current_index = validate_session_index(articles_count, session.current_index)
+    if hasattr(session, 'ec_completed'):
+        session.ec_completed = min(session.ec_completed, articles_count)
 
 
 def render_advisory_status_banner():
@@ -98,6 +123,18 @@ def render_ec_screening():
 
     session = st.session_state.apollo_session
     session.stage = "ec"
+
+    if "keyboard_shortcuts_enabled" not in st.session_state:
+        st.session_state.keyboard_shortcuts_enabled = True
+
+    if st.session_state.keyboard_shortcuts_enabled:
+        st.markdown("""
+        <style>
+        div.stKeyListener {
+            display: none;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
     if "advisory_pipeline_initialized_ec" not in st.session_state and session.articles:
         from src.advisory import initialize_advisory_pipeline
@@ -194,22 +231,161 @@ def render_screening_workspace(session):
     total = len(articles)
     reviewed = session.ec_completed
 
+    protocol_version = get_protocol_value(st.session_state.get("research_protocol", {}), "protocol_version", "1.0")
+    queue_summary = get_cached_queue_summary(articles, protocol_version, "ec")
+    cal_stats = get_calibration_stats()
+
+    with st.expander("📊 REVIEW QUEUE", expanded=True):
+        col_crit, col_high, col_med, col_low_samp, col_low_auto, col_no_adv = st.columns(6)
+        with col_crit:
+            st.metric("Critical", queue_summary.get("CRITICAL_REVIEW", 0))
+        with col_high:
+            st.metric("High Risk", queue_summary.get("HIGH_RISK", 0))
+        with col_med:
+            st.metric("Medium", queue_summary.get("MEDIUM_RISK", 0))
+        with col_low_samp:
+            st.metric("Sampled", queue_summary.get("LOW_RISK_SAMPLED", 0))
+        with col_low_auto:
+            auto_low = queue_summary.get("AUTO_LOW_RISK", 0)
+            if auto_low > 0:
+                st.markdown(f"⚪ **{auto_low}** auto-screened")
+            else:
+                st.metric("Auto-Screen", auto_low)
+        with col_no_adv:
+            st.metric("Pending", queue_summary.get("NO_ADVISORY", 0))
+
+        from src.advisory.calibration_tracker import get_calibration_summary
+        cal_summary = get_calibration_summary()
+
+        st.markdown(f"---")
+        st.markdown("**Calibration Panel**")
+        col_agree, col_override, col_crit, col_hall = st.columns(4)
+        with col_agree:
+            st.metric("Agreement", cal_summary.get("agreement_rate", "N/A"))
+        with col_override:
+            st.metric("Override Rate", cal_summary.get("override_rate", "N/A"))
+        with col_crit:
+            st.metric("Escalated", cal_summary.get("critical_overrides", 0))
+        with col_hall:
+            st.metric("Evidence Reliability", cal_summary.get("hallucination_risk_rate", "N/A"))
+
+        col_lr_agree, col_fe, col_fi = st.columns(3)
+        with col_lr_agree:
+            st.caption(f"Auto-screen accuracy: {cal_summary.get('low_risk_sample_agreement', 'N/A')}")
+        with col_fe:
+            st.caption(f"Missed: {cal_summary.get('false_exclusion', 0)}")
+        with col_fi:
+            st.caption(f"Wrong includes: {cal_summary.get('false_inclusion', 0)}")
+
+        with st.expander("⚡ OPERATIONAL TELEMETRY", expanded=False):
+            telemetry_col1, telemetry_col2, telemetry_col3 = st.columns(3)
+            with telemetry_col1:
+                st.metric("Total Papers", total)
+            with telemetry_col2:
+                st.metric("Reviewed", reviewed)
+            with telemetry_col3:
+                st.metric("Pending Review", total - reviewed)
+            
+            from src.advisory.advisory_cache import get_advisory_cache
+            cache = get_advisory_cache()
+            cache_size = len(cache) if cache else 0
+            st.caption(f"Advisory cache entries: {cache_size}")
+
+    col_mode, col_queue = st.columns([1, 2])
+    with col_mode:
+        review_mode = st.selectbox(
+            "Review Mode",
+            options=["FOCUSED_RISK_REVIEW", "SEQUENTIAL_REVIEW", "CALIBRATION_REVIEW"],
+            index=0,
+            format_func=lambda x: {
+                "FOCUSED_RISK_REVIEW": "🎯 Focused Risk",
+                "SEQUENTIAL_REVIEW": "📋 Sequential",
+                "CALIBRATION_REVIEW": "📊 Calibration"
+            }.get(x, x),
+            key="ec_review_mode"
+        )
+    with col_queue:
+        if review_mode == "CALIBRATION_REVIEW":
+            st.caption("📊 Shows disagreements/overrides only")
+            queue_filter = "CALIBRATION"
+        else:
+            if "ec_selected_queue" not in st.session_state:
+                st.session_state.ec_selected_queue = "ALL"
+            queue_filter = st.selectbox(
+                "Review Queue",
+                options=["ALL", "CRITICAL_REVIEW", "HIGH_RISK", "MEDIUM_RISK", "LOW_RISK_SAMPLED", "AUTO_LOW_RISK"],
+                index=0,
+                format_func=lambda x: {
+                    "ALL": "📄 All Papers",
+                    "CRITICAL_REVIEW": "🔴 Critical (needs review)",
+                    "HIGH_RISK": "🟠 High Risk",
+                    "MEDIUM_RISK": "🟡 Medium Risk",
+                    "LOW_RISK_SAMPLED": "🔵 Sampled for Validation",
+                    "AUTO_LOW_RISK": "⚪ Auto-Screened"
+                }.get(x, x),
+                key="ec_selected_queue"
+            )
+
+    filtered_articles = articles
+
+    if review_mode == "CALIBRATION_REVIEW":
+        from src.advisory.calibration_tracker import get_calibration_filtered_articles
+        filtered_articles = get_calibration_filtered_articles(articles, protocol_version, "ec")
+    elif queue_filter != "ALL":
+        filtered_articles = filter_articles_by_queue(articles, protocol_version, "ec", queue_filter)
+
+    if queue_filter == "AUTO_LOW_RISK" and len(filtered_articles) > 20:
+        with st.expander(f"📋 Review {len(filtered_articles)} Auto-Screened Papers (Batch Validation)", expanded=False):
+            st.markdown("**Quick Validation Mode** - Review a sample to verify auto-screening quality")
+            
+            batch_size = min(10, len(filtered_articles))
+            sample_indices = list(range(0, min(batch_size * 10, len(filtered_articles)), 10))[:batch_size]
+            
+            for i, sample_idx in enumerate(sample_indices):
+                if sample_idx < len(filtered_articles):
+                    article = filtered_articles[sample_idx]
+                    with st.container():
+                        col_b1, col_b2, col_b3 = st.columns([3, 1, 1])
+                        with col_b1:
+                            st.markdown(f"**{article.get('title', 'Untitled')[:80]}...**")
+                        with col_b2:
+                            st.caption(f"Confidence: {article.get('advisory_confidence', 'N/A')}")
+                        with col_b3:
+                            if st.button("✓ Quick Accept", key=f"quick_accept_{sample_idx}"):
+                                pass
+                        st.divider()
+
+    total = len(filtered_articles)
+    if total == 0:
+        st.warning(f"No articles in queue: {queue_filter}")
+        return
+
+    current_idx = session.current_index
+    if current_idx >= total:
+        session.current_index = max(0, total - 1)
+        current_idx = session.current_index
+    if current_idx < 0:
+        session.current_index = 0
+        current_idx = 0
+
     col_nav, col_stats, col_nav2 = st.columns([1, 3, 1])
     with col_nav:
-        if st.button("◀", disabled=current_idx == 0, width="stretch"):
-            session.current_index = max(0, current_idx - 1)
+        if st.button("◀", disabled=current_idx == 0, key="prev_filtered"):
+            session.current_index = current_idx - 1
             st.rerun()
     with col_stats:
-        progress_bar(reviewed, total, stage="EC")
+        progress_bar(min(current_idx + 1, total), total, stage=f"EC ({queue_filter})")
     with col_nav2:
-        if st.button("▶", disabled=current_idx >= total - 1, width="stretch"):
-            session.current_index = min(total - 1, current_idx + 1)
+        if st.button("▶", disabled=current_idx >= total - 1, key="next_filtered"):
+            session.current_index = current_idx + 1
             st.rerun()
-    
+
     render_advisory_status_banner()
 
-    if articles and 0 <= current_idx < total:
-        article = articles[current_idx]
+    st.markdown(f"**Queue:** {queue_filter} | **Paper:** {current_idx + 1} / {total}")
+
+    if filtered_articles and 0 <= current_idx < total:
+        article = filtered_articles[current_idx]
         render_literature_status_header(article, current_idx)
         
         col_article, col_advice = st.columns([3, 1])
@@ -254,6 +430,22 @@ def render_screening_workspace(session):
             if selected_ec_manual:
                 st.markdown(f'<div style="font-size:0.75rem;color:{COLORS["error"]};margin-bottom:0.5rem;">Selected: {manual_codes_str}</div>', unsafe_allow_html=True)
 
+            advisory = get_ec_advisory(article.title, article.abstract, protocol_version) if article.title else None
+            ai_decision_str = ""
+            if advisory and hasattr(advisory, 'decision') and advisory.decision:
+                from src.advisory.advisory_models import safe_decision
+                ai_decision_str = safe_decision(advisory.decision)
+
+            override_severity = "MEDIUM"
+            if ai_decision_str and ai_decision_str not in ("UNKNOWN", "UNAVAILABLE", "INSUFFICIENT_METADATA"):
+                st.caption(f"AI suggests: {ai_decision_str}")
+                override_severity = st.selectbox(
+                    "Override Severity (if disagreeing)",
+                    options=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                    index=1,
+                    key=f"severity_{current_idx}"
+                )
+
             col_excl, col_incl, col_skip = st.columns([1, 1, 1])
             with col_excl:
                 excl_clicked = st.button("EXCLUDE", type="secondary", width="stretch")
@@ -268,6 +460,22 @@ def render_screening_workspace(session):
                 article.cis1 = "NO"
                 article.revisor1 = session.researcher_id
                 session.ec_completed += 1
+
+                advisory = get_ec_advisory(article.title, article.abstract, protocol_version) if article.title else None
+                if advisory:
+                    metadata = article.metadata if hasattr(article, 'metadata') else {}
+                    ai_dec = safe_decision(advisory.decision) if hasattr(advisory, 'decision') else ""
+                    disagree = ai_dec and ai_dec.upper() != "EXCLUDE"
+                    log_calibration_event(
+                        article_id=article.article_id,
+                        protocol_version=protocol_version,
+                        stage="ec",
+                        advisory=advisory,
+                        human_decision="EXCLUDE",
+                        metadata=metadata,
+                        override_severity=override_severity if disagree else ""
+                    )
+
                 st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({manual_codes_str or 'Manual'})", icon="❌")
                 if current_idx < total - 1:
                     session.current_index = current_idx + 1
@@ -279,6 +487,19 @@ def render_screening_workspace(session):
                 article.ces1 = "NO"
                 article.revisor1 = session.researcher_id
                 session.ec_completed += 1
+
+                advisory = get_ec_advisory(article.title, article.abstract, protocol_version) if article.title else None
+                if advisory:
+                    metadata = article.metadata if hasattr(article, 'metadata') else {}
+                    log_calibration_event(
+                        article_id=article.article_id,
+                        protocol_version=protocol_version,
+                        stage="ec",
+                        advisory=advisory,
+                        human_decision="INCLUDE",
+                        metadata=metadata
+                    )
+
                 st.toast(f"✓ Article {current_idx + 1} INCLUDED", icon="✅")
                 if current_idx < total - 1:
                     session.current_index = current_idx + 1
@@ -498,7 +719,129 @@ def render_ai_advisory_panel(article, current_idx: int):
 
             if status == AdvisoryStatus.COMPLETED and advisory.is_available():
                 from src.advisory.advisory_models import safe_enum_value, safe_decision, safe_status
-                st.caption(f"Status: {safe_status(status)} | Decision: {safe_decision(advisory.decision)}")
+
+                risk_class = safe_enum_value(advisory.risk_classification, "UNKNOWN") if advisory.risk_classification else "UNKNOWN"
+                validation_queue = safe_enum_value(advisory.validation_queue, "UNKNOWN") if advisory.validation_queue else "UNKNOWN"
+                requires_val = "YES" if advisory.requires_validation else "NO"
+
+                risk_color = {
+                    "LOW_RISK": COLORS["success"],
+                    "MEDIUM_RISK": COLORS["warning"],
+                    "HIGH_RISK": COLORS["error"],
+                    "CRITICAL_REVIEW": "#FF0000",
+                    "UNKNOWN": COLORS["text_muted"]
+                }.get(risk_class, COLORS["text_muted"])
+
+                st.markdown(f"""
+                <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:8px;border-radius:4px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span style="font-size:0.7rem;color:{COLORS['text_muted']};">RISK</span>
+                        <span style="font-size:0.75rem;font-weight:600;color:{risk_color};">{risk_class}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span style="font-size:0.7rem;color:{COLORS['text_muted']};">CONFIDENCE</span>
+                        <span style="font-size:0.75rem;color:{COLORS['text_secondary']};">{advisory.confidence:.2f}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span style="font-size:0.7rem;color:{COLORS['text_muted']};">VALIDATION</span>
+                        <span style="font-size:0.75rem;color:{COLORS['text_secondary']};">{requires_val}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;">
+                        <span style="font-size:0.7rem;color:{COLORS['text_muted']};">QUEUE</span>
+                        <span style="font-size:0.65rem;color:{COLORS['text_secondary']};">{validation_queue}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.caption(f"Decision: {safe_decision(advisory.decision)} | {safe_status(status)}")
+
+                grounding_strength = getattr(advisory, 'grounding_strength', 0.0)
+                hallucination_risk = getattr(advisory, 'hallucination_risk_score', 0.0)
+
+                col_g1, col_g2, col_g3 = st.columns(3)
+                with col_g1:
+                    alignment_label = "Strong" if grounding_strength >= 0.7 else "Moderate" if grounding_strength >= 0.4 else "Weak"
+                    st.metric("Evidence Alignment", alignment_label, delta=f"{grounding_strength:.0%}" if grounding_strength else None)
+                with col_g2:
+                    reliability_label = "High" if hallucination_risk < 0.3 else "Medium" if hallucination_risk < 0.7 else "Low"
+                    st.metric("Evidence Reliability", reliability_label, delta=f"{hallucination_risk:.0%}" if hallucination_risk else None)
+                with col_g3:
+                    unsupported = getattr(advisory, 'unsupported_claims_detected', False)
+                    st.metric("Weak Signals", "⚠️ Detected" if unsupported else "✓ Clear")
+
+                if hasattr(advisory, 'justification') and advisory.justification:
+                    with st.expander("🔍 Why did APOLLO decide this?"):
+                        st.markdown("**Rationale:**")
+                        st.text(advisory.justification[:500] + "..." if len(advisory.justification) > 500 else advisory.justification)
+
+                        if hasattr(advisory, 'criterion_grounding') and advisory.criterion_grounding:
+                            st.markdown("**Criterion Grounding:**")
+                            for crit_id, evidence in advisory.criterion_grounding.items():
+                                st.markdown(f"- **{crit_id}:** {evidence[:200]}...")
+
+                col_w1, col_w2, col_w3 = st.columns(3)
+
+                approved_key = f"approve_{idx}_{current_idx}"
+                override_key = f"override_{idx}_{current_idx}"
+                escalate_key = f"escalate_{idx}_{current_idx}"
+
+                with col_w1:
+                    if st.button("✓ Confirm", key=approved_key, help="Confirm AI decision and log agreement"):
+                        if current_idx < total - 1:
+                            session.current_index = current_idx + 1
+                        st.rerun()
+                with col_w2:
+                    override_clicked = st.button("⚠️ Override", key=override_key, help="Override AI decision")
+                    if override_clicked:
+                        pass
+                with col_w3:
+                    escalate_clicked = st.button("🔺 Escalate", key=escalate_key, help="Mark for manual review")
+                    if escalate_clicked:
+                        pass
+
+                if override_clicked or escalate_clicked:
+                    with st.form(f"review_action_form_{idx}"):
+                        human_decision = st.radio(
+                            "Your decision:",
+                            options=["INCLUDE", "EXCLUDE"],
+                            horizontal=True,
+                            key=f"human_decision_{idx}"
+                        )
+                        override_severity = st.selectbox(
+                            "Severity:",
+                            options=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                            key=f"override_severity_{idx}"
+                        )
+                        override_reason = st.text_area(
+                            "Reason for override:",
+                            key=f"override_reason_{idx}",
+                            height=80
+                        )
+                        submit_action = st.form_submit_button("Submit Review")
+                        if submit_action:
+                            ai_decision = safe_decision(advisory.decision) if hasattr(advisory, 'decision') else "UNKNOWN"
+                            is_disagreement = human_decision != ai_decision
+                            
+                            from src.advisory.calibration_tracker import log_calibration_event
+                            log_calibration_event(
+                                article_id=article.get("id", "unknown"),
+                                protocol_version=protocol_version,
+                                stage="ec",
+                                ai_decision=ai_decision,
+                                human_decision=human_decision,
+                                disagreement=is_disagreement,
+                                override_severity=override_severity,
+                                risk_classification=getattr(advisory, 'risk_classification', None),
+                                override_reason=override_reason or "No reason provided"
+                            )
+                            
+                            st.success(f"✓ Review logged: {human_decision} (was {ai_decision})")
+                            if current_idx < total - 1:
+                                session.current_index = current_idx + 1
+                            st.rerun()
+
+                st.caption("⌨️ Keyboard: A=Confirm | O=Override | E=Escalate | N=Next | P=Previous")
+
                 advisory_dict = {
                     "decision": safe_decision(advisory.decision),
                     "confidence": advisory.confidence,

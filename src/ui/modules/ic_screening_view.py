@@ -28,6 +28,7 @@ from src.advisory import (
     get_cache_stats,
     AdvisoryStatus
 )
+from src.advisory.calibration_tracker import log_calibration_event
 from src.advisory.advisory_scheduler import set_active_stage
 
 _st_cache_key_calls = 0
@@ -296,6 +297,19 @@ def render_screening_workspace(session):
                 session.articles[original_idx].cis1 = manual_codes_str if manual_codes_str else "N/A"
                 session.articles[original_idx].revisor1 = session.researcher_id
                 session.ic_completed += 1
+
+                advisory = get_advisory(article.title, article.abstract, protocol_version, stage="ic") if article.title else None
+                if advisory:
+                    metadata = article.metadata if hasattr(article, 'metadata') else {}
+                    log_calibration_event(
+                        article_id=article.article_id,
+                        protocol_version=protocol_version,
+                        stage="ic",
+                        advisory=advisory,
+                        human_decision="EXCLUDE",
+                        metadata=metadata
+                    )
+
                 st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({manual_codes_str or 'Manual'})", icon="❌")
                 if current_idx < total - 1:
                     st.session_state.ic_current_index = current_idx + 1
@@ -307,6 +321,19 @@ def render_screening_workspace(session):
                 session.articles[original_idx].cis1 = manual_codes_str if manual_codes_str else "YES"
                 session.articles[original_idx].revisor1 = session.researcher_id
                 session.ic_completed += 1
+
+                advisory = get_advisory(article.title, article.abstract, protocol_version, stage="ic") if article.title else None
+                if advisory:
+                    metadata = article.metadata if hasattr(article, 'metadata') else {}
+                    log_calibration_event(
+                        article_id=article.article_id,
+                        protocol_version=protocol_version,
+                        stage="ic",
+                        advisory=advisory,
+                        human_decision="INCLUDE",
+                        metadata=metadata
+                    )
+
                 st.toast(f"✓ Article {current_idx + 1} INCLUDED ({manual_codes_str or 'YES'})", icon="✅")
                 if current_idx < total - 1:
                     st.session_state.ic_current_index = current_idx + 1

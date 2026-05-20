@@ -97,8 +97,8 @@ def render_advisory_status_banner():
 
 def render_ec_screening():
     """Render EC Screening Workspace - Focus Mode."""
-    from src.core.dynamic_protocol import ProtocolState
     from src.core.screening_session import ScreeningSession
+    from src.core.protocol_service import ensure_protocol_locked, validate_protocol_for_screening
 
     set_active_stage("ec")
 
@@ -108,10 +108,14 @@ def render_ec_screening():
 
     protocol = st.session_state.research_protocol
 
-    if protocol.state == ProtocolState.DRAFT.value:
-        print("!!! DEBUG UI !!! Auto-locking DRAFT protocol for screening")
-        protocol.state = ProtocolState.LOCKED.value
-        protocol.lock()
+    was_locked = ensure_protocol_locked(protocol)
+    if was_locked:
+        print("[PROTOCOL] Auto-locked DRAFT protocol for screening")
+
+    is_valid, error_msg = validate_protocol_for_screening(protocol)
+    if not is_valid:
+        st.warning(f"⚠ {error_msg}")
+        return
 
     if "apollo_session" not in st.session_state:
         st.session_state.apollo_session = ScreeningSession(

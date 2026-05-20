@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 
 from src.core.logging_config import get_logger
+from src.core.session_navigation import NavigationService
+from src.core.session_query_service import SessionQueryService
 
 logger = get_logger("ingestion")
 INGESTION_DEBUG = False  # Set to True for verbose diagnostics
@@ -479,16 +481,11 @@ class ScreeningSession:
     
     def get_current_article(self) -> Optional[ArticleReview]:
         """Get current article for review."""
-        if 0 <= self.current_index < len(self.articles):
-            return self.articles[self.current_index]
-        return None
+        return NavigationService.get_current_article(self.articles, self.current_index)
     
     def can_review_current_at_stage(self, stage: str) -> bool:
         """Check if current article can be reviewed at this stage."""
-        article = self.get_current_article()
-        if not article:
-            return False
-        return article.can_proceed_to_stage(stage)
+        return NavigationService.can_review_current_at_stage(self.articles, self.current_index, stage)
     
     def record_decision(
         self,
@@ -631,29 +628,15 @@ class ScreeningSession:
     
     def skip_unreviewable(self) -> bool:
         """Skip articles that can't be reviewed at current stage."""
-        article = self.get_current_article()
-        if not article:
-            return False
-        
-        if not article.can_proceed_to_stage(self.stage):
-            self.current_index += 1
+        new_index = NavigationService.skip_unreviewable(self.articles, self.current_index, self.stage)
+        if new_index != self.current_index:
+            self.current_index = new_index
             return True
         return False
     
     def advance(self, skip: bool = False) -> None:
         """Move to next article with workflow rules."""
-        if skip:
-            self.current_index += 1
-            return
-        
-        while self.current_index < len(self.articles):
-            article = self.articles[self.current_index]
-            decision = article.get_current_stage_decision(self.stage)
-            
-            if decision == "":
-                break
-            
-            self.current_index += 1
+        self.current_index = NavigationService.advance(self.articles, self.current_index, self.stage, skip)
     
     def apply_decision(
         self,
@@ -690,121 +673,59 @@ class ScreeningSession:
     
     def get_discussion_articles(self) -> List[ArticleReview]:
         """Get all articles needing discussion."""
-        return [a for a in self.articles if a.is_discussion_needed]
+        return SessionQueryService.get_discussion_articles(self.articles)
     
     def get_skipped_articles(self) -> List[ArticleReview]:
         """Get all skipped articles."""
-        result = []
-        for a in self.articles:
-            stage_field = self._get_stage_field(self.stage)
-            if getattr(a, stage_field, "") == "skip":
-                result.append(a)
-        return result
+        return SessionQueryService.get_skipped_articles(self.articles, self.stage)
     
     def get_ec_included_articles(self) -> List[ArticleReview]:
         """Get articles that passed EC."""
-        return [a for a in self.articles if a.is_ec_included]
+        return SessionQueryService.get_ec_included_articles(self.articles)
     
     def get_ic_included_articles(self) -> List[ArticleReview]:
         """Get articles that passed IC."""
-        return [a for a in self.articles if a.is_ic_included]
+        return SessionQueryService.get_ic_included_articles(self.articles)
     
     def get_wl_articles(self) -> List[ArticleReview]:
         """
         Get White Literature articles only.
-        WL articles are identified by literature_type="WL" or source_sheet="White Literature".
-        Used for filtered WL-only screening and export separation.
         """
-        return [
-            a for a in self.articles 
-            if a.get_literature_type() == "WL" or 
-               a.metadata.get("source_sheet", "").lower() in ["white literature", "wl"]
-        ]
+        return SessionQueryService.get_wl_articles(self.articles)
     
     def get_gl_articles(self) -> List[ArticleReview]:
         """
         Get Grey Literature articles only.
-        GL articles are identified by literature_type="GL" or source_sheet="Grey Literature".
-        Used for filtered GL-only screening and export separation.
-        GL articles require manual URL review for IC stage.
         """
-        return [
-            a for a in self.articles 
-            if a.get_literature_type() == "GL" or 
-               a.metadata.get("source_sheet", "").lower() in ["grey literature", "gl"]
-        ]
+        return SessionQueryService.get_gl_articles(self.articles)
     
-    def filter_articles(self, literature_type: Optional[str] = None, 
+    def filter_articles(self, literature_type: Optional[str] = None,
                         stage_decision: Optional[str] = None) -> List[ArticleReview]:
         """
         Filter articles by literature type and/or stage decision.
-        
-        Args:
-            literature_type: "WL" or "GL" or None for all
-            stage_decision: "include", "exclude", "skip", "pending", or None for all
-            
-        Returns:
-            Filtered list of ArticleReview objects
         """
-        filtered = self.articles
-        
-        if literature_type:
-            if literature_type == "WL":
-                filtered = self.get_wl_articles()
-            elif literature_type == "GL":
-                filtered = self.get_gl_articles()
-        
-        if stage_decision:
-            stage_field = self._get_stage_field(self.stage)
-            filtered = [a for a in filtered if getattr(a, stage_field, "") == stage_decision]
-        
-        return filtered
+        return SessionQueryService.filter_articles(
+            self.articles, self.stage, literature_type, stage_decision,
+        )
     
     def get_wl_progress(self) -> Dict:
         """Get WL-specific progress statistics."""
-        wl_articles = self.get_wl_articles()
-        wl_total = len(wl_articles)
-        wl_completed = sum(1 for a in wl_articles if a.ec_stage in ["include", "exclude", "skip"])
-        wl_included = sum(1 for a in wl_articles if a.ec_stage == "include")
-        wl_excluded = sum(1 for a in wl_articles if a.ec_stage == "exclude")
-        
-        return {
-            "total": wl_total,
-            "completed": wl_completed,
-            "pending": wl_total - wl_completed,
-            "included": wl_included,
-            "excluded": wl_excluded,
-            "progress_pct": int((wl_completed / wl_total * 100) if wl_total > 0 else 0)
-        }
+        return SessionQueryService.get_wl_progress(self.articles)
     
     def get_gl_progress(self) -> Dict:
         """Get GL-specific progress statistics."""
-        gl_articles = self.get_gl_articles()
-        gl_total = len(gl_articles)
-        gl_completed = sum(1 for a in gl_articles if a.ec_stage in ["include", "exclude", "skip"])
-        gl_included = sum(1 for a in gl_articles if a.ec_stage == "include")
-        gl_excluded = sum(1 for a in gl_articles if a.ec_stage == "exclude")
-        
-        return {
-            "total": gl_total,
-            "completed": gl_completed,
-            "pending": gl_total - gl_completed,
-            "included": gl_included,
-            "excluded": gl_excluded,
-            "progress_pct": int((gl_completed / gl_total * 100) if gl_total > 0 else 0)
-        }
+        return SessionQueryService.get_gl_progress(self.articles)
     
     def get_pending_for_stage(self, stage: str) -> int:
         """Get count of pending articles for stage."""
-        if stage == "ec":
-            return self.total_count - self.ec_completed - self.skip_count
-        elif stage == "ic":
-            return len(self.get_ec_included_articles()) - self.ic_completed - self.skip_count
-        return 0
+        return SessionQueryService.get_pending_for_stage(
+            self.articles, stage,
+            self.ec_completed, self.ic_completed, self.skip_count,
+        )
     
     def is_complete(self) -> bool:
         """Check if session is complete."""
-        return self.stage == "complete" or self.current_index >= self.total_count
+        return NavigationService.is_complete(self.current_index, self.total_count, self.stage)
     
     def _get_stage_field(self, stage: str) -> str:
         """Get stage field name."""
@@ -816,19 +737,12 @@ class ScreeningSession:
     
     def get_progress(self) -> Dict:
         """Get progress stats."""
-        return {
-            "current": self.current_index + 1,
-            "total": self.total_count,
-            "stage": self.stage,
-            "ec_completed": self.ec_completed,
-            "ic_completed": self.ic_completed,
-            "ec_pending": self.get_pending_for_stage("ec"),
-            "ic_pending": self.get_pending_for_stage("ic"),
-            "included": self.included_count,
-            "excluded": self.excluded_count,
-            "skipped": self.skip_count,
-            "discussion": self.discussion_count
-        }
+        return SessionQueryService.get_progress(
+            self.articles, self.current_index, self.total_count, self.stage,
+            self.ec_completed, self.ic_completed,
+            self.included_count, self.excluded_count,
+            self.skip_count, self.discussion_count,
+        )
     
     def save(self, output_dir: str = "sessions") -> str:
         """Save session state to file with hash for integrity."""

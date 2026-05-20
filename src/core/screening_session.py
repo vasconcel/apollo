@@ -457,6 +457,8 @@ class ScreeningSession:
 
     def save(self, output_dir: str = "sessions") -> str:
         """Save session state to file with hash for integrity."""
+        now = datetime.now().isoformat()
+        self.state.last_saved = now
         path = SessionPersistenceService.save(
             output_dir,
             self.state.session_id, self.state.created_at,
@@ -468,11 +470,12 @@ class ScreeningSession:
             self.state.researcher_id, self.state.last_saved,
             self.state.articles,
         )
-        self.state.last_saved = datetime.now().isoformat()
         return path
 
     def save_to_json(self, path: str) -> str:
         """Deterministic JSON persistence with full audit chain."""
+        now = datetime.now().isoformat()
+        self.state.last_saved = now
         result = SessionPersistenceService.save_to_json(
             path,
             self.state.session_id, self.state.created_at,
@@ -488,7 +491,6 @@ class ScreeningSession:
             self.state.audit_chain,
             self.state.autosave_enabled,
         )
-        self.state.last_saved = datetime.now().isoformat()
         return result
 
     def load_from_json(self, path: str) -> bool:

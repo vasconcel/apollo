@@ -395,6 +395,24 @@ class TestScreeningSessionPersistenceDelegation:
         sample_session.save_to_json(path)
         assert sample_session.last_saved != ''
 
+    def test_save_persists_current_last_saved(self, sample_session, temp_dir):
+        """Serialized last_saved matches in-memory value after save."""
+        sample_session.save(output_dir=temp_dir)
+        expected = sample_session.last_saved
+        path = SessionPersistenceService.resolve_session_path(
+            temp_dir, sample_session.session_id
+        )
+        data = SessionPersistenceService.read_json(path)
+        assert data["last_saved"] == expected
+
+    def test_save_to_json_persists_current_last_saved(self, sample_session, temp_dir):
+        """Serialized last_saved matches in-memory value after save_to_json."""
+        path = os.path.join(temp_dir, 'canonical.json')
+        sample_session.save_to_json(path)
+        expected = sample_session.last_saved
+        data = SessionPersistenceService.read_json(path)
+        assert data["last_saved"] == expected
+
 
 # ---------------------------------------------------------------------------
 # Checksum and serialization determinism

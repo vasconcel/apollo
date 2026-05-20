@@ -8,10 +8,8 @@ WORKFLOW RULES:
 - SKIP papers: Can be recovered for later review.
 - NEEDS_DISCUSSION: Tracked separately for team review.
 """
-import json
 import os
 import uuid
-import hashlib
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any
@@ -21,6 +19,7 @@ from src.core.session_navigation import NavigationService
 from src.core.session_query_service import SessionQueryService
 from src.core.session_persistence_service import SessionPersistenceService
 from src.core.session_ingestion_service import SessionIngestionService
+from src.core.session_audit_service import SessionAuditService
 
 
 class SessionStage(Enum):
@@ -294,85 +293,23 @@ class ScreeningSession:
         return True
     
     def _append_audit_event(self, article: ArticleReview, decision: str, notes: str, stage: str) -> None:
-        """Append immutable audit event to chain."""
-        previous_hash = self._audit_chain[-1]["current_hash"] if self._audit_chain else "GENESIS"
-        
-        event_payload = {
-            "event_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
-            "article_id": article.article_id,
-            "reviewer_id": self.researcher_id,
-            "stage": stage,
-            "decision": decision,
-            "notes": notes,
-        }
-        
-        payload_json = json.dumps(event_payload, sort_keys=True, ensure_ascii=False)
-        current_hash = hashlib.sha256(
-            (payload_json + previous_hash).encode()
-        ).hexdigest()
-        
-        event = {
-            **event_payload,
-            "previous_hash": previous_hash,
-            "current_hash": current_hash
-        }
-        
+        """Append immutable audit event to chain via AuditService."""
+        event = SessionAuditService.append_event(
+            self._audit_chain, self.researcher_id, article, decision, notes, stage,
+        )
         self._audit_chain.append(event)
     
     def verify_audit_chain(self) -> tuple:
-        """
-        Verify audit chain integrity. Phase 2: Immutable Audit Chain.
-        
-        Returns:
-            Tuple of (is_valid: bool, errors: list)
-        """
-        if not self._audit_chain:
-            return True, []
-        
-        errors = []
-        
-        expected_previous = "GENESIS"
-        for i, event in enumerate(self._audit_chain):
-            if event.get("previous_hash") != expected_previous:
-                errors.append(f"Event {i}: Chain broken at {event.get('event_id', 'UNKNOWN')}")
-            
-            payload = {k: v for k, v in event.items() if k not in ("previous_hash", "current_hash")}
-            payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-            computed_hash = hashlib.sha256(
-                (payload_json + event.get("previous_hash", "")).encode()
-            ).hexdigest()
-            
-            if computed_hash != event.get("current_hash"):
-                errors.append(f"Event {i}: Hash mismatch for {event.get('event_id', 'UNKNOWN')}")
-            
-            expected_previous = event.get("current_hash", "")
-        
-        return len(errors) == 0, errors
-    
+        """Verify audit chain integrity via AuditService."""
+        return SessionAuditService.verify_chain(self._audit_chain)
+
     def detect_tampering(self) -> tuple:
-        """
-        Detect tampering in audit chain. Phase 2: Immutable Audit Chain.
-        
-        Returns:
-            Tuple of (is_clean: bool, tampered_events: list)
-        """
-        is_valid, errors = self.verify_audit_chain()
-        
-        if is_valid:
-            return True, []
-        
-        tampered = []
-        for error in errors:
-            if "Hash mismatch" in error:
-                event_id = error.split("for ")[-1] if "for " in error else "UNKNOWN"
-                tampered.append(event_id)
-        
-        return False, tampered
-    
+        """Detect tampering in audit chain via AuditService."""
+        return SessionAuditService.detect_tampering(self._audit_chain)
+
     def get_audit_events(self) -> List[Dict]:
-        """Get all audit events in order."""
-        return list(self._audit_chain)
+        """Get all audit events in order via AuditService."""
+        return SessionAuditService.get_events(self._audit_chain)
     
     def _save_stage_snapshot(self, stage: str) -> None:
         """Create protocol snapshot on stage transition."""

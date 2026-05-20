@@ -20,6 +20,7 @@ from src.core.session_query_service import SessionQueryService
 from src.core.session_persistence_service import SessionPersistenceService
 from src.core.session_ingestion_service import SessionIngestionService
 from src.core.session_audit_service import SessionAuditService
+from src.core.session_decision_service import SessionDecisionService
 
 
 class SessionStage(Enum):
@@ -252,44 +253,33 @@ class ScreeningSession:
         notes: str = "",
         llm_suggestion: Optional[Dict] = None
     ) -> bool:
-        """Record researcher decision at current stage WITH protocol snapshot."""
+        """Record researcher decision at current stage via DecisionService."""
         article = self.get_current_article()
         if not article:
             return False
-        
-        timestamp = datetime.now().isoformat()
-        stage = self.stage
-        
-        if stage == "ec":
-            article.ec_stage = decision
-            article.ec_notes = notes
-            article.ec_timestamp = timestamp
-            if llm_suggestion:
-                article.ec_llm_suggestion = llm_suggestion
-            self.ec_completed += 1
-            
-        elif stage == "ic":
-            if not article.can_proceed_to_stage("ic"):
-                return False
-            article.ic_stage = decision
-            article.ic_notes = notes
-            article.ic_timestamp = timestamp
-            if llm_suggestion:
-                article.ic_llm_suggestion = llm_suggestion
-            self.ic_completed += 1
-        
-        if decision == "include":
-            self.included_count += 1
-        elif decision == "exclude":
-            self.excluded_count += 1
-        elif decision == "skip":
-            self.skip_count += 1
-        elif decision == "needs_discussion":
-            self.discussion_count += 1
-        
-        self.last_saved = timestamp
-        self._save_stage_snapshot(stage)
-        self._append_audit_event(article, decision, notes, stage)
+
+        result = SessionDecisionService.apply_review_decision(
+            article, self.stage, decision, notes, llm_suggestion,
+            self.researcher_id, self.dynamic_protocol, self._audit_chain,
+        )
+
+        if not result["success"]:
+            return False
+
+        for key, value in result["article_field_updates"].items():
+            setattr(article, key, value)
+
+        for counter, delta in result["counter_increments"].items():
+            setattr(self, counter, getattr(self, counter) + delta)
+
+        self.last_saved = result["timestamp"]
+        self._audit_chain.append(result["audit_event"])
+
+        if result["protocol_snapshot"]:
+            if not hasattr(self, "_snapshots"):
+                self._snapshots = []
+            self._snapshots.append(result["protocol_snapshot"])
+
         return True
     
     def _append_audit_event(self, article: ArticleReview, decision: str, notes: str, stage: str) -> None:
@@ -310,18 +300,6 @@ class ScreeningSession:
     def get_audit_events(self) -> List[Dict]:
         """Get all audit events in order via AuditService."""
         return SessionAuditService.get_events(self._audit_chain)
-    
-    def _save_stage_snapshot(self, stage: str) -> None:
-        """Create protocol snapshot on stage transition."""
-        from src.core.dynamic_protocol import DynamicProtocol
-        
-        if self.dynamic_protocol:
-            protocol = DynamicProtocol.from_dict(self.dynamic_protocol)
-            snapshot = protocol.create_snapshot(stage)
-            
-            if not hasattr(self, "_snapshots"):
-                self._snapshots = []
-            self._snapshots.append(snapshot.to_dict())
     
     def skip_unreviewable(self) -> bool:
         """Skip articles that can't be reviewed at current stage."""
@@ -345,19 +323,7 @@ class ScreeningSession:
     ) -> bool:
         """
         Apply a decision to a specific article by article_id.
-        
-        This method exists for UI compatibility — it locates the article
-        by ID and records the decision at the specified stage.
-        
-        Args:
-            article_id: The article's article_id (from ArticleReview.article_id)
-            stage: The stage at which to record ("ec", "ic")
-            decision: The decision ("include", "exclude", "skip", "needs_discussion")
-            notes: Researcher notes/reasoning
-            llm_suggestion: Optional LLM advisory snapshot
-            
-        Returns:
-            True if decision was recorded, False otherwise
+        Locates article, temporarily sets index, and records decision.
         """
         for idx, article in enumerate(self.articles):
             if article.article_id == article_id:

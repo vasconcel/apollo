@@ -17,66 +17,10 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
-from src.core.logging_config import get_logger
 from src.core.session_navigation import NavigationService
 from src.core.session_query_service import SessionQueryService
-
-logger = get_logger("ingestion")
-INGESTION_DEBUG = False  # Set to True for verbose diagnostics
-
-
-def normalize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Defensive metadata normalization - ensures ALL articles have required fields.
-    Never allows silent empty-string propagation.
-    """
-    required_fields = {
-        "year": "Unknown",
-        "year_source": "missing",
-        "authors": "",
-        "author_normalization_source": "unknown",
-        "source": "",
-        "source_type": "unknown",
-        "literature_type": "WL",
-        "metadata_completeness": "unknown"
-    }
-    
-    normalized = dict(metadata)
-    
-    for field_name, default_value in required_fields.items():
-        if field_name not in normalized or normalized[field_name] is None or str(normalized.get(field_name, "")).strip() == "":
-            normalized[field_name] = default_value
-    
-    return normalized
-
-
-LITERATURE_TYPE_MAP = {
-    "WL": "WL", "wl": "WL", "Wl": "WL",
-    "WHITE LITERATURE": "WL", "White Literature": "WL", "white literature": "WL",
-    "GL": "GL", "gl": "GL", "Gl": "GL",
-    "GREY LITERATURE": "GL", "Grey Literature": "GL", "grey literature": "GL",
-}
-
-
-def normalize_literature_type(raw_value: str) -> str:
-    """Normalize literature type to canonical WL/GL value."""
-    if not raw_value:
-        return "WL"
-    normalized = raw_value.strip()
-    return LITERATURE_TYPE_MAP.get(normalized, LITERATURE_TYPE_MAP.get(normalized.upper(), "WL"))
-
-
-def compute_csv_metadata_completeness(row: dict) -> str:
-    """Compute metadata completeness for CSV rows."""
-    has_title = bool(row.get("Title"))
-    has_abstract = bool(row.get("Abstract"))
-    has_year = bool(row.get("Year"))
-
-    if has_title and has_abstract and has_year:
-        return "complete"
-    elif has_title:
-        return "partial"
-    return "minimal"
+from src.core.session_persistence_service import SessionPersistenceService
+from src.core.session_ingestion_service import SessionIngestionService
 
 
 class SessionStage(Enum):
@@ -278,8 +222,8 @@ class ScreeningSession:
     _audit_chain: List[Dict] = field(default_factory=list)
     
     def add_articles(self, article_records: List) -> None:
-        """Add articles to session."""
-        self.articles = [ArticleReview.from_article_record(r) for r in article_records]
+        """Add articles to session via IngestionService."""
+        self.articles = SessionIngestionService.add_articles(article_records)
         self.total_count = len(self.articles)
 
     def ingest_from_upload(
@@ -287,197 +231,13 @@ class ScreeningSession:
         uploaded_file,
         stage: str = "ec"
     ) -> List[ArticleReview]:
-        """
-        Canonical ingestion: load ATLAS Excel file and convert to ArticleReview objects.
-
-        This is the single canonical entry point for file loading. All DataFrame operations
-        occur HERE, not in the UI layer. Preserves full metadata lineage.
-
-        Args:
-            uploaded_file: Streamlit UploadedFile object
-            stage: Current screening stage ("ec", "ic")
-
-        Returns:
-            List of ArticleReview objects with full metadata
-        """
-        import tempfile
-        import pandas as pd
-        import json
-        from src.core.article_metadata import (
-            normalize_wl_metadata, normalize_gl_metadata, article_to_dict,
-            LATEX_DECODER_AVAILABLE
+        """Ingest articles from an uploaded file via IngestionService."""
+        articles = SessionIngestionService.ingest_from_bytes(
+            uploaded_file.getvalue(), uploaded_file.name, stage,
         )
-        from src.core.year_extraction import extract_year
-
-        temp_path = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
-
-        try:
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getvalue())
-
-            if uploaded_file.name.endswith(".csv"):
-                df = pd.read_csv(temp_path)
-                articles = []
-                for _, row in df.iterrows():
-                    row_dict = row.to_dict()
-                    lit_type = normalize_literature_type(str(row_dict.get("Literature_Type", "WL")))
-                    completeness = compute_csv_metadata_completeness(row_dict)
-                    
-                    title = str(row_dict.get("Title", ""))
-                    abstract = str(row_dict.get("Abstract", ""))
-                    
-                    year_value = row_dict.get("Year")
-                    year_source = "csv"
-                    if year_value is None or str(year_value).strip() == "":
-                        extracted_year, extracted_source = extract_year(title, abstract, None)
-                        if extracted_year:
-                            year_value = extracted_year
-                            year_source = extracted_source
-                    
-                    metadata = {
-                        "year": str(year_value) if year_value else "",
-                        "authors": str(row_dict.get("Authors", "")),
-                        "literature_type": lit_type,
-                        "title": title,
-                        "abstract": abstract,
-                        "global_id": str(row_dict.get("global_id", str(uuid.uuid4())[:8])),
-                        "year_source": year_source,
-                        "metadata_completeness": completeness
-                    }
-                    review_article = ArticleReview(
-                        article_id=metadata["global_id"],
-                        title=metadata["title"],
-                        abstract=metadata["abstract"],
-                        metadata=metadata
-                    )
-                    if stage == "ic":
-                        review_article.ec_stage = str(row_dict.get("EC_Decision", "INCLUDE"))
-                    articles.append(review_article)
-                self.articles = articles
-                self.total_count = len(articles)
-                return articles
-            else:
-                wl_df = pd.read_excel(temp_path, sheet_name="White Literature")
-                gl_df = pd.read_excel(temp_path, sheet_name="Grey Literature")
-
-            articles = []
-            if INGESTION_DEBUG:
-                logger.debug("WL ingestion start")
-            for idx, row in wl_df.iterrows():
-                row_dict = row.to_dict()
-                article = normalize_wl_metadata(row_dict)
-                article_dict = article_to_dict(article)
-                
-                year_value = article.year if article.year else None
-                year_source = "atlas"
-                
-                if INGESTION_DEBUG:
-                    logger.debug(f"WL {idx} - Structured year: {repr(year_value)}")
-                
-                if year_value is None:
-                    extracted_year, extracted_source = extract_year(
-                        article.title, 
-                        article.abstract,
-                        None
-                    )
-                    if INGESTION_DEBUG:
-                        logger.debug(f"WL {idx} - Regex fallback: year={repr(extracted_year)}, source={repr(extracted_source)}")
-                    if extracted_year:
-                        year_value = extracted_year
-                        year_source = extracted_source
-                
-                if INGESTION_DEBUG:
-                    logger.debug(f"WL {idx} - Final year: {repr(year_value)}, source: {repr(year_source)}")
-                
-                metadata = {
-                    "year": str(year_value) if year_value else "",
-                    "authors": article.authors,
-                    "literature_type": article.literature_type,
-                    "doi": article.doi,
-                    "source": article.source,
-                    "keywords": article.keywords,
-                    "library": article.library,
-                    "global_id": article.global_id,
-                    "local_id": article.local_id,
-                    "url": article.url,
-                    "completeness": article.completeness_score,
-                    "year_source": year_source,
-                    "metadata_completeness": article.metadata_completeness,
-                    "raw_data": article.raw_data,
-                    "author_normalization_source": "pylatexenc" if LATEX_DECODER_AVAILABLE else "raw"
-                }
-                
-                metadata = normalize_metadata(metadata)
-                
-                review_article = ArticleReview(
-                    article_id=article.global_id or article.local_id or str(uuid.uuid4())[:8],
-                    title=article.title,
-                    abstract=article.abstract,
-                    metadata=metadata
-                )
-                articles.append(review_article)
-
-            if INGESTION_DEBUG:
-                logger.debug("GL ingestion start")
-            for idx, row in gl_df.iterrows():
-                row_dict = row.to_dict()
-                article = normalize_gl_metadata(row_dict)
-                article_dict = article_to_dict(article)
-                
-                year_value = article.year if article.year else None
-                year_source = "atlas"
-                
-                if INGESTION_DEBUG:
-                    logger.debug(f"GL {idx} - Structured year: {repr(year_value)}")
-                
-                if year_value is None:
-                    extracted_year, extracted_source = extract_year(
-                        article.title, 
-                        article.abstract,
-                        None
-                    )
-                    if INGESTION_DEBUG:
-                        logger.debug(f"GL {idx} - Regex fallback: year={repr(extracted_year)}, source={repr(extracted_source)}")
-                    if extracted_year:
-                        year_value = extracted_year
-                        year_source = extracted_source
-                
-                if INGESTION_DEBUG:
-                    logger.debug(f"GL {idx} - Final year: {repr(year_value)}, source: {repr(year_source)}")
-                
-                metadata = {
-                    "year": str(year_value) if year_value else "",
-                    "authors": article.authors,
-                    "literature_type": article.literature_type,
-                    "url": article.url,
-                    "source": article.source,
-                    "keywords": article.keywords,
-                    "global_id": article.global_id,
-                    "local_id": article.local_id,
-                    "completeness": article.completeness_score,
-                    "year_source": year_source,
-                    "metadata_completeness": article.metadata_completeness,
-                    "raw_data": article.raw_data,
-                    "author_normalization_source": "pylatexenc" if LATEX_DECODER_AVAILABLE else "raw"
-                }
-                
-                metadata = normalize_metadata(metadata)
-                
-                review_article = ArticleReview(
-                    article_id=article.global_id or article.local_id or str(uuid.uuid4())[:8],
-                    title=article.title,
-                    abstract=article.abstract,
-                    metadata=metadata
-                )
-                articles.append(review_article)
-
-            self.articles = articles
-            self.total_count = len(articles)
-            return articles
-
-        finally:
-            import os
-            os.unlink(temp_path)
+        self.articles = articles
+        self.total_count = len(articles)
+        return articles
     
     def get_current_article(self) -> Optional[ArticleReview]:
         """Get current article for review."""
@@ -746,222 +506,132 @@ class ScreeningSession:
     
     def save(self, output_dir: str = "sessions") -> str:
         """Save session state to file with hash for integrity."""
-        os.makedirs(output_dir, exist_ok=True)
-        path = os.path.join(output_dir, f"session_{self.session_id}.json")
-        
-        data = self._to_dict()
-        
-        data_hash = hashlib.sha256(
-            json.dumps(data, sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()[:16]
-        
-        data["session_hash"] = data_hash
-        
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
+        path = SessionPersistenceService.save(
+            output_dir,
+            self.session_id, self.created_at, self.protocol_version, self.stage,
+            self.current_index, self.total_count,
+            self.ec_completed, self.ic_completed,
+            self.included_count, self.excluded_count,
+            self.skip_count, self.discussion_count,
+            self.researcher_id, self.last_saved,
+            self.articles,
+        )
         self.last_saved = datetime.now().isoformat()
         return path
     
     def save_to_json(self, path: str) -> str:
         """
         Deterministic JSON persistence with full audit chain.
-        
-        Phase 1: Persistent Screening Session implementation.
-        Preserves: articles, decisions, snapshots, protocol hash, timestamps,
-        audit chain, metadata lineage, schema_version.
-        
-        Args:
-            path: Full path to save JSON file
-            
-        Returns:
-            Path to saved file
         """
-        data = self._to_dict_full()
-        
-        data["schema_version"] = self.schema_version
-        
-        fields_for_checksum = [
-            "session_id", "created_at", "protocol_version", "stage",
-            "current_index", "total_count", "ec_completed", "ic_completed",
-            "included_count", "excluded_count", "skip_count",
-            "discussion_count", "researcher_id", "last_saved", "schema_version",
-            "articles", "dynamic_protocol"
-        ]
-        data_for_check = {k: data.get(k) for k in fields_for_checksum if k in data}
-        
-        canonical_json = json.dumps(data_for_check, sort_keys=True, ensure_ascii=False)
-        checksum = hashlib.sha256(canonical_json.encode()).hexdigest()
-        data["session_checksum"] = checksum
-        
-        if self.dynamic_protocol:
-            from src.core.dynamic_protocol import DynamicProtocol
-            try:
-                protocol = DynamicProtocol.from_dict(self.dynamic_protocol)
-                data["protocol_hash"] = protocol.protocol_hash
-            except Exception:
-                data["protocol_hash"] = ""
-        
-        data["audit_chain"] = self._audit_chain
-        data["autosave_enabled"] = self.autosave_enabled
-        
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
+        result = SessionPersistenceService.save_to_json(
+            path,
+            self.session_id, self.created_at, self.protocol_version, self.stage,
+            self.current_index, self.total_count,
+            self.ec_completed, self.ic_completed,
+            self.included_count, self.excluded_count,
+            self.skip_count, self.discussion_count,
+            self.researcher_id, self.last_saved,
+            self.schema_version,
+            self.articles,
+            self.dynamic_protocol,
+            self._audit_chain,
+            self.autosave_enabled,
+        )
         self.last_saved = datetime.now().isoformat()
-        return path
+        return result
     
     def load_from_json(self, path: str) -> bool:
         """
         Load session from deterministic JSON with validation.
-        
-        Phase 1: Persistent Screening Session implementation.
-        Verifies checksum and restores full state including audit chain.
-        
-        Args:
-            path: Full path to JSON file
-            
-        Returns:
-            True if loaded successfully, False otherwise
         """
-        if not os.path.exists(path):
+        result = SessionPersistenceService.load_from_json(path)
+        if result is None:
             return False
-        
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return False
-        
-        expected_checksum = data.get("session_checksum", "")
-        
-        fields_for_checksum = [
-            "session_id", "created_at", "protocol_version", "stage",
-            "current_index", "total_count", "ec_completed", "ic_completed",
-            "included_count", "excluded_count", "skip_count",
-            "discussion_count", "researcher_id", "last_saved", "schema_version",
-            "articles", "dynamic_protocol"
-        ]
-        data_for_check = {k: data.get(k) for k in fields_for_checksum if k in data}
-        
-        actual_checksum = hashlib.sha256(
-            json.dumps(data_for_check, sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()
-        
-        self.session_id = data.get("session_id", "")
-        self.created_at = data.get("created_at", "")
-        self.protocol_version = data.get("protocol_version", "1.0")
-        self.stage = data.get("stage", SessionStage.EC.value)
-        self.current_index = data.get("current_index", 0)
-        self.total_count = data.get("total_count", 0)
-        self.ec_completed = data.get("ec_completed", 0)
-        self.ic_completed = data.get("ic_completed", 0)
-        self.included_count = data.get("included_count", 0)
-        self.excluded_count = data.get("excluded_count", 0)
-        self.skip_count = data.get("skip_count", 0)
-        self.discussion_count = data.get("discussion_count", 0)
-        self.researcher_id = data.get("researcher_id", "researcher_1")
-        self.last_saved = data.get("last_saved", "")
-        self.schema_version = data.get("schema_version", "2.0")
-        self.autosave_enabled = data.get("autosave_enabled", False)
-        
-        self.articles = [ArticleReview(**a) for a in data.get("articles", [])]
-        
-        if "dynamic_protocol" in data and isinstance(data["dynamic_protocol"], dict):
+
+        self.session_id = result["session_id"]
+        self.created_at = result["created_at"]
+        self.protocol_version = result["protocol_version"]
+        self.stage = result["stage"]
+        self.current_index = result["current_index"]
+        self.total_count = result["total_count"]
+        self.ec_completed = result["ec_completed"]
+        self.ic_completed = result["ic_completed"]
+        self.included_count = result["included_count"]
+        self.excluded_count = result["excluded_count"]
+        self.skip_count = result["skip_count"]
+        self.discussion_count = result["discussion_count"]
+        self.researcher_id = result["researcher_id"]
+        self.last_saved = result["last_saved"]
+        self.schema_version = result["schema_version"]
+        self.autosave_enabled = result["autosave_enabled"]
+
+        self.articles = [ArticleReview(**a) for a in result["articles"]]
+
+        dp = result["dynamic_protocol"]
+        if dp is not None and isinstance(dp, dict):
             try:
                 from src.core.dynamic_protocol import DynamicProtocol
-                DynamicProtocol.from_dict(data["dynamic_protocol"])
-                self.dynamic_protocol = data["dynamic_protocol"]
+                DynamicProtocol.from_dict(dp)
+                self.dynamic_protocol = dp
             except (TypeError, ValueError):
                 self.dynamic_protocol = None
-        
-        self._audit_chain = data.get("audit_chain", [])
-        
+
+        self._audit_chain = result["audit_chain"]
+
         return True
     
     def compute_checksum(self) -> str:
-        """
-        Compute SHA256 checksum of session canonical JSON.
-        
-        Phase 1: Persistent Screening Session implementation.
-        Used for integrity verification and replay validation.
-        
-        Returns:
-            SHA256 hex digest of canonical JSON representation
-        """
-        data = self._to_dict_full()
-        
-        fields_for_checksum = [
-            "session_id", "created_at", "protocol_version", "stage",
-            "current_index", "total_count", "ec_completed", "ic_completed",
-            "included_count", "excluded_count", "skip_count",
-            "discussion_count", "researcher_id", "last_saved", "schema_version",
-            "articles", "dynamic_protocol"
-        ]
-        data_for_check = {k: data.get(k) for k in fields_for_checksum if k in data}
-        
-        canonical_json = json.dumps(data_for_check, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(canonical_json.encode()).hexdigest()
+        """Compute SHA256 checksum of session canonical JSON."""
+        full_data = SessionPersistenceService.to_dict_full(
+            self.session_id, self.created_at, self.protocol_version, self.stage,
+            self.current_index, self.total_count,
+            self.ec_completed, self.ic_completed,
+            self.included_count, self.excluded_count,
+            self.skip_count, self.discussion_count,
+            self.researcher_id, self.last_saved,
+            self.schema_version,
+            self.articles,
+            self.dynamic_protocol,
+        )
+        return SessionPersistenceService.compute_checksum(full_data)
     
     def _to_dict_full(self) -> Dict:
         """Convert to dictionary with full metadata lineage."""
-        return {
-            "session_id": self.session_id,
-            "created_at": self.created_at,
-            "protocol_version": self.protocol_version,
-            "stage": self.stage,
-            "current_index": self.current_index,
-            "total_count": self.total_count,
-            "ec_completed": self.ec_completed,
-            "ic_completed": self.ic_completed,
-            "included_count": self.included_count,
-            "excluded_count": self.excluded_count,
-            "skip_count": self.skip_count,
-            "discussion_count": self.discussion_count,
-            "researcher_id": self.researcher_id,
-            "last_saved": self.last_saved,
-            "schema_version": self.schema_version,
-            "articles": [a.to_dict() for a in self.articles],
-            "dynamic_protocol": self.dynamic_protocol,
-        }
+        return SessionPersistenceService.to_dict_full(
+            self.session_id, self.created_at, self.protocol_version, self.stage,
+            self.current_index, self.total_count,
+            self.ec_completed, self.ic_completed,
+            self.included_count, self.excluded_count,
+            self.skip_count, self.discussion_count,
+            self.researcher_id, self.last_saved,
+            self.schema_version,
+            self.articles,
+            self.dynamic_protocol,
+        )
     
     def _to_dict(self) -> Dict:
         """Convert to dictionary."""
-        return {
-            "session_id": self.session_id,
-            "created_at": self.created_at,
-            "protocol_version": self.protocol_version,
-            "stage": self.stage,
-            "current_index": self.current_index,
-            "total_count": self.total_count,
-            "ec_completed": self.ec_completed,
-            "ic_completed": self.ic_completed,
-            "included_count": self.included_count,
-            "excluded_count": self.excluded_count,
-            "skip_count": self.skip_count,
-            "discussion_count": self.discussion_count,
-            "researcher_id": self.researcher_id,
-            "last_saved": self.last_saved,
-            "articles": [a.to_dict() for a in self.articles]
-        }
+        return SessionPersistenceService.to_dict(
+            self.session_id, self.created_at, self.protocol_version, self.stage,
+            self.current_index, self.total_count,
+            self.ec_completed, self.ic_completed,
+            self.included_count, self.excluded_count,
+            self.skip_count, self.discussion_count,
+            self.researcher_id, self.last_saved,
+            self.articles,
+        )
     
     @classmethod
     def load(cls, session_id: str, output_dir: str = "sessions") -> Optional["ScreeningSession"]:
         """Load session state from file with validation."""
-        path = os.path.join(output_dir, f"session_{session_id}.json")
-        
-        if not os.path.exists(path):
+        path = SessionPersistenceService.resolve_session_path(output_dir, session_id)
+        data = SessionPersistenceService.load_session_data(path)
+        if data is None:
             return None
-        
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return None
-        
+
         session = cls(
-            session_id=data["session_id"],
-            created_at=data["created_at"],
+            session_id=data.get("session_id", ""),
+            created_at=data.get("created_at", ""),
             protocol_version=data.get("protocol_version", "1.0"),
             stage=data.get("stage", SessionStage.EC.value),
             current_index=data.get("current_index", 0),
@@ -977,21 +647,22 @@ class ScreeningSession:
             schema_version=data.get("schema_version", "2.0"),
             autosave_enabled=data.get("autosave_enabled", False)
         )
-        
+
         session.articles = [
             ArticleReview(**a) for a in data.get("articles", [])
         ]
-        
-        if "dynamic_protocol" in data and isinstance(data["dynamic_protocol"], dict):
+
+        dp = data.get("dynamic_protocol")
+        if dp is not None and isinstance(dp, dict):
             try:
                 from src.core.dynamic_protocol import DynamicProtocol
-                DynamicProtocol.from_dict(data["dynamic_protocol"])
-                session.dynamic_protocol = data["dynamic_protocol"]
+                DynamicProtocol.from_dict(dp)
+                session.dynamic_protocol = dp
             except (TypeError, ValueError):
                 session.dynamic_protocol = None
-        
+
         session._audit_chain = data.get("audit_chain", [])
-        
+
         return session
 
 
@@ -1007,53 +678,15 @@ def load_screening_session(session_id: str, output_dir: str = "sessions") -> Opt
 
 def list_sessions(output_dir: str = "sessions") -> List[Dict[str, str]]:
     """List all saved sessions."""
-    if not os.path.exists(output_dir):
-        return []
-    
-    sessions = []
-    for f in os.listdir(output_dir):
-        if f.startswith("session_") and f.endswith(".json"):
-            path = os.path.join(output_dir, f)
-            try:
-                mtime = os.path.getmtime(path)
-                sessions.append({
-                    "session_id": f.replace("session_", "").replace(".json", ""),
-                    "path": path,
-                    "modified": datetime.fromtimestamp(mtime).isoformat()
-                })
-            except OSError:
-                pass
-    
-    return sorted(sessions, key=lambda x: x["modified"], reverse=True)
+    return SessionPersistenceService.list_sessions(output_dir)
 
 
 def recover_session(output_dir: str = "sessions") -> Optional[ScreeningSession]:
     """Recover most recent session from crash."""
-    sessions = list_sessions(output_dir)
-    if not sessions:
+    session_id = SessionPersistenceService.recover_session(output_dir)
+    if session_id is None:
         return None
-    
-    most_recent = sessions[0]
-    return load_screening_session(most_recent["session_id"], output_dir)
-    
-    def validate(self) -> List[str]:
-        """Validate session integrity. Returns list of issues."""
-        issues = []
-        
-        if self.total_count != len(self.articles):
-            issues.append("Article count mismatch")
-        
-        if self.current_index < 0 or self.current_index >= self.total_count:
-            issues.append("Invalid current index")
-        
-        for i, a in enumerate(self.articles):
-            if not a.title:
-                issues.append(f"Article {i}: Missing title")
-            
-            if a.ic_stage and not a.is_ec_included:
-                issues.append(f"Article {i}: IC decision without EC pass")
-        
-        return issues
+    return load_screening_session(session_id, output_dir)
 
 
 def create_session(article_records: List, protocol_version: str = "1.0") -> ScreeningSession:

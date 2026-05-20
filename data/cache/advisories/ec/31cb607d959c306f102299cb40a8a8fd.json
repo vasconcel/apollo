@@ -16,29 +16,6 @@
       "criterion_id": "EC2",
       "criterion_name": "EC2",
       "satisfied": false,
-      "evidence": [
-        "Cannot be evaluated at Title/Abstract screening stage. Proceeding with metadata analysis."
-      ],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC3",
-      "criterion_name": "EC3",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC4",
-      "criterion_name": "EC4",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC5",
-      "criterion_name": "EC5",
-      "satisfied": false,
       "evidence": [],
       "confidence": 0.0
     },
@@ -46,9 +23,7 @@
       "criterion_id": "EC6",
       "criterion_name": "EC6",
       "satisfied": false,
-      "evidence": [
-        "Handled by system deterministic engine."
-      ],
+      "evidence": [],
       "confidence": 0.0
     }
   ],
@@ -56,6 +31,6 @@
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
-  "generated_at": "2026-05-19T18:31:10.675220",
-  "generation_duration_ms": 1836.6892337799072
+  "generated_at": "2026-05-20T01:26:57.383005",
+  "generation_duration_ms": 1600.3053188323975
 }

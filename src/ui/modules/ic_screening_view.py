@@ -563,15 +563,16 @@ def render_ai_advisory_panel(article, current_idx: int):
     advisory = get_advisory(title, abstract, protocol_version, stage=stage)
     
     status = get_advisory_status(title, abstract, protocol_version, stage=stage)
-    
+
     with st.container(border=True):
         with st.expander("🤖 AI ADVISORY", expanded=False):
-            print(f"[IC ADVISORY RENDER] Title: {title[:30]}... | Status: {status} | Decision: {advisory.decision.value if hasattr(advisory.decision, 'value') else 'N/A'} | Available: {advisory.is_available() if hasattr(advisory, 'is_available') else False}")
-            
+            from src.advisory.advisory_models import safe_decision, safe_status
+            print(f"[IC ADVISORY RENDER] Title: {title[:30]}... | Status: {status} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'} | Available: {advisory.is_available() if advisory and hasattr(advisory, 'is_available') else False}")
+
             if status == AdvisoryStatus.COMPLETED and advisory.is_available():
-                st.caption(f"Status: {status.value} | Decision: {advisory.decision.value}")
+                st.caption(f"Status: {safe_status(status)} | Decision: {safe_decision(advisory.decision)}")
                 advisory_dict = {
-                    "decision": advisory.decision.value,
+                    "decision": safe_decision(advisory.decision),
                     "confidence": advisory.confidence,
                     "triggered_criteria": advisory.triggered_criteria,
                     "criterion_evaluations": {

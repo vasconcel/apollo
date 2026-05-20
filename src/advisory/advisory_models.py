@@ -9,11 +9,47 @@ Defines typed dataclasses for:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Literal
+from typing import Dict, List, Optional, Literal, Any
 from datetime import datetime
 from enum import Enum
 import json
 import hashlib
+
+
+def safe_enum_value(enum_obj: Any, default: str = "UNKNOWN") -> str:
+    """Safe access to enum value - single source of truth for enum handling."""
+    if enum_obj is None:
+        return default
+    try:
+        if hasattr(enum_obj, 'value'):
+            return enum_obj.value
+        return str(enum_obj)
+    except Exception:
+        return default
+
+
+def safe_decision(decision: Any, default: str = "UNAVAILABLE") -> str:
+    """Safe access to advisory decision value."""
+    if decision is None:
+        return default
+    try:
+        if hasattr(decision, 'value'):
+            return decision.value
+        return str(decision)
+    except Exception:
+        return default
+
+
+def safe_status(status: Any, default: str = "UNKNOWN") -> str:
+    """Safe access to advisory status value."""
+    if status is None:
+        return default
+    try:
+        if hasattr(status, 'value'):
+            return status.value
+        return str(status)
+    except Exception:
+        return default
 
 
 class AdvisoryStatus(str, Enum):
@@ -29,6 +65,68 @@ class AdvisoryDecision(str, Enum):
     EXCLUDE = "EXCLUDE"
     SKIP = "SKIP"
     UNAVAILABLE = "UNAVAILABLE"
+    INSUFFICIENT_METADATA = "INSUFFICIENT_METADATA"
+
+
+def compute_metadata_completeness(title: str, abstract: str, metadata: dict = None) -> float:
+    """
+    Calculate metadata completeness score for confidence calibration.
+
+    Returns 0.0-1.0 indicating how much information is available.
+
+    Factors:
+    - Title presence and length
+    - Abstract presence and length
+    - Year availability
+    - Authors presence
+    - Source/venue presence
+    """
+    score = 0.0
+    weights = {
+        "title": 0.2,
+        "abstract": 0.35,
+        "year": 0.15,
+        "authors": 0.15,
+        "source": 0.15
+    }
+
+    if title and title not in ("", "nan", "None"):
+        score += weights["title"] * min(len(title) / 20, 1.0)
+
+    if abstract and abstract not in ("", "nan", "None"):
+        abstract_words = len(str(abstract).split())
+        score += weights["abstract"] * min(abstract_words / 50, 1.0)
+
+    if metadata:
+        year = metadata.get("year", "")
+        if year and year not in ("", "nan", "None"):
+            score += weights["year"]
+
+        authors = metadata.get("authors", "")
+        if authors and authors not in ("", "nan", "None"):
+            score += weights["authors"]
+
+        source = metadata.get("source", "")
+        if source and source not in ("", "nan", "None"):
+            score += weights["source"]
+
+    return min(score, 1.0)
+
+
+def calibrate_confidence(base_confidence: float, metadata_completeness: float) -> float:
+    """
+    Calibrate confidence based on metadata availability.
+
+    If metadata is sparse, reduce confidence ceiling.
+    """
+    if metadata_completeness < 0.3:
+        return min(base_confidence, 0.45)
+    elif metadata_completeness < 0.5:
+        return min(base_confidence, 0.65)
+    elif metadata_completeness < 0.7:
+        return min(base_confidence, 0.85)
+    else:
+        return base_confidence
 
 
 @dataclass
@@ -66,13 +164,13 @@ class AdvisoryResult:
     generation_duration_ms: Optional[float] = None
     
     def to_dict(self) -> dict:
-        """Serialize to dictionary for JSON persistence."""
+        """Serialize to dictionary for JSON persistence - SAFE."""
         return {
-            "cache_key": self.cache_key,
-            "protocol_version": self.protocol_version,
-            "decision": self.decision.value,
-            "confidence": self.confidence,
-            "triggered_criteria": self.triggered_criteria,
+            "cache_key": self.cache_key or "",
+            "protocol_version": self.protocol_version or "1.0",
+            "decision": safe_enum_value(self.decision, "UNAVAILABLE"),
+            "confidence": self.confidence if self.confidence is not None else 0.0,
+            "triggered_criteria": self.triggered_criteria or [],
             "criterion_evaluations": [
                 {
                     "criterion_id": ce.criterion_id,
@@ -81,34 +179,40 @@ class AdvisoryResult:
                     "evidence": ce.evidence,
                     "confidence": ce.confidence
                 }
-                for ce in self.criterion_evaluations
+                for ce in (self.criterion_evaluations or [])
             ],
-            "justification": self.justification,
+            "justification": self.justification or "",
             "error": self.error,
-            "is_fallback": self.is_fallback,
-            "is_placeholder": self.is_placeholder,
+            "is_fallback": bool(self.is_fallback),
+            "is_placeholder": bool(self.is_placeholder),
             "generated_at": self.generated_at,
             "generation_duration_ms": self.generation_duration_ms
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "AdvisoryResult":
-        """Deserialize from dictionary."""
-        criterion_evaluations = [
-            CriterionEvaluation(
-                criterion_id=ce["criterion_id"],
-                criterion_name=ce["criterion_name"],
-                satisfied=ce["satisfied"],
-                evidence=ce["evidence"],
-                confidence=ce["confidence"]
-            )
-            for ce in data.get("criterion_evaluations", [])
-        ]
-        
+        """Deserialize from dictionary - DEFENSIVE HANDLING."""
+        criterion_evaluations = []
+        for ce in data.get("criterion_evaluations", []):
+            if ce and isinstance(ce, dict):
+                criterion_evaluations.append(CriterionEvaluation(
+                    criterion_id=ce.get("criterion_id", "unknown"),
+                    criterion_name=ce.get("criterion_name", "Unknown"),
+                    satisfied=bool(ce.get("satisfied", False)),
+                    evidence=ce.get("evidence", ""),
+                    confidence=float(ce.get("confidence", 0.0))
+                ))
+
+        decision_str = data.get("decision", "UNAVAILABLE")
+        try:
+            decision = AdvisoryDecision(decision_str)
+        except (ValueError, TypeError):
+            decision = AdvisoryDecision.UNAVAILABLE
+
         return cls(
             cache_key=data.get("cache_key", ""),
             protocol_version=data.get("protocol_version", "1.0"),
-            decision=AdvisoryDecision(data.get("decision", "UNAVAILABLE")),
+            decision=decision,
             confidence=data.get("confidence", 0.0),
             triggered_criteria=data.get("triggered_criteria", []),
             criterion_evaluations=criterion_evaluations,
@@ -122,11 +226,16 @@ class AdvisoryResult:
     
     def is_available(self) -> bool:
         """Check if advisory has actual content (not failed/placeholder)."""
-        return (
-            self.decision != AdvisoryDecision.UNAVAILABLE
-            and not self.is_placeholder
-            and self.error is None
-        )
+        if self.decision is None:
+            return False
+        try:
+            return (
+                self.decision != AdvisoryDecision.UNAVAILABLE
+                and not self.is_placeholder
+                and self.error is None
+            )
+        except Exception:
+            return False
     
     @staticmethod
     def create_unavailable(reason: str = "Not yet generated") -> "AdvisoryResult":

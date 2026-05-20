@@ -29,6 +29,8 @@ from enum import Enum
 
 VALID_STAGES = frozenset({"ec", "ic", "qc"})
 
+from .advisory_models import safe_enum_value
+
 
 def normalize_stage(stage: Any) -> str:
     """Centralized stage normalization - SINGLE SOURCE OF TRUTH."""
@@ -153,7 +155,7 @@ def _log_advisory_debug(parse_result: AdvisoryParseResult):
 
     print(f"\nPARSE STATUS")
     print(f"------------------------------------------------------------")
-    print(f"SUCCESS" if parse_result.success else f"FAILED: {parse_result.failure_type.value}")
+    print(f"SUCCESS" if parse_result.success else f"FAILED: {safe_enum_value(parse_result.failure_type, 'UNKNOWN')}")
 
     if parse_result.failure_reason:
         print(f"\nFAILURE REASON")
@@ -434,7 +436,7 @@ class AdvisoryWorker:
             advisory = self._generate_with_retry(request, stage)
             store_advisory(advisory, stage=stage)
             if stage.lower() == "qc":
-                print(f"[QC CACHE STORE] Stage: qc | CacheKey: {item.cache_key[:16]}... | Decision: {advisory.decision.value}")
+                print(f"[QC CACHE STORE] Stage: qc | CacheKey: {item.cache_key[:16]}... | Decision: {safe_enum_value(advisory.decision)}")
             else:
                 print(f"[CACHE STORE] Stage: {stage} | CacheKey: {item.cache_key[:16]}...")
 
@@ -444,7 +446,7 @@ class AdvisoryWorker:
                 print(f"[STATE] PROCESSING -> FAILED: {item.article_id} ({elapsed:.1f}s) Error: {advisory.error[:50]}")
             else:
                 queue.mark_completed(item)
-                print(f"[STATE] PROCESSING -> COMPLETED: {item.article_id} ({elapsed:.1f}s) Decision: {advisory.decision.value}")
+                print(f"[STATE] PROCESSING -> COMPLETED: {item.article_id} ({elapsed:.1f}s) Decision: {safe_enum_value(advisory.decision)}")
 
             return advisory
 
@@ -590,10 +592,30 @@ class AdvisoryWorker:
                         metadata=metadata
                     )
                 else:
+                    suggestion = self.llm.suggest(
+                        title=title,
+                        abstract=abstract,
+                        literature_type=literature_type,
+                        stage="ec",
+                        protocol_criteria=self._protocol_criteria,
+                        metadata=metadata
+                    )
+            elif stage_lower == "ic":
+                from src.core.llm_assistant import LLMAssistant
+                if hasattr(self.llm, 'suggest_ic'):
                     suggestion = self.llm.suggest_ic(
                         title=title,
                         abstract=abstract,
                         literature_type=literature_type,
+                        protocol_criteria=self._protocol_criteria,
+                        metadata=metadata
+                    )
+                else:
+                    suggestion = self.llm.suggest(
+                        title=title,
+                        abstract=abstract,
+                        literature_type=literature_type,
+                        stage="ic",
                         protocol_criteria=self._protocol_criteria,
                         metadata=metadata
                     )
@@ -658,9 +680,9 @@ class AdvisoryWorker:
 
             parse_error = suggestion_dict.get("error")
             if failure_type:
-                parse_error = f"{failure_type.value}: {failure_reason}" if failure_reason else failure_type.value
+                parse_error = f"{safe_enum_value(failure_type)}: {failure_reason}" if failure_reason else safe_enum_value(failure_type)
 
-            error_msg = parse_error or (f"FAILED: {failure_type.value}" if failure_type else None)
+            error_msg = parse_error or (f"FAILED: {safe_enum_value(failure_type)}" if failure_type else None)
 
             return AdvisoryResult(
                 cache_key=request.cache_key,
@@ -804,7 +826,7 @@ class AdvisoryWorker:
                 print(f"  Failed: {result.error}")
             else:
                 succeeded += 1
-                print(f"  Success: {result.decision.value} ({result.confidence:.2f})")
+                print(f"  Success: {safe_enum_value(result.decision)} ({result.confidence:.2f})")
             
             if processed < (max_items or float('inf')):
                 sleep_time = self.config.sleep_seconds

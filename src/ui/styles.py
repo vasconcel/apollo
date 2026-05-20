@@ -9,8 +9,24 @@ from src.ui.theme import COLORS, TYPOGRAPHY
 # When False (production), hides: raw LLM responses, normalization dumps, queue internals
 APOLLO_DEBUG = False
 
+# VERBOSE LOGGING - Set to True to see all CACHE HIT, LOOKUP, REUSE messages
+# When False (production), only shows: failures, completions, state transitions
+APOLLO_DEBUG_VERBOSE = False
+
+# LOG LEVEL - Controls verbosity: DEBUG, INFO, WARNING, ERROR
+# Default: INFO (shows important state transitions, warnings, errors)
+APOLLO_LOG_LEVEL = "INFO"
+
 # DEBUG MODE - Set to True to outline sidebar containers for visual validation
 SIDEBAR_DEBUG = False
+
+
+def should_log(level: str) -> bool:
+    """Check if message at given level should be logged based on APOLLO_LOG_LEVEL."""
+    levels = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+    current = levels.get(APOLLO_LOG_LEVEL.upper(), 1)
+    msg_level = levels.get(level.upper(), 1)
+    return msg_level >= current
 
 
 def get_custom_css():

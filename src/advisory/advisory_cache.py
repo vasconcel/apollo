@@ -28,6 +28,58 @@ from .advisory_models import (
     AdvisoryStatus
 )
 
+_VERBOSE = False  # Set to True for debug, False for production
+
+_mem_snapshot_cache: Dict[str, AdvisoryResult] = {}
+_mem_snapshot_hits: int = 0
+_mem_snapshot_misses: int = 0
+
+
+def _get_mem_snapshot(title: str, abstract: str, protocol_version: str, stage: str) -> Optional[AdvisoryResult]:
+    """Get advisory from memory snapshot cache (reduces rerender lookups)."""
+    global _mem_snapshot_cache, _mem_snapshot_hits, _mem_snapshot_misses
+
+    cache = get_advisory_cache()
+    key = cache.compute_cache_key(title, abstract, protocol_version)
+    cache_key_full = f"{stage}_{key}"
+
+    if cache_key_full in _mem_snapshot_cache:
+        _mem_snapshot_hits += 1
+        return _mem_snapshot_cache[cache_key_full]
+
+    _mem_snapshot_misses += 1
+    return None
+
+
+def _set_mem_snapshot(title: str, abstract: str, protocol_version: str, stage: str, advisory: AdvisoryResult) -> None:
+    """Set advisory in memory snapshot cache."""
+    global _mem_snapshot_cache
+
+    cache = get_advisory_cache()
+    key = cache.compute_cache_key(title, abstract, protocol_version)
+    cache_key_full = f"{stage}_{key}"
+
+    _mem_snapshot_cache[cache_key_full] = advisory
+
+
+def clear_mem_snapshot() -> None:
+    """Clear memory snapshot cache (call at session start)."""
+    global _mem_snapshot_cache, _mem_snapshot_hits, _mem_snapshot_misses
+    _mem_snapshot_cache = {}
+    _mem_snapshot_hits = 0
+    _mem_snapshot_misses = 0
+
+
+def get_mem_snapshot_stats() -> Dict:
+    """Get memory snapshot cache statistics."""
+    return {"hits": _mem_snapshot_hits, "misses": _mem_snapshot_misses, "size": len(_mem_snapshot_cache)}
+
+
+def _log_verbose(msg: str) -> None:
+    """Conditional verbose logging - only prints when _VERBOSE is True."""
+    if _VERBOSE:
+        print(msg)
+
 
 def validate_advisory_structure(advisory: Any) -> tuple[bool, str, Optional[Dict]]:
     """
@@ -110,23 +162,23 @@ class AdvisoryCache:
         NEVER generates or retries - strictly read-only.
         """
         if not cache_key:
-            print(f"[CACHE GET] Stage: {stage} | Key: NONE (empty)")
+            _log_verbose(f"[CACHE GET] Stage: {stage} | Key: NONE (empty)")
             return AdvisoryResult.create_unavailable("No cache key provided")
-        
+
         session_key = self._session_key(cache_key, protocol_version, stage)
-        
+
         if session_key in self._session_cache:
             cached = self._session_cache[session_key]
-            print(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Session HIT")
+            _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Session HIT")
             return cached
-        
+
         disk_advisory = self._load_from_disk(cache_key, stage)
         if disk_advisory is not None:
             self._session_cache[session_key] = disk_advisory
-            print(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Disk HIT")
+            _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Disk HIT")
             return disk_advisory
-        
-        print(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | MISS (not generated)")
+
+        _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | MISS (not generated)")
         return AdvisoryResult.create_unavailable("Advisory not yet generated")
     
     def get_for_article(
@@ -263,18 +315,28 @@ class AdvisoryCache:
         return stage_dir / f"{cache_key}.json"
     
     def _load_from_disk(self, cache_key: str, stage: str = "ic") -> Optional[AdvisoryResult]:
-        """Load advisory from disk cache."""
+        """Load advisory from disk cache with validation."""
         disk_path = self._disk_path(cache_key, stage)
-        
+
         if not disk_path.exists():
-            print(f"[CACHE DISK] Stage: {stage} | Key: {cache_key[:16]}... | File not found: {disk_path}")
+            _log_verbose(f"[CACHE DISK] Stage: {stage} | Key: {cache_key[:16]}... | File not found")
             return None
-        
+
         try:
             with open(disk_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             advisory = AdvisoryResult.from_dict(data)
-            print(f"[CACHE DISK] Stage: {stage} | Key: {cache_key[:16]}... | Loaded successfully")
+
+            if advisory.error and "NoneType" in advisory.error and "attribute" in advisory.error:
+                print(f"[CACHE INVALIDATE] Legacy corrupted entry: {cache_key[:16]}...")
+                try:
+                    disk_path.unlink()
+                    _log_verbose(f"[CACHE INVALIDATE] Removed: {disk_path}")
+                except Exception:
+                    pass
+                return None
+
+            _log_verbose(f"[CACHE DISK] Stage: {stage} | Key: {cache_key[:16]}... | Loaded successfully")
             return advisory
         except json.JSONDecodeError as e:
             print(f"[CACHE DISK ERROR] Stage: {stage} | Key: {cache_key[:16]}... | JSON parse error: {e}")
@@ -318,21 +380,22 @@ def get_advisory(
     stage: str = "ic"
 ) -> AdvisoryResult:
     """
-    Get advisory for article (public API).
-    
+    Get advisory for article (public API) with memoization.
+
     This is the STRICTLY READ-ONLY entry point for UI modules.
-    
-    Args:
-        title: Article title
-        abstract: Article abstract
-        protocol_version: Protocol version
-        stage: Screening stage ("ic" or "ec")
-    
-    Returns:
-        AdvisoryResult - always returns (never generates)
+
+    Uses memory snapshot cache to avoid repeated lookups during same render cycle.
     """
+    cached = _get_mem_snapshot(title, abstract, protocol_version, stage)
+    if cached is not None:
+        _log_verbose(f"[MEM SNAPSHOT HIT] Stage: {stage}")
+        return cached
+
     cache = get_advisory_cache()
-    return cache.get_for_article(title, abstract, protocol_version, stage)
+    result = cache.get_for_article(title, abstract, protocol_version, stage)
+
+    _set_mem_snapshot(title, abstract, protocol_version, stage, result)
+    return result
 
 
 def get_advisory_by_key(

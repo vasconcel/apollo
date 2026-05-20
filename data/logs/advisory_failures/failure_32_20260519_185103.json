@@ -1,0 +1,13 @@
+{
+  "success": false,
+  "failure_type": "UNKNOWN",
+  "failure_reason": "Exception: 'NoneType' object has no attribute 'value'",
+  "raw_response": "\"StructuredAdvisory(stage='ec', decision='unavailable', confidence=0.0, triggered_criteria=[], non_triggered_criteria=[], criterion_evaluations={}, justification='Structured advisory unavailable. Displaying deterministic fallback summary.', reasoning_summary='LLM service unavailable. Manual review required.', ambiguity_flags=['LLM not available'], evidence_extracts=[], metadata_grounding={'title_used': False, 'year_used': False, 'abstract_used': False, 'literature_type_used': False}, is_fallback",
+  "normalized_response": {},
+  "cache_key": "d73abeca28d4eb9c372d23ae3c70c4a6",
+  "article_id": "32",
+  "protocol_version": "1.0",
+  "stage": "ec",
+  "timestamp": "2026-05-19T18:51:03.401675",
+  "model_used": "llama-3.3-70b-versatile"
+}

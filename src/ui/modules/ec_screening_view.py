@@ -497,9 +497,10 @@ def render_ai_advisory_panel(article, current_idx: int):
             print(f"[UI ADVISORY CHECK] Status: {status} == COMPLETED: {status == AdvisoryStatus.COMPLETED} | is_available: {advisory.is_available()}")
 
             if status == AdvisoryStatus.COMPLETED and advisory.is_available():
-                st.caption(f"Status: {status.value} | Decision: {advisory.decision.value}")
+                from src.advisory.advisory_models import safe_enum_value, safe_decision, safe_status
+                st.caption(f"Status: {safe_status(status)} | Decision: {safe_decision(advisory.decision)}")
                 advisory_dict = {
-                    "decision": advisory.decision.value,
+                    "decision": safe_decision(advisory.decision),
                     "confidence": advisory.confidence,
                     "triggered_criteria": advisory.triggered_criteria,
                     "criterion_evaluations": {

@@ -1,0 +1,14 @@
+{
+  "cache_key": "442d899740b52a0cfa66863c3c522ee6",
+  "protocol_version": "1.0",
+  "decision": "UNAVAILABLE",
+  "confidence": 0.0,
+  "triggered_criteria": [],
+  "criterion_evaluations": [],
+  "justification": "Generation failed: 'NoneType' object has no attribute 'value'",
+  "error": "UNKNOWN: 'NoneType' object has no attribute 'value'",
+  "is_fallback": false,
+  "is_placeholder": false,
+  "generated_at": "2026-05-19T18:50:53.603234",
+  "generation_duration_ms": null
+}

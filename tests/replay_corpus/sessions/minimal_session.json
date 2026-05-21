@@ -1,0 +1,69 @@
+{
+  "session_id": "minimal_session",
+  "created_at": "2025-01-15T10:00:00",
+  "protocol_version": "1.0",
+  "stage": "ec",
+  "current_index": 0,
+  "total_count": 2,
+  "ec_completed": 0,
+  "ic_completed": 0,
+  "included_count": 0,
+  "excluded_count": 0,
+  "skip_count": 0,
+  "discussion_count": 0,
+  "researcher_id": "researcher_1",
+  "last_saved": "",
+  "schema_version": "2.0",
+  "articles": [
+    {
+      "article_id": "ART001",
+      "title": "Test Paper A",
+      "abstract": "Abstract for paper A",
+      "metadata": {
+        "literature_type": "WL",
+        "year": "2020"
+      },
+      "ec_stage": "",
+      "ec_notes": "",
+      "ec_timestamp": "",
+      "ec_llm_suggestion": {},
+      "ic_stage": "",
+      "ic_notes": "",
+      "ic_timestamp": "",
+      "ic_llm_suggestion": {},
+      "qc_stage": "",
+      "qc_notes": "",
+      "qc_timestamp": "",
+      "qc_score": "",
+      "qc_llm_suggestion": {},
+      "final_decision": ""
+    },
+    {
+      "article_id": "ART002",
+      "title": "Test Paper B",
+      "abstract": "Abstract for paper B",
+      "metadata": {
+        "literature_type": "WL",
+        "year": "2021"
+      },
+      "ec_stage": "",
+      "ec_notes": "",
+      "ec_timestamp": "",
+      "ec_llm_suggestion": {},
+      "ic_stage": "",
+      "ic_notes": "",
+      "ic_timestamp": "",
+      "ic_llm_suggestion": {},
+      "qc_stage": "",
+      "qc_notes": "",
+      "qc_timestamp": "",
+      "qc_score": "",
+      "qc_llm_suggestion": {},
+      "final_decision": ""
+    }
+  ],
+  "dynamic_protocol": null,
+  "audit_chain": [],
+  "autosave_enabled": false,
+  "session_checksum": "b5c328ce71cfd25af653d2dadcb2b544081d54a18c310d3da8c84bbfe7d2421e"
+}

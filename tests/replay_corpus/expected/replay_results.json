@@ -1,0 +1,58 @@
+{
+  "minimal_session.json": {
+    "session_id": "minimal_session",
+    "stage": "ec",
+    "current_index": 0,
+    "total_count": 2,
+    "ec_completed": 0,
+    "ic_completed": 0,
+    "included_count": 0,
+    "excluded_count": 0,
+    "skip_count": 0,
+    "discussion_count": 0,
+    "num_articles": 2,
+    "num_audit_events": 0
+  },
+  "ec_completed.json": {
+    "session_id": "ec_completed",
+    "stage": "ec",
+    "current_index": 3,
+    "total_count": 3,
+    "ec_completed": 3,
+    "ic_completed": 0,
+    "included_count": 1,
+    "excluded_count": 1,
+    "skip_count": 0,
+    "discussion_count": 1,
+    "num_articles": 3,
+    "num_audit_events": 3
+  },
+  "ic_completed.json": {
+    "session_id": "ic_completed",
+    "stage": "ic",
+    "current_index": 3,
+    "total_count": 4,
+    "ec_completed": 4,
+    "ic_completed": 3,
+    "included_count": 2,
+    "excluded_count": 1,
+    "skip_count": 0,
+    "discussion_count": 1,
+    "num_articles": 4,
+    "num_audit_events": 7
+  },
+  "discussion_heavy.json": {
+    "session_id": "discussion_heavy",
+    "stage": "ec",
+    "current_index": 8,
+    "total_count": 8,
+    "ec_completed": 8,
+    "ic_completed": 0,
+    "included_count": 2,
+    "excluded_count": 0,
+    "skip_count": 0,
+    "discussion_count": 6,
+    "num_articles": 8,
+    "num_audit_events": 8
+  }
+}

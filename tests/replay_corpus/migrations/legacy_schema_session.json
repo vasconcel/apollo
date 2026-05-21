@@ -1,0 +1,46 @@
+{
+  "session_id": "legacy_schema_session",
+  "created_at": "2024-06-01T08:00:00",
+  "protocol_version": "0.9",
+  "stage": "ec",
+  "current_index": 0,
+  "total_count": 1,
+  "ec_completed": 0,
+  "ic_completed": 0,
+  "included_count": 0,
+  "excluded_count": 0,
+  "skip_count": 0,
+  "discussion_count": 0,
+  "researcher_id": "researcher_legacy",
+  "last_saved": "",
+  "schema_version": "1.0",
+  "articles": [
+    {
+      "article_id": "LEGACY001",
+      "title": "Legacy Paper",
+      "abstract": "Legacy abstract",
+      "metadata": {
+        "literature_type": "WL",
+        "year": "2019"
+      },
+      "ec_stage": "",
+      "ec_notes": "",
+      "ec_timestamp": "",
+      "ec_llm_suggestion": {},
+      "ic_stage": "",
+      "ic_notes": "",
+      "ic_timestamp": "",
+      "ic_llm_suggestion": {},
+      "qc_stage": "",
+      "qc_notes": "",
+      "qc_timestamp": "",
+      "qc_score": "",
+      "qc_llm_suggestion": {},
+      "final_decision": ""
+    }
+  ],
+  "dynamic_protocol": null,
+  "audit_chain": [],
+  "autosave_enabled": false,
+  "session_checksum": "3e3139c42ee204d64a4cc92305780ac4e98424fed1bb904dad36193d00f7523a"
+}

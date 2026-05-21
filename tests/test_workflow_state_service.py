@@ -169,11 +169,17 @@ class TestWorkflowArchitecturalBoundary:
     def test_workflow_state_service_is_stateless(self):
         assert_is_stateless(WorkflowStateService)
 
-    def test_screening_session_imports_workflow_service(self):
-        source = resolve_source_path(
-            __file__, "src", "core", "screening_session.py"
+    def test_screening_session_reaches_workflow_via_services(self):
+        """ScreeningSession accesses WorkflowStateService indirectly through
+        NavigationService and SessionQueryService, which delegate to it."""
+        nav_source = resolve_source_path(
+            __file__, "src", "core", "session_navigation.py"
         ).read_text(encoding="utf-8")
-        assert "from src.core.workflow_state_service import" in source
+        assert "WorkflowStateService.stage_field" in nav_source
+        qry_source = resolve_source_path(
+            __file__, "src", "core", "session_query_service.py"
+        ).read_text(encoding="utf-8")
+        assert "WorkflowStateService.stage_field" in qry_source
 
     def test_no_persistence_in_source(self):
         source = get_source(WorkflowStateService)

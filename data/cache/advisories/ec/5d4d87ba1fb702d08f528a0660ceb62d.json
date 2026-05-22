@@ -16,22 +16,39 @@
       "criterion_id": "EC2",
       "criterion_name": "EC2",
       "satisfied": false,
-      "evidence": [
-        "Cannot be evaluated at Title/Abstract screening stage. Proceeding with metadata analysis."
-      ],
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC3",
+      "criterion_name": "EC3",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC4",
+      "criterion_name": "EC4",
+      "satisfied": false,
+      "evidence": [],
+      "confidence": 0.0
+    },
+    {
+      "criterion_id": "EC5",
+      "criterion_name": "EC5",
+      "satisfied": false,
+      "evidence": [],
       "confidence": 0.0
     },
     {
       "criterion_id": "EC6",
       "criterion_name": "EC6",
       "satisfied": false,
-      "evidence": [
-        "Handled by system deterministic engine."
-      ],
+      "evidence": [],
       "confidence": 0.0
     }
   ],
-  "justification": "The provided metadata does not contain sufficient information to trigger any exclusion criteria. The literature type is classified as White Literature, which is peer-reviewed, but no other relevant details are available.",
+  "justification": "The provided metadata does not contain sufficient information to trigger any exclusion criteria. The literature type is classified as White Literature, which is peer-reviewed, and the year is not applicable due to the critical year rule.",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
@@ -39,6 +56,6 @@
   "risk_reason": "",
   "validation_queue": "UNKNOWN",
   "requires_validation": false,
-  "generated_at": "2026-05-20T04:30:33.951567",
-  "generation_duration_ms": 2927.9305934906006
+  "generated_at": "2026-05-22T02:37:25.826989",
+  "generation_duration_ms": 2559.269666671753
 }

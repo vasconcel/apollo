@@ -31,6 +31,8 @@ COLORS = {
     "status_consensus": "#60A5FA",
     "status_pending": "#A1A1AA",
     "status_coded": "#5E9CA0",
+    "status_uncertain": "#FBBF24",
+    "status_autonomous": "#34D399",
     "font_mono": "'JetBrains Mono', 'IBM Plex Mono', 'Consolas', monospace",
     "font_sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 }

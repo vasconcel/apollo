@@ -194,6 +194,30 @@ SEMANTIC_COLORS = {
         "description": "Article metadata is minimal, manual verification recommended",
         "accessibility_label": "Minimal Metadata"
     },
+    "UNCERTAIN": {
+        "bg": "rgba(251, 191, 36, 0.15)",
+        "border": "#FBBF24",
+        "text": "#FBBF24",
+        "badge": "#FBBF24",
+        "description": "AI could not determine relevance with sufficient confidence",
+        "accessibility_label": "Uncertain"
+    },
+    "AUTONOMOUS": {
+        "bg": "rgba(52, 211, 153, 0.15)",
+        "border": "#34D399",
+        "text": "#34D399",
+        "badge": "#34D399",
+        "description": "Decision made autonomously by AI with high confidence",
+        "accessibility_label": "Autonomous"
+    },
+    "HUMAN_REVIEW": {
+        "bg": "rgba(96, 165, 250, 0.15)",
+        "border": "#60A5FA",
+        "text": "#60A5FA",
+        "badge": "#60A5FA",
+        "description": "Decision requires human validation before finalization",
+        "accessibility_label": "Human Review"
+    },
 }
 
 
@@ -253,7 +277,12 @@ def get_decision_semantic(decision: str) -> dict:
         "exclude": "EXCLUDED",
         "skip": "SKIP",
         "needs_discussion": "NEEDS_DISCUSSION",
-        "pending": "PENDING"
+        "pending": "PENDING",
+        "uncertain": "UNCERTAIN",
+        "insufficient_evidence": "UNCERTAIN",
+        "cannot_determine": "UNCERTAIN",
+        "autonomous": "AUTONOMOUS",
+        "human_review": "HUMAN_REVIEW",
     }
     state = decision_map.get(decision.lower(), "PENDING")
     return get_semantic_color(state)

@@ -34,7 +34,17 @@ from .advisory_models import (
     CriterionEvaluation,
     QueueItem,
     QueueState,
-    AdvisoryConfig
+    AdvisoryConfig,
+    ValidationRouting,
+    AutonomyAssessment,
+    TopicRelevance,
+    calibrate_confidence,
+    compute_risk_classification,
+    compute_evidence_strength,
+    compute_uncertainty_score,
+    assess_autonomy,
+    populate_risk_classification,
+    compute_metadata_completeness,
 )
 
 from .advisory_cache import (
@@ -94,6 +104,9 @@ __all__ = [
     "QueueItem",
     "QueueState",
     "AdvisoryConfig",
+    "ValidationRouting",
+    "AutonomyAssessment",
+    "TopicRelevance",
     
     # Cache
     "get_advisory_cache",
@@ -135,5 +148,14 @@ __all__ = [
     "set_active_stage",
     "get_active_stage",
     "should_process_stage",
-    "get_worker_state"
+    "get_worker_state",
+
+    # Confidence & Autonomy
+    "calibrate_confidence",
+    "compute_risk_classification",
+    "compute_evidence_strength",
+    "compute_uncertainty_score",
+    "assess_autonomy",
+    "populate_risk_classification",
+    "compute_metadata_completeness",
 ]

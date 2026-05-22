@@ -1,0 +1,601 @@
+{
+  "report_type": "apollo_evaluation",
+  "experiment_name": "sample_benchmark",
+  "protocol_version": "1.0",
+  "dataset_name": "sample_benchmark",
+  "dataset_size": 25,
+  "stage": "ec",
+  "generated_at": "2026-05-22T00:24:58.024418",
+  "metrics": {
+    "classification": {
+      "precision": 0.9,
+      "recall": 1.0,
+      "f1_score": 0.9473684210526316,
+      "specificity": 0.9375,
+      "balanced_accuracy": 0.96875,
+      "true_positives": 9,
+      "true_negatives": 15,
+      "false_positives": 1,
+      "false_negatives": 0,
+      "total": 25
+    },
+    "safety": {
+      "false_inclusion_rate": 0.04,
+      "false_exclusion_rate": 0.0,
+      "catastrophic_false_exclusions": 0,
+      "catastrophic_false_exclusion_rate": 0.0,
+      "total_human_included": 9,
+      "safe_autonomous_rate": 0.95
+    },
+    "autonomy": {
+      "autonomous_coverage": 0.8,
+      "human_review_reduction_pct": 0.2,
+      "abstention_rate": 0.2,
+      "escalation_rate": 0.0,
+      "autonomous_precision": 0.9,
+      "autonomous_recall": 1.0,
+      "autonomous_f1": 0.9473684210526316,
+      "autonomous_agreement_rate": 0.95,
+      "total_autonomous": 20,
+      "total_human_review": 5,
+      "total_abstained": 5,
+      "total_escalated": 0,
+      "total_samples": 25
+    },
+    "calibration": {
+      "expected_calibration_error": 0.799819100667619,
+      "maximum_calibration_error": 0.9488706721361458,
+      "confidence_correctness_correlation": 0.0,
+      "bins": [
+        {
+          "bin": 0,
+          "low": 0.0,
+          "high": 0.1,
+          "count": 0,
+          "avg_confidence": 0.0,
+          "accuracy": 0.0,
+          "gap": 0.0
+        },
+        {
+          "bin": 1,
+          "low": 0.1,
+          "high": 0.2,
+          "count": 0,
+          "avg_confidence": 0.0,
+          "accuracy": 0.0,
+          "gap": 0.0
+        },
+        {
+          "bin": 2,
+          "low": 0.2,
+          "high": 0.3,
+          "count": 1,
+          "avg_confidence": 0.2628521092314463,
+          "accuracy": 0.0,
+          "gap": 0.2628521092314463
+        },
+        {
+          "bin": 3,
+          "low": 0.3,
+          "high": 0.4,
+          "count": 3,
+          "avg_confidence": 0.3365009272514694,
+          "accuracy": 0.0,
+          "gap": 0.3365009272514694
+        },
+        {
+          "bin": 4,
+          "low": 0.4,
+          "high": 0.5,
+          "count": 1,
+          "avg_confidence": 0.46172991232557725,
+          "accuracy": 0.0,
+          "gap": 0.46172991232557725
+        },
+        {
+          "bin": 5,
+          "low": 0.5,
+          "high": 0.6,
+          "count": 0,
+          "avg_confidence": 0.0,
+          "accuracy": 0.0,
+          "gap": 0.0
+        },
+        {
+          "bin": 6,
+          "low": 0.6,
+          "high": 0.7,
+          "count": 0,
+          "avg_confidence": 0.0,
+          "accuracy": 0.0,
+          "gap": 0.0
+        },
+        {
+          "bin": 7,
+          "low": 0.7,
+          "high": 0.8,
+          "count": 1,
+          "avg_confidence": 0.7949818251593344,
+          "accuracy": 0.0,
+          "gap": 0.7949818251593344
+        },
+        {
+          "bin": 8,
+          "low": 0.8,
+          "high": 0.9,
+          "count": 7,
+          "avg_confidence": 0.86856611751228,
+          "accuracy": 0.0,
+          "gap": 0.86856611751228
+        },
+        {
+          "bin": 9,
+          "low": 0.9,
+          "high": 1.0,
+          "count": 12,
+          "avg_confidence": 0.9488706721361458,
+          "accuracy": 0.0,
+          "gap": 0.9488706721361458
+        }
+      ],
+      "bin_count": 10
+    },
+    "queue": {
+      "auto_include": 10,
+      "auto_exclude": 10,
+      "human_review": 5,
+      "escalate": 0,
+      "uncertain": 0,
+      "total": 25
+    }
+  },
+  "error_analysis": [
+    {
+      "article_id": "BENCH_001",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.8535015057311733,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_002",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.8544495751274497,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_003",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.948185496302633,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_004",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.8723523042927646,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_005",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.7949818251593344,
+      "categories": [
+        "keyword_overlap_false_positive"
+      ],
+      "severity": "medium",
+      "description": "Paper uses domain keywords (e.g. 'software', 'AI', 'ML') but addresses a completely different research question. APOLLO confuses topical keyword overlap for true relevance.",
+      "rationale": "Unclassified false positive; attributed to keyword overlap",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_006",
+      "apollo_decision": "UNCERTAIN",
+      "gold_decision": "UNCERTAIN",
+      "confidence": 0.36086842743641023,
+      "categories": [
+        "confidence_miscalibration"
+      ],
+      "severity": "medium",
+      "description": "Confidence score does not reflect actual decision quality. High confidence on wrong decisions or low confidence on correct ones.",
+      "rationale": "Confidence 36% on correct decision; underconfident",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_007",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.9486400570700892,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_008",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.9713077133457377,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_009",
+      "apollo_decision": "INSUFFICIENT_EVIDENCE",
+      "gold_decision": "INSUFFICIENT_EVIDENCE",
+      "confidence": 0.2628521092314463,
+      "categories": [
+        "confidence_miscalibration"
+      ],
+      "severity": "medium",
+      "description": "Confidence score does not reflect actual decision quality. High confidence on wrong decisions or low confidence on correct ones.",
+      "rationale": "Confidence 26% on correct decision; underconfident",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_010",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.8842735295211996,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_011",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.9679992688265733,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_012",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.8592664047296166,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_013",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.905388466148493,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_014",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.9254568205534206,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_015",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.9896552649093154,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_016",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.872397480241143,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_017",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.9859509728659065,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_018",
+      "apollo_decision": "UNCERTAIN",
+      "gold_decision": "UNCERTAIN",
+      "confidence": 0.3020526419093136,
+      "categories": [
+        "confidence_miscalibration"
+      ],
+      "severity": "medium",
+      "description": "Confidence score does not reflect actual decision quality. High confidence on wrong decisions or low confidence on correct ones.",
+      "rationale": "Confidence 30% on correct decision; underconfident",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_019",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.956674707867289,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_020",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.9567515120105212,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_021",
+      "apollo_decision": "UNCERTAIN",
+      "gold_decision": "UNCERTAIN",
+      "confidence": 0.3465817124086844,
+      "categories": [
+        "confidence_miscalibration"
+      ],
+      "severity": "medium",
+      "description": "Confidence score does not reflect actual decision quality. High confidence on wrong decisions or low confidence on correct ones.",
+      "rationale": "Confidence 35% on correct decision; underconfident",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_022",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.8837220229426126,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_023",
+      "apollo_decision": "EXCLUDE",
+      "gold_decision": "EXCLUDE",
+      "confidence": 0.9245788637341321,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_024",
+      "apollo_decision": "UNCERTAIN",
+      "gold_decision": "UNCERTAIN",
+      "confidence": 0.46172991232557725,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    },
+    {
+      "article_id": "BENCH_025",
+      "apollo_decision": "INCLUDE",
+      "gold_decision": "INCLUDE",
+      "confidence": 0.90585892199964,
+      "categories": [
+        "unknown"
+      ],
+      "severity": "medium",
+      "description": "Error could not be classified into a specific category.",
+      "rationale": "Could not determine error category",
+      "evidence_snippet": "Simulated justification for evaluation testing"
+    }
+  ],
+  "threshold_comparison": [
+    {
+      "config": {
+        "confidence_min": 0.9,
+        "grounding_strength_min": 0.7,
+        "evidence_strength_min": 0.5,
+        "uncertainty_max": 0.3,
+        "require_triggered_criteria": true,
+        "name": "conservative"
+      },
+      "autonomous_count": 2,
+      "human_review_count": 23,
+      "abstention_count": 5,
+      "escalation_count": 0,
+      "autonomous_coverage": 0.08,
+      "human_review_reduction": 0.07999999999999996,
+      "autonomous_precision": 1.0,
+      "autonomous_recall": 0.1111111111111111,
+      "autonomous_f1": 0.19999999999999998,
+      "autonomous_agreement": 1.0,
+      "false_positive_rate": 0.0625,
+      "false_negative_rate": 0.0,
+      "catastrophic_exclusions": 0,
+      "safety_score": 0.9791666666666666
+    },
+    {
+      "config": {
+        "confidence_min": 0.95,
+        "grounding_strength_min": 0.8,
+        "evidence_strength_min": 0.6,
+        "uncertainty_max": 0.2,
+        "require_triggered_criteria": true,
+        "name": "balanced"
+      },
+      "autonomous_count": 0,
+      "human_review_count": 25,
+      "abstention_count": 5,
+      "escalation_count": 0,
+      "autonomous_coverage": 0.0,
+      "human_review_reduction": 0.0,
+      "autonomous_precision": 0.0,
+      "autonomous_recall": 0.0,
+      "autonomous_f1": 0.0,
+      "autonomous_agreement": 0.0,
+      "false_positive_rate": 0.0625,
+      "false_negative_rate": 0.0,
+      "catastrophic_exclusions": 0,
+      "safety_score": 0.9791666666666666
+    },
+    {
+      "config": {
+        "confidence_min": 0.85,
+        "grounding_strength_min": 0.6,
+        "evidence_strength_min": 0.4,
+        "uncertainty_max": 0.4,
+        "require_triggered_criteria": true,
+        "name": "moderate"
+      },
+      "autonomous_count": 6,
+      "human_review_count": 19,
+      "abstention_count": 5,
+      "escalation_count": 0,
+      "autonomous_coverage": 0.24,
+      "human_review_reduction": 0.24,
+      "autonomous_precision": 1.0,
+      "autonomous_recall": 0.1111111111111111,
+      "autonomous_f1": 0.19999999999999998,
+      "autonomous_agreement": 1.0,
+      "false_positive_rate": 0.0625,
+      "false_negative_rate": 0.0,
+      "catastrophic_exclusions": 0,
+      "safety_score": 0.9791666666666666
+    },
+    {
+      "config": {
+        "confidence_min": 0.8,
+        "grounding_strength_min": 0.5,
+        "evidence_strength_min": 0.3,
+        "uncertainty_max": 0.5,
+        "require_triggered_criteria": false,
+        "name": "aggressive"
+      },
+      "autonomous_count": 19,
+      "human_review_count": 6,
+      "abstention_count": 5,
+      "escalation_count": 0,
+      "autonomous_coverage": 0.76,
+      "human_review_reduction": 0.76,
+      "autonomous_precision": 1.0,
+      "autonomous_recall": 1.0,
+      "autonomous_f1": 1.0,
+      "autonomous_agreement": 1.0,
+      "false_positive_rate": 0.0625,
+      "false_negative_rate": 0.0,
+      "catastrophic_exclusions": 0,
+      "safety_score": 0.9791666666666666
+    },
+    {
+      "config": {
+        "confidence_min": 0.99,
+        "grounding_strength_min": 0.9,
+        "evidence_strength_min": 0.8,
+        "uncertainty_max": 0.1,
+        "require_triggered_criteria": true,
+        "name": "ultra_conservative"
+      },
+      "autonomous_count": 0,
+      "human_review_count": 25,
+      "abstention_count": 5,
+      "escalation_count": 0,
+      "autonomous_coverage": 0.0,
+      "human_review_reduction": 0.0,
+      "autonomous_precision": 0.0,
+      "autonomous_recall": 0.0,
+      "autonomous_f1": 0.0,
+      "autonomous_agreement": 0.0,
+      "false_positive_rate": 0.0625,
+      "false_negative_rate": 0.0,
+      "catastrophic_exclusions": 0,
+      "safety_score": 0.9791666666666666
+    }
+  ]
+}

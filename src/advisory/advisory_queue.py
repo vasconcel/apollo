@@ -151,6 +151,11 @@ class AdvisoryQueue:
         
         return self.state
     
+    @property
+    def pending_items(self) -> List[QueueItem]:
+        """Get all pending queue items (property alias for get_pending)."""
+        return self.get_pending()
+
     def get_pending(self) -> List[QueueItem]:
         """Get all pending queue items."""
         return [

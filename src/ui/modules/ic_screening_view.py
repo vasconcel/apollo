@@ -26,7 +26,16 @@ from src.advisory import (
     get_advisory,
     get_advisory_status,
     get_cache_stats,
-    AdvisoryStatus
+    AdvisoryStatus,
+    AdvisoryDecision,
+)
+from src.advisory.advisory_models import (
+    safe_decision,
+    safe_status,
+    safe_enum_value,
+    compute_evidence_strength,
+    compute_uncertainty_score,
+    assess_autonomy,
 )
 from src.advisory.calibration_tracker import log_calibration_event
 from src.advisory.advisory_scheduler import set_active_stage
@@ -586,44 +595,59 @@ def render_ai_advisory_panel(article, current_idx: int):
 
     with st.container(border=True):
         with st.expander("🤖 AI ADVISORY", expanded=False):
-            from src.advisory.advisory_models import safe_decision, safe_status
             print(f"[IC ADVISORY RENDER] Title: {title[:30]}... | Status: {status} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'} | Available: {advisory.is_available() if advisory and hasattr(advisory, 'is_available') else False}")
 
-            if status == AdvisoryStatus.COMPLETED and advisory.is_available():
-                st.caption(f"Status: {safe_status(status)} | Decision: {safe_decision(advisory.decision)}")
-                advisory_dict = {
-                    "decision": safe_decision(advisory.decision),
-                    "confidence": advisory.confidence,
-                    "triggered_criteria": advisory.triggered_criteria,
-                    "criterion_evaluations": {
-                        ce.criterion_id: {
-                            "criterion_name": ce.criterion_name,
-                            "satisfied": ce.satisfied,
-                            "evidence": ce.evidence,
-                            "confidence": ce.confidence
-                        }
-                        for ce in advisory.criterion_evaluations
-                    },
-                    "justification": advisory.justification
-                }
-                render_suggestion_details(advisory_dict)
-            else:
-                if status == AdvisoryStatus.PENDING:
-                    st.caption("⏳ Advisory pending — manual screening operational")
-                    print(f"[IC ADVISORY STATE] PENDING | Article: {title[:30]}...")
-                elif status == AdvisoryStatus.PROCESSING:
-                    st.caption("🔄 Advisory generating — please wait...")
-                    print(f"[IC ADVISORY STATE] PROCESSING | Article: {title[:30]}...")
-                elif status == AdvisoryStatus.FAILED:
-                    error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
-                    st.caption(f"⚠️ Advisory failed: {error_msg}")
-                    print(f"[IC ADVISORY STATE] FAILED | Article: {title[:30]}... | Error: {error_msg}")
-                elif status == AdvisoryStatus.UNAVAILABLE:
-                    st.caption("○ Advisory unavailable — manual screening fully operational")
-                    print(f"[IC ADVISORY STATE] UNAVAILABLE | Article: {title[:30]}...")
+            is_completed = status == AdvisoryStatus.COMPLETED
+            if is_completed:
+                decision_val = advisory.decision if advisory else None
+                is_uncertain = decision_val in (
+                    AdvisoryDecision.UNCERTAIN,
+                    AdvisoryDecision.INSUFFICIENT_EVIDENCE,
+                    AdvisoryDecision.CANNOT_DETERMINE,
+                ) if decision_val else False
+
+                if (advisory and advisory.is_available()) or is_uncertain:
+                    st.caption(f"Status: {safe_status(status)} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'}")
+
+                    if is_uncertain and advisory:
+                        evidence_strength = compute_evidence_strength(advisory)
+                        uncertainty_score = compute_uncertainty_score(advisory)
+                        st.warning("⚠ AI could not determine relevance with sufficient confidence. Manual review required.")
+                        st.markdown(f"**Uncertainty Score:** {uncertainty_score:.2f} | **Evidence Strength:** {evidence_strength:.2f}")
+
+                    advisory_dict = {
+                        "decision": safe_decision(advisory.decision) if advisory else "N/A",
+                        "confidence": advisory.confidence if advisory else 0.0,
+                        "triggered_criteria": advisory.triggered_criteria if advisory else [],
+                        "criterion_evaluations": {
+                            ce.criterion_id: {
+                                "criterion_name": ce.criterion_name,
+                                "satisfied": ce.satisfied,
+                                "evidence": ce.evidence,
+                                "confidence": ce.confidence
+                            }
+                            for ce in (advisory.criterion_evaluations if advisory else [])
+                        },
+                        "justification": advisory.justification if advisory else ""
+                    }
+                    render_suggestion_details(advisory_dict)
                 else:
-                    st.caption("○ No advisory generated — manual screening operational")
-                    print(f"[IC ADVISORY STATE] UNKNOWN | Article: {title[:30]}... | Status: {status}")
+                    if status == AdvisoryStatus.PENDING:
+                        st.caption("⏳ Advisory pending — manual screening operational")
+                        print(f"[IC ADVISORY STATE] PENDING | Article: {title[:30]}...")
+                    elif status == AdvisoryStatus.PROCESSING:
+                        st.caption("🔄 Advisory generating — please wait...")
+                        print(f"[IC ADVISORY STATE] PROCESSING | Article: {title[:30]}...")
+                    elif status == AdvisoryStatus.FAILED:
+                        error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
+                        st.caption(f"⚠️ Advisory failed: {error_msg}")
+                        print(f"[IC ADVISORY STATE] FAILED | Article: {title[:30]}... | Error: {error_msg}")
+                    elif status == AdvisoryStatus.UNAVAILABLE:
+                        st.caption("○ Advisory unavailable — manual screening fully operational")
+                        print(f"[IC ADVISORY STATE] UNAVAILABLE | Article: {title[:30]}...")
+                    else:
+                        st.caption("○ No advisory generated — manual screening operational")
+                        print(f"[IC ADVISORY STATE] UNKNOWN | Article: {title[:30]}... | Status: {status}")
 
 
 
@@ -661,8 +685,11 @@ def render_suggestion_details(suggestion: Dict):
     decision = suggestion.get("decision", "").upper()
     confidence = suggestion.get("confidence", 0)
     is_fallback = suggestion.get("is_fallback", False)
+    is_uncertain = decision in ("UNCERTAIN", "INSUFFICIENT_EVIDENCE", "CANNOT_DETERMINE")
 
-    if confidence >= 0.7:
+    if is_uncertain:
+        signal_label = "Insufficient evidence for reliable determination"
+    elif confidence >= 0.7:
         signal_label = "Strong heuristic alignment"
     elif confidence >= 0.4:
         signal_label = "Moderate LLM signal"
@@ -686,6 +713,8 @@ def render_suggestion_details(suggestion: Dict):
             status_badge("EXCLUDED")
         elif decision == "INCLUDE":
             status_badge("INCLUDED")
+        elif is_uncertain:
+            status_badge("UNCERTAIN")
         elif decision == "UNAVAILABLE":
             status_badge("FALLBACK")
         else:

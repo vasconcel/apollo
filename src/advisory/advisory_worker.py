@@ -73,7 +73,14 @@ from .advisory_models import (
     QueueItem,
     AdvisoryStatus,
     validate_grounding,
-    compute_hallucination_risk
+    compute_hallucination_risk,
+    calibrate_confidence,
+    compute_metadata_completeness,
+    compute_evidence_strength,
+    compute_uncertainty_score,
+    assess_autonomy,
+    TopicRelevance,
+    populate_risk_classification,
 )
 from .advisory_queue import get_advisory_queue
 from .advisory_cache import get_advisory_cache, store_advisory
@@ -215,10 +222,13 @@ DECISION_NORMALIZATION_MAP = {
     "in": "INCLUDE",
     "skip": "SKIP",
     "skipped": "SKIP",
-    "uncertain": "UNAVAILABLE",
-    "unclear": "UNAVAILABLE",
+    "uncertain": "UNCERTAIN",
+    "unclear": "UNCERTAIN",
+    "cannot determine": "UNCERTAIN",
+    "cannot_determine": "UNCERTAIN",
+    "insufficient evidence": "INSUFFICIENT_EVIDENCE",
+    "insufficient_evidence": "INSUFFICIENT_EVIDENCE",
     "review": "UNAVAILABLE",
-    "unavailable": "UNAVAILABLE",
     "unavailable": "UNAVAILABLE",
 }
 
@@ -233,10 +243,14 @@ def normalize_decision(decision_value: Any) -> str:
     if decision_str in DECISION_NORMALIZATION_MAP:
         return DECISION_NORMALIZATION_MAP[decision_str]
 
-    if decision_str.upper() in ["INCLUDE", "EXCLUDE", "SKIP", "UNAVAILABLE"]:
-        return decision_str.upper()
+    upper = decision_str.upper()
+    if upper in VALID_DECISIONS:
+        return upper
 
     return "UNAVAILABLE"
+
+
+VALID_DECISIONS = frozenset({"INCLUDE", "EXCLUDE", "SKIP", "UNCERTAIN", "INSUFFICIENT_EVIDENCE", "CANNOT_DETERMINE", "UNAVAILABLE"})
 
 
 def _validate_response_schema(response: Dict[str, Any]) -> tuple[Optional[AdvisoryFailureType], str]:
@@ -249,7 +263,7 @@ def _validate_response_schema(response: Dict[str, Any]) -> tuple[Optional[Adviso
 
     normalized_decision = normalize_decision(response.get("decision"))
 
-    if normalized_decision not in ["INCLUDE", "EXCLUDE", "SKIP", "UNAVAILABLE"]:
+    if normalized_decision not in VALID_DECISIONS:
         return AdvisoryFailureType.INVALID_STATUS, f"Invalid decision value: {response.get('decision')}"
 
     try:
@@ -711,25 +725,47 @@ class AdvisoryWorker:
                 metadata=metadata
             )
 
+            raw_confidence = suggestion_dict.get("confidence", 0.0)
+
             metadata_completeness = 0.0
             if metadata:
                 fields_present = sum(1 for v in metadata.values() if v)
                 metadata_completeness = min(fields_present / 10.0, 1.0)
 
+            has_evidence = bool(evidence_snippets) or bool(criterion_grounding)
+            has_triggered_criteria = bool(triggered_criteria)
+
+            calibrated_confidence = calibrate_confidence(
+                base_confidence=raw_confidence,
+                metadata_completeness=metadata_completeness,
+                grounding_strength=grounding_strength,
+                has_evidence=has_evidence,
+                has_triggered_criteria=has_triggered_criteria
+            )
+
+            if calibrated_confidence < 0.5 and decision == AdvisoryDecision.INCLUDE:
+                decision = AdvisoryDecision.UNCERTAIN
+
             hallucination_risk = compute_hallucination_risk(
                 is_fallback=False,
                 grounding_strength=grounding_strength,
                 unsupported_claims=unsupported_detected,
-                confidence=suggestion_dict.get("confidence", 0.0),
+                confidence=calibrated_confidence,
                 metadata_completeness=metadata_completeness,
                 error=error_msg
             )
 
-            return AdvisoryResult(
+            topic_relevance = TopicRelevance(
+                domain_relevance_score=suggestion_dict.get("domain_relevance_score", 0.0),
+                topical_alignment=suggestion_dict.get("topical_alignment", 0.0),
+                rq_alignment_strength=suggestion_dict.get("rq_alignment_strength", 0.0)
+            )
+
+            advisory = AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
                 decision=decision,
-                confidence=suggestion_dict.get("confidence", 0.0),
+                confidence=calibrated_confidence,
                 triggered_criteria=triggered_criteria,
                 criterion_evaluations=criterion_evaluations,
                 justification=justification,
@@ -740,8 +776,24 @@ class AdvisoryWorker:
                 criterion_grounding=criterion_grounding,
                 grounding_strength=grounding_strength,
                 unsupported_claims_detected=unsupported_detected,
-                hallucination_risk_score=hallucination_risk
+                hallucination_risk_score=hallucination_risk,
+                topic_relevance=topic_relevance,
             )
+
+            ambiguity_detected = decision in (
+                AdvisoryDecision.UNCERTAIN,
+                AdvisoryDecision.INSUFFICIENT_EVIDENCE,
+                AdvisoryDecision.CANNOT_DETERMINE,
+            ) or hallucination_risk > 0.5
+
+            populate_risk_classification(
+                advisory=advisory,
+                metadata_completeness=metadata_completeness,
+                criterion_grounding_score=grounding_strength,
+                ambiguity_detected=ambiguity_detected,
+            )
+
+            return advisory
 
         except Exception as e:
             tb = traceback.format_exc()

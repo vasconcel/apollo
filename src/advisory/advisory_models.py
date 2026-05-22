@@ -64,6 +64,9 @@ class AdvisoryDecision(str, Enum):
     INCLUDE = "INCLUDE"
     EXCLUDE = "EXCLUDE"
     SKIP = "SKIP"
+    UNCERTAIN = "UNCERTAIN"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    CANNOT_DETERMINE = "CANNOT_DETERMINE"
     UNAVAILABLE = "UNAVAILABLE"
     INSUFFICIENT_METADATA = "INSUFFICIENT_METADATA"
 
@@ -82,6 +85,14 @@ class ValidationQueue(str, Enum):
     AUTO_EXCLUDE_CANDIDATES = "AUTO_EXCLUDE_CANDIDATES"
     PRIORITY_REVIEW = "PRIORITY_REVIEW"
     CRITICAL_REVIEW = "CRITICAL_REVIEW"
+
+
+class ValidationRouting(str, Enum):
+    """Autonomous screening routing decision."""
+    AUTO_INCLUDE = "AUTO_INCLUDE"
+    AUTO_EXCLUDE = "AUTO_EXCLUDE"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+    ESCALATE = "ESCALATE"
 
 
 class ScreeningMode(str, Enum):
@@ -175,6 +186,72 @@ class CalibrationEvent:
         )
 
 
+@dataclass
+class TopicRelevance:
+    """Topic relevance assessment for the article."""
+    domain_relevance_score: float = 0.0
+    topical_alignment: float = 0.0
+    rq_alignment_strength: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "domain_relevance_score": self.domain_relevance_score,
+            "topical_alignment": self.topical_alignment,
+            "rq_alignment_strength": self.rq_alignment_strength
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TopicRelevance":
+        return cls(
+            domain_relevance_score=float(data.get("domain_relevance_score", 0.0)),
+            topical_alignment=float(data.get("topical_alignment", 0.0)),
+            rq_alignment_strength=float(data.get("rq_alignment_strength", 0.0))
+        )
+
+    @staticmethod
+    def unavailable() -> "TopicRelevance":
+        return TopicRelevance(0.0, 0.0, 0.0)
+
+
+@dataclass
+class AutonomyAssessment:
+    """
+    Assessment of whether the advisory can be trusted for autonomous screening.
+
+    Determines if the decision has sufficient evidence, confidence, and
+    grounding to bypass human review.
+    """
+    autonomous_eligible: bool = False
+    requires_human_validation: bool = True
+    uncertainty_score: float = 1.0
+    evidence_strength: float = 0.0
+    routing: ValidationRouting = ValidationRouting.HUMAN_REVIEW
+
+    def to_dict(self) -> dict:
+        return {
+            "autonomous_eligible": self.autonomous_eligible,
+            "requires_human_validation": self.requires_human_validation,
+            "uncertainty_score": self.uncertainty_score,
+            "evidence_strength": self.evidence_strength,
+            "routing": self.routing.value
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AutonomyAssessment":
+        routing_str = data.get("routing", "HUMAN_REVIEW")
+        try:
+            routing = ValidationRouting(routing_str)
+        except (ValueError, TypeError):
+            routing = ValidationRouting.HUMAN_REVIEW
+        return cls(
+            autonomous_eligible=bool(data.get("autonomous_eligible", False)),
+            requires_human_validation=bool(data.get("requires_human_validation", True)),
+            uncertainty_score=float(data.get("uncertainty_score", 1.0)),
+            evidence_strength=float(data.get("evidence_strength", 0.0)),
+            routing=routing
+        )
+
+
 def compute_metadata_completeness(title: str, abstract: str, metadata: dict = None) -> float:
     """
     Calculate metadata completeness score for confidence calibration.
@@ -220,20 +297,46 @@ def compute_metadata_completeness(title: str, abstract: str, metadata: dict = No
     return min(score, 1.0)
 
 
-def calibrate_confidence(base_confidence: float, metadata_completeness: float) -> float:
+def calibrate_confidence(
+    base_confidence: float,
+    metadata_completeness: float,
+    grounding_strength: float = 1.0,
+    has_evidence: bool = True,
+    has_triggered_criteria: bool = True
+) -> float:
     """
-    Calibrate confidence based on metadata availability.
+    Calibrate confidence based on metadata availability, grounding strength,
+    and evidence presence.
 
-    If metadata is sparse, reduce confidence ceiling.
+    Prevents confidence inflation when:
+    - metadata is sparse
+    - grounding is weak
+    - no evidence is available
+    - no criteria were triggered
+
+    Epistemic certainty cannot exceed evidence quality.
     """
+    calibrated = base_confidence
+
+    if grounding_strength < 0.3:
+        calibrated = min(calibrated, 0.45)
+    elif grounding_strength < 0.5:
+        calibrated = min(calibrated, 0.65)
+
+    if not has_triggered_criteria:
+        calibrated = min(calibrated, 0.55)
+
+    if not has_evidence:
+        calibrated = min(calibrated, 0.40)
+
     if metadata_completeness < 0.3:
-        return min(base_confidence, 0.45)
+        calibrated = min(calibrated, 0.45)
     elif metadata_completeness < 0.5:
-        return min(base_confidence, 0.65)
+        calibrated = min(calibrated, 0.65)
     elif metadata_completeness < 0.7:
-        return min(base_confidence, 0.85)
-    else:
-        return base_confidence
+        calibrated = min(calibrated, 0.85)
+
+    return calibrated
 
 
 def compute_risk_classification(
@@ -257,6 +360,7 @@ def compute_risk_classification(
     - Error presence (advisory generation failed)
     - Ambiguity signals
     - Criterion grounding strength
+    - Decision type (UNCERTAIN maps to HIGH_RISK)
     """
     reasons = []
 
@@ -266,8 +370,11 @@ def compute_risk_classification(
     if decision == AdvisoryDecision.INSUFFICIENT_METADATA:
         return RiskClassification.CRITICAL_REVIEW, "Insufficient metadata for reliable evaluation"
 
-    if decision == AdvisoryDecision.UNAVAILABLE:
-        return RiskClassification.CRITICAL_REVIEW, "Advisory unavailable"
+    if decision in (AdvisoryDecision.UNAVAILABLE, AdvisoryDecision.INSUFFICIENT_EVIDENCE, AdvisoryDecision.CANNOT_DETERMINE):
+        return RiskClassification.CRITICAL_REVIEW, f"Advisory cannot determine: {decision.value}"
+
+    if decision == AdvisoryDecision.UNCERTAIN:
+        return RiskClassification.HIGH_RISK, "Advisory expressed uncertainty"
 
     if criterion_grounding_score < 0.5:
         reasons.append("weak_criterion_grounding")
@@ -310,6 +417,7 @@ def get_validation_queue(
     Map risk classification to validation queue - DETERMINISTIC.
 
     Returns the appropriate queue for human validation.
+    UNCERTAIN abstracts always go to CRITICAL_REVIEW.
     """
     if risk_classification == RiskClassification.CRITICAL_REVIEW:
         return ValidationQueue.CRITICAL_REVIEW
@@ -482,9 +590,10 @@ def populate_risk_classification(
     Populate risk classification and validation fields on an AdvisoryResult.
 
     This is called after advisory generation to add risk-based routing.
+    Also computes evidence strength and autonomy assessment.
 
     Returns the advisory with populated risk_classification, risk_reason,
-    validation_queue, and requires_validation fields.
+    validation_queue, requires_validation, and topic_relevance fields.
     """
     risk_class, risk_reason = compute_risk_classification(
         confidence=advisory.confidence,
@@ -502,7 +611,7 @@ def populate_risk_classification(
     advisory.validation_queue = get_validation_queue(
         risk_classification=risk_class,
         decision=advisory.decision,
-        deterministic_hash=deterministic_hash
+        sampling_deterministic_hash=deterministic_hash
     )
 
     advisory.requires_validation = should_validate(
@@ -513,6 +622,124 @@ def populate_risk_classification(
     )
 
     return advisory
+
+
+def compute_evidence_strength(advisory: "AdvisoryResult") -> float:
+    """
+    Compute evidence strength score (0.0-1.0) for an advisory.
+
+    Factors:
+    - Grounding strength (how well justification matches source)
+    - Average criterion evaluation confidence
+    - Presence and quantity of evidence snippets
+    """
+    factors = [advisory.grounding_strength]
+
+    if advisory.criterion_evaluations:
+        avg_criterion_conf = sum(
+            ce.confidence for ce in advisory.criterion_evaluations
+        ) / len(advisory.criterion_evaluations)
+        factors.append(avg_criterion_conf)
+        factors.append(min(1.0, len(advisory.criterion_evaluations) / 3.0))
+
+    if advisory.grounding_evidence:
+        factors.append(min(1.0, len(advisory.grounding_evidence) / 2.0))
+
+    return sum(factors) / len(factors) if factors else 0.0
+
+
+def compute_uncertainty_score(advisory: "AdvisoryResult") -> float:
+    """
+    Compute uncertainty score (0.0-1.0) for an advisory.
+
+    0.0 = completely certain, 1.0 = completely uncertain.
+    """
+    factors = [1.0 - advisory.confidence]
+    factors.append(1.0 - advisory.grounding_strength)
+
+    if not advisory.triggered_criteria:
+        factors.append(0.5)
+
+    factors.append(advisory.hallucination_risk_score)
+
+    if advisory.decision in (AdvisoryDecision.UNCERTAIN, AdvisoryDecision.INSUFFICIENT_EVIDENCE, AdvisoryDecision.CANNOT_DETERMINE):
+        factors.append(0.8)
+
+    return sum(factors) / len(factors) if factors else 1.0
+
+
+def assess_autonomy(
+    decision: AdvisoryDecision,
+    confidence: float,
+    grounding_strength: float,
+    evidence_strength: float,
+    uncertainty_score: float,
+    triggered_criteria: list
+) -> AutonomyAssessment:
+    """
+    Assess whether an advisory is eligible for autonomous screening.
+
+    Autonomous decisions require:
+    - High confidence (>= 0.95)
+    - Sufficient grounding (>= 0.80)
+    - Evidence presence
+    - Low uncertainty (< 0.2)
+    - Objective decision (INCLUDE or EXCLUDE only)
+
+    Returns AutonomyAssessment with routing decision.
+    """
+    has_criteria = bool(triggered_criteria)
+    is_objective = decision in (AdvisoryDecision.INCLUDE, AdvisoryDecision.EXCLUDE)
+    is_decisive = (
+        confidence >= 0.95
+        and grounding_strength >= 0.80
+        and evidence_strength >= 0.6
+        and uncertainty_score < 0.2
+        and has_criteria
+    )
+
+    if is_objective and is_decisive:
+        if decision == AdvisoryDecision.INCLUDE:
+            return AutonomyAssessment(
+                autonomous_eligible=True,
+                requires_human_validation=False,
+                uncertainty_score=uncertainty_score,
+                evidence_strength=evidence_strength,
+                routing=ValidationRouting.AUTO_INCLUDE
+            )
+        else:
+            return AutonomyAssessment(
+                autonomous_eligible=True,
+                requires_human_validation=False,
+                uncertainty_score=uncertainty_score,
+                evidence_strength=evidence_strength,
+                routing=ValidationRouting.AUTO_EXCLUDE
+            )
+
+    if decision in (AdvisoryDecision.UNCERTAIN, AdvisoryDecision.INSUFFICIENT_EVIDENCE, AdvisoryDecision.CANNOT_DETERMINE):
+        if uncertainty_score > 0.7:
+            return AutonomyAssessment(
+                autonomous_eligible=False,
+                requires_human_validation=True,
+                uncertainty_score=uncertainty_score,
+                evidence_strength=evidence_strength,
+                routing=ValidationRouting.ESCALATE
+            )
+        return AutonomyAssessment(
+            autonomous_eligible=False,
+            requires_human_validation=True,
+            uncertainty_score=uncertainty_score,
+            evidence_strength=evidence_strength,
+            routing=ValidationRouting.HUMAN_REVIEW
+        )
+
+    return AutonomyAssessment(
+        autonomous_eligible=False,
+        requires_human_validation=True,
+        uncertainty_score=uncertainty_score,
+        evidence_strength=evidence_strength,
+        routing=ValidationRouting.HUMAN_REVIEW
+    )
 
 
 @dataclass
@@ -559,6 +786,8 @@ class AdvisoryResult:
 
     generated_at: Optional[str] = None
     generation_duration_ms: Optional[float] = None
+
+    topic_relevance: Optional["TopicRelevance"] = None
     
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSON persistence - SAFE."""
@@ -587,7 +816,8 @@ class AdvisoryResult:
             "validation_queue": safe_enum_value(self.validation_queue, "UNKNOWN"),
             "requires_validation": bool(self.requires_validation),
             "generated_at": self.generated_at,
-            "generation_duration_ms": self.generation_duration_ms
+            "generation_duration_ms": self.generation_duration_ms,
+            "topic_relevance": self.topic_relevance.to_dict() if self.topic_relevance else None
         }
 
     @classmethod
@@ -622,16 +852,22 @@ class AdvisoryResult:
             is_fallback=data.get("is_fallback", False),
             is_placeholder=data.get("is_placeholder", False),
             generated_at=data.get("generated_at"),
-            generation_duration_ms=data.get("generation_duration_ms")
+            generation_duration_ms=data.get("generation_duration_ms"),
+            topic_relevance=TopicRelevance.from_dict(data["topic_relevance"]) if data.get("topic_relevance") else None
         )
     
     def is_available(self) -> bool:
-        """Check if advisory has actual content (not failed/placeholder)."""
+        """Check if advisory has actual content (not failed/placeholder/uncertain)."""
         if self.decision is None:
             return False
         try:
             return (
-                self.decision != AdvisoryDecision.UNAVAILABLE
+                self.decision not in (
+                    AdvisoryDecision.UNAVAILABLE,
+                    AdvisoryDecision.UNCERTAIN,
+                    AdvisoryDecision.INSUFFICIENT_EVIDENCE,
+                    AdvisoryDecision.CANNOT_DETERMINE,
+                )
                 and not self.is_placeholder
                 and self.error is None
             )

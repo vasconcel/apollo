@@ -1,0 +1,21 @@
+[
+  {
+    "article_id": "ART_001",
+    "title": "Test",
+    "abstract": "Test abstract",
+    "stage": "ec",
+    "protocol_version": "1.0",
+    "raw_prompt": "Test prompt",
+    "raw_llm_response": "Test response",
+    "parsed_advisory": {
+      "decision": "INCLUDE",
+      "confidence": 0.95
+    },
+    "routing_decision": "AUTO_INCLUDE",
+    "gold_decision": "INCLUDE",
+    "is_correct": true,
+    "generation_duration_ms": null,
+    "error": null,
+    "timestamp": ""
+  }
+]

@@ -1,0 +1,148 @@
+{
+  "sweep_name": "test_sweep",
+  "mode": "scenario",
+  "evaluations": [
+    {
+      "scenario": "conservative",
+      "total_papers": 25,
+      "human_review_required": 5,
+      "autonomous_resolved": 20,
+      "autonomous_coverage": 0.8,
+      "human_review_reduction_pct": 0.8,
+      "catastrophic_errors": 0,
+      "catastrophic_error_rate": 0.0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "autonomous_agreement": 1.0,
+      "mean_autonomous_confidence": 0.9499999999999996,
+      "papers_by_routing": {
+        "AUTO_INCLUDE": 9,
+        "AUTO_EXCLUDE": 11,
+        "HUMAN_REVIEW": 5,
+        "ESCALATE": 0
+      }
+    },
+    {
+      "scenario": "balanced",
+      "total_papers": 25,
+      "human_review_required": 5,
+      "autonomous_resolved": 20,
+      "autonomous_coverage": 0.8,
+      "human_review_reduction_pct": 0.8,
+      "catastrophic_errors": 0,
+      "catastrophic_error_rate": 0.0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "autonomous_agreement": 1.0,
+      "mean_autonomous_confidence": 0.9499999999999996,
+      "papers_by_routing": {
+        "AUTO_INCLUDE": 9,
+        "AUTO_EXCLUDE": 11,
+        "HUMAN_REVIEW": 5,
+        "ESCALATE": 0
+      }
+    },
+    {
+      "scenario": "aggressive",
+      "total_papers": 25,
+      "human_review_required": 5,
+      "autonomous_resolved": 20,
+      "autonomous_coverage": 0.8,
+      "human_review_reduction_pct": 0.8,
+      "catastrophic_errors": 0,
+      "catastrophic_error_rate": 0.0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "autonomous_agreement": 1.0,
+      "mean_autonomous_confidence": 0.9499999999999996,
+      "papers_by_routing": {
+        "AUTO_INCLUDE": 9,
+        "AUTO_EXCLUDE": 11,
+        "HUMAN_REVIEW": 5,
+        "ESCALATE": 0
+      }
+    },
+    {
+      "scenario": "ultra_conservative",
+      "total_papers": 25,
+      "human_review_required": 25,
+      "autonomous_resolved": 0,
+      "autonomous_coverage": 0.0,
+      "human_review_reduction_pct": 0.0,
+      "catastrophic_errors": 0,
+      "catastrophic_error_rate": 0.0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "autonomous_agreement": 0.0,
+      "mean_autonomous_confidence": 0.0,
+      "papers_by_routing": {
+        "AUTO_INCLUDE": 0,
+        "AUTO_EXCLUDE": 0,
+        "HUMAN_REVIEW": 25,
+        "ESCALATE": 0
+      }
+    }
+  ],
+  "best_by_coverage": {
+    "scenario": "conservative",
+    "total_papers": 25,
+    "human_review_required": 5,
+    "autonomous_resolved": 20,
+    "autonomous_coverage": 0.8,
+    "human_review_reduction_pct": 0.8,
+    "catastrophic_errors": 0,
+    "catastrophic_error_rate": 0.0,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "autonomous_agreement": 1.0,
+    "mean_autonomous_confidence": 0.9499999999999996,
+    "papers_by_routing": {
+      "AUTO_INCLUDE": 9,
+      "AUTO_EXCLUDE": 11,
+      "HUMAN_REVIEW": 5,
+      "ESCALATE": 0
+    }
+  },
+  "best_by_safety": {
+    "scenario": "conservative",
+    "total_papers": 25,
+    "human_review_required": 5,
+    "autonomous_resolved": 20,
+    "autonomous_coverage": 0.8,
+    "human_review_reduction_pct": 0.8,
+    "catastrophic_errors": 0,
+    "catastrophic_error_rate": 0.0,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "autonomous_agreement": 1.0,
+    "mean_autonomous_confidence": 0.9499999999999996,
+    "papers_by_routing": {
+      "AUTO_INCLUDE": 9,
+      "AUTO_EXCLUDE": 11,
+      "HUMAN_REVIEW": 5,
+      "ESCALATE": 0
+    }
+  },
+  "best_balanced": {
+    "scenario": "conservative",
+    "total_papers": 25,
+    "human_review_required": 5,
+    "autonomous_resolved": 20,
+    "autonomous_coverage": 0.8,
+    "human_review_reduction_pct": 0.8,
+    "catastrophic_errors": 0,
+    "catastrophic_error_rate": 0.0,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "autonomous_agreement": 1.0,
+    "mean_autonomous_confidence": 0.9499999999999996,
+    "papers_by_routing": {
+      "AUTO_INCLUDE": 9,
+      "AUTO_EXCLUDE": 11,
+      "HUMAN_REVIEW": 5,
+      "ESCALATE": 0
+    }
+  },
+  "total_configs": 4,
+  "duration_seconds": 0.00021600723266601562
+}

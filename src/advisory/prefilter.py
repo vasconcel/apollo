@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import re
 import time
+import threading
 
 
 PREFILTER_REJECT_REASONS = {
@@ -176,7 +177,8 @@ class PrefilterResult:
 class PrefilterEngine:
     """Deterministic pre-filtering engine for non-study artifacts."""
 
-    def __init__(self):
+    def __init__(self, stage: str = ""):
+        self._stage = stage
         self._seen_titles: Dict[str, str] = {}
         self._hit_count: int = 0
         self._total_count: int = 0
@@ -274,11 +276,18 @@ class PrefilterEngine:
         self._total_count = 0
 
 
-_global_prefilter: Optional[PrefilterEngine] = None
+_global_prefilters: Dict[str, PrefilterEngine] = {}
+_prefilter_lock = threading.Lock()
 
 
-def get_prefilter() -> PrefilterEngine:
-    global _global_prefilter
-    if _global_prefilter is None:
-        _global_prefilter = PrefilterEngine()
-    return _global_prefilter
+def get_prefilter(stage: str = "") -> PrefilterEngine:
+    """
+    Get or create a stage-scoped prefilter instance.
+    
+    Each stage (ec, ic, qc) gets its own dedup context.
+    Use stage="" for modules that don't have stage context.
+    """
+    with _prefilter_lock:
+        if stage not in _global_prefilters:
+            _global_prefilters[stage] = PrefilterEngine(stage=stage)
+        return _global_prefilters[stage]

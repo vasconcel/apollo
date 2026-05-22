@@ -17,6 +17,7 @@ import os
 import json
 import hashlib
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 from datetime import datetime
@@ -142,8 +143,14 @@ class AdvisoryCache:
     
     def __init__(self, config: Optional[AdvisoryConfig] = None):
         self.config = config or AdvisoryConfig()
-        self._session_cache: Dict[str, AdvisoryResult] = {}
+        self._session_cache: OrderedDict = OrderedDict()
         self.entries: Dict[str, AdvisoryResult] = {}  # Alias for backward compatibility
+
+        self._session_hits: int = 0
+        self._session_misses: int = 0
+        self._session_sets: int = 0
+        self._disk_hits: int = 0
+        self._disk_misses: int = 0
         
         self._cache_dir = Path(self.config.cache_dir)
         if self.config.enable_disk_cache:
@@ -173,16 +180,22 @@ class AdvisoryCache:
         session_key = self._session_key(cache_key, protocol_version, stage)
 
         if session_key in self._session_cache:
+            self._session_hits += 1
             cached = self._session_cache[session_key]
+            self._session_cache.move_to_end(session_key)
             _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Session HIT")
             return cached
 
+        self._session_misses += 1
         disk_advisory = self._load_from_disk(cache_key, stage)
         if disk_advisory is not None:
+            self._disk_hits += 1
             self._session_cache[session_key] = disk_advisory
+            self._session_cache.move_to_end(session_key)
             _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Disk HIT")
             return disk_advisory
 
+        self._disk_misses += 1
         _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | MISS (not generated)")
         return AdvisoryResult.create_unavailable("Advisory not yet generated")
     
@@ -217,6 +230,13 @@ class AdvisoryCache:
         
         session_key = self._session_key(advisory.cache_key, advisory.protocol_version, stage)
         self._session_cache[session_key] = advisory
+        self._session_cache.move_to_end(session_key)
+        self._session_sets += 1
+        
+        # LRU eviction: remove oldest entries if over limit
+        max_entries = self.config.max_cache_entries
+        while len(self._session_cache) > max_entries:
+            self._session_cache.popitem(last=False)
         
         if self.config.enable_disk_cache:
             self._save_to_disk(advisory, stage)
@@ -289,7 +309,13 @@ class AdvisoryCache:
             "session_cache_count": session_count,
             "disk_cache_count": disk_count,
             "total_cached": max(session_count, disk_count),
-            "cache_dir": str(self._cache_dir)
+            "cache_dir": str(self._cache_dir),
+            "session_hits": self._session_hits,
+            "session_misses": self._session_misses,
+            "session_sets": self._session_sets,
+            "disk_hits": self._disk_hits,
+            "disk_misses": self._disk_misses,
+            "max_cache_entries": self.config.max_cache_entries,
         }
     
     def count_advisories_with_attribute(self, attr_name: str, protocol_version: str = "1.0", stage: str = "ic") -> int:

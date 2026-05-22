@@ -25,6 +25,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+import threading
 
 
 VALID_STAGES = frozenset({"ec", "ic", "qc"})
@@ -447,8 +448,8 @@ class AdvisoryWorker:
         queue = get_advisory_queue(self.config, stage=stage)
         start_time = time.time()
 
-        queue.mark_processing(item)
-        print(f"[STATE] PENDING -> PROCESSING: {item.article_id} (stage={stage})")
+        # Note: item is already in PROCESSING state via acquire_next() in process_all()
+        print(f"[STATE] PROCESSING (acquired): {item.article_id} (stage={stage})")
 
         request = AdvisoryRequest(
             cache_key=item.cache_key,
@@ -616,7 +617,7 @@ class AdvisoryWorker:
         prefilter_result = None
         try:
             from .prefilter import get_prefilter
-            prefilter_result = get_prefilter().check(title, abstract)
+            prefilter_result = get_prefilter(stage=stage_lower).check(title, abstract)
         except Exception:
             pass
 
@@ -956,13 +957,14 @@ class AdvisoryWorker:
                 "QC2": "Methodological rigor assessment"
             }
     
-    def process_all(self, max_items: Optional[int] = None, stage: str = "ic") -> Dict:
+    def process_all(self, max_items: Optional[int] = None, stage: str = "ic", stop_event: Optional[threading.Event] = None) -> Dict:
         """
         Process all pending queue items.
 
         Args:
             max_items: Maximum items to process (None for all)
             stage: Advisory stage for queue access
+            stop_event: Optional event to signal early termination
 
         Returns:
             Processing summary
@@ -997,7 +999,11 @@ class AdvisoryWorker:
         failed = 0
         
         while True:
-            item = queue.get_next()
+            if stop_event and stop_event.is_set():
+                print(f"[WORKER STOP] Stop event signaled for stage: {stage}")
+                break
+
+            item = queue.acquire_next()
             if item is None:
                 break
             

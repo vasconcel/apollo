@@ -1171,6 +1171,7 @@ class QueueState:
     failed: int = 0
     
     last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    last_wal_seq: int = 0
     
     items: List[QueueItem] = field(default_factory=list)
     
@@ -1182,6 +1183,7 @@ class QueueState:
             "completed": self.completed,
             "failed": self.failed,
             "last_updated": self.last_updated,
+            "last_wal_seq": self.last_wal_seq,
             "items": [item.to_dict() for item in self.items]
         }
     
@@ -1194,6 +1196,7 @@ class QueueState:
             completed=data.get("completed", 0),
             failed=data.get("failed", 0),
             last_updated=data.get("last_updated", ""),
+            last_wal_seq=data.get("last_wal_seq", 0),
             items=[QueueItem.from_dict(item) for item in data.get("items", [])]
         )
     
@@ -1226,6 +1229,7 @@ class AdvisoryConfig:
     
     enable_disk_cache: bool = True
     enable_queue_state: bool = True
+    max_cache_entries: int = 500
     
     def to_dict(self) -> dict:
         return {

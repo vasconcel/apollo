@@ -18,6 +18,7 @@ from .advisory_models import AdvisoryConfig, AdvisoryStatus
 from .advisory_queue import get_advisory_queue, build_queue
 from .advisory_worker import AdvisoryWorker
 from .advisory_cache import get_advisory_cache, get_cache_stats
+from .prefilter import get_prefilter
 
 
 class AdvisoryWorkerOrchestrator:
@@ -37,7 +38,7 @@ class AdvisoryWorkerOrchestrator:
         self._protocol = protocol
         self._worker: Optional[AdvisoryWorker] = None
         self._worker_thread: Optional[threading.Thread] = None
-        self._is_running = False
+        self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
         print(f"[ORCHESTRATOR INIT] Stage: {stage}")
     
@@ -53,6 +54,9 @@ class AdvisoryWorkerOrchestrator:
         """
         if protocol is not None:
             self._protocol = protocol
+
+        # Reset prefilter dedup state per pipeline init (session-scoped isolation)
+        get_prefilter(stage=stage).reset()
 
         print(f"[ORCHESTRATOR] Getting queue for stage: {stage}")
         queue = get_advisory_queue(self.config, stage=stage)
@@ -84,22 +88,23 @@ class AdvisoryWorkerOrchestrator:
         print(f"[LIFECYCLE] start_worker called for stage: {self._stage}")
         
         with self._start_lock:
-            if self._is_running and self._worker_thread and self._worker_thread.is_alive():
+            if self._is_active() and self._worker_thread and self._worker_thread.is_alive():
                 print(f"[LIFECYCLE] Worker already active: advisory-worker-{self._stage}")
                 print(f"[LIFECYCLE] Prevented duplicate worker spawn for: {self._stage}")
                 return
 
+            # Reset stop event for fresh start
+            self._stop_event.clear()
+
             print(f"[ORCHESTRATOR] Starting worker for stage: {self._stage}")
             self._worker = AdvisoryWorker(self.config, protocol=self._protocol)
-            self._is_running = True
 
             def run_worker_loop():
                 try:
-                    self._worker.process_all(max_items, stage=self._stage)
+                    self._worker.process_all(max_items, stage=self._stage, stop_event=self._stop_event)
                 except Exception as e:
                     print(f"Advisory worker error: {e}")
                 finally:
-                    self._is_running = False
                     print(f"[WORKER STOP] Stage: {self._stage}")
 
             self._worker_thread = threading.Thread(
@@ -109,10 +114,17 @@ class AdvisoryWorkerOrchestrator:
             )
             self._worker_thread.start()
             print(f"[WORKER START] Stage: {self._stage} | Thread: {self._worker_thread.name}")
+
+    def _is_active(self) -> bool:
+        """Check if worker should be considered active."""
+        return not self._stop_event.is_set()
     
     def stop_worker(self) -> None:
-        """Stop background worker."""
-        self._is_running = False
+        """Stop background worker gracefully."""
+        self._stop_event.set()
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=5.0)
+        print(f"[ORCHESTRATOR] Worker stopped for stage: {self._stage}")
     
     def get_status(self, stage: str = "ic") -> Dict:
         """Get worker status for specific stage."""
@@ -120,11 +132,12 @@ class AdvisoryWorkerOrchestrator:
         queue_stats = get_advisory_queue(self.config, stage=stage).get_stats()
         cache_stats = get_cache_stats()
         thread_alive = self._worker_thread.is_alive() if self._worker_thread else False
+        is_active = self._is_active() and thread_alive
         
         return {
-            "is_running": self._is_running,
+            "is_running": is_active,
             "thread_alive": thread_alive,
-            "workers_active": 1 if (self._is_running and thread_alive) else 0,
+            "workers_active": 1 if is_active else 0,
             "queue": queue_stats,
             "cache": cache_stats,
             "generated_count": queue_stats.get("completed", 0),
@@ -134,7 +147,7 @@ class AdvisoryWorkerOrchestrator:
     
     def is_generating(self) -> bool:
         """Check if worker is actively processing."""
-        return self._is_running and (
+        return self._is_active() and (
             self._worker_thread.is_alive() if self._worker_thread else False
         )
 

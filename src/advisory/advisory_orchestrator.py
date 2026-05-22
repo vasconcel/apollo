@@ -119,10 +119,12 @@ class AdvisoryWorkerOrchestrator:
         print(f"[ORCHESTRATOR STATUS] Stage: {stage}")
         queue_stats = get_advisory_queue(self.config, stage=stage).get_stats()
         cache_stats = get_cache_stats()
+        thread_alive = self._worker_thread.is_alive() if self._worker_thread else False
         
         return {
             "is_running": self._is_running,
-            "thread_alive": self._worker_thread.is_alive() if self._worker_thread else False,
+            "thread_alive": thread_alive,
+            "workers_active": 1 if (self._is_running and thread_alive) else 0,
             "queue": queue_stats,
             "cache": cache_stats,
             "generated_count": queue_stats.get("completed", 0),
@@ -285,6 +287,7 @@ def get_advisory_pipeline_status(stage: str = "ic") -> Dict:
             "initialized": False,
             "is_running": False,
             "thread_alive": False,
+            "workers_active": 0,
             "queue": {"total": 0, "pending": 0, "completed": 0, "failed": 0},
             "generated_count": 0,
             "pending_advisories": 0

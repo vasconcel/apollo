@@ -775,6 +775,7 @@ class AdvisoryResult:
     confidence: float
 
     triggered_criteria: List[str] = field(default_factory=list)
+    non_triggered_criteria: List[str] = field(default_factory=list)
     criterion_evaluations: List[CriterionEvaluation] = field(default_factory=list)
 
     justification: str = ""
@@ -806,12 +807,12 @@ class AdvisoryResult:
     decision_confidence: float = 0.0
     calibration_provenance: Dict[str, Any] = field(default_factory=dict)
 
-    evidence_span: List[str] = field(default_factory=list)
+    evidence_span: int = 0
     metadata_fields_used: List[str] = field(default_factory=list)
     heuristic_contributions: Dict[str, Any] = field(default_factory=dict)
     prompt_hash: str = ""
     routing_rationale: str = ""
-    stage_validation: Dict[str, Any] = field(default_factory=dict)
+    stage_validation: str = ""
     prefilter_applied: bool = False
     prefilter_reason: str = ""
     model_used: str = ""
@@ -824,6 +825,7 @@ class AdvisoryResult:
             "decision": safe_enum_value(self.decision, "UNAVAILABLE"),
             "confidence": self.confidence if self.confidence is not None else 0.0,
             "triggered_criteria": self.triggered_criteria or [],
+            "non_triggered_criteria": self.non_triggered_criteria or [],
             "criterion_evaluations": [
                 {
                     "criterion_id": ce.criterion_id,
@@ -889,6 +891,7 @@ class AdvisoryResult:
             decision=decision,
             confidence=data.get("confidence", 0.0),
             triggered_criteria=data.get("triggered_criteria", []),
+            non_triggered_criteria=data.get("non_triggered_criteria", []),
             criterion_evaluations=criterion_evaluations,
             justification=data.get("justification", ""),
             error=data.get("error"),
@@ -903,12 +906,12 @@ class AdvisoryResult:
             evidence_confidence=float(data.get("evidence_confidence", 0.0)),
             decision_confidence=float(data.get("decision_confidence", 0.0)),
             calibration_provenance=data.get("calibration_provenance", {}),
-            evidence_span=data.get("evidence_span", []),
+            evidence_span=data.get("evidence_span", 0),
             metadata_fields_used=data.get("metadata_fields_used", []),
             heuristic_contributions=data.get("heuristic_contributions", {}),
             prompt_hash=data.get("prompt_hash", ""),
             routing_rationale=data.get("routing_rationale", ""),
-            stage_validation=data.get("stage_validation", {}),
+            stage_validation=data.get("stage_validation", ""),
             prefilter_applied=bool(data.get("prefilter_applied", False)),
             prefilter_reason=data.get("prefilter_reason", ""),
             model_used=data.get("model_used", ""),
@@ -1112,6 +1115,9 @@ class QueueItem:
     status: AdvisoryStatus = AdvisoryStatus.PENDING
     priority: int = 0
     
+    title: str = ""
+    abstract: str = ""
+    
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -1127,6 +1133,8 @@ class QueueItem:
             "stage": self.stage,
             "status": self.status.value,
             "priority": self.priority,
+            "title": self.title,
+            "abstract": self.abstract,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
@@ -1143,6 +1151,8 @@ class QueueItem:
             stage=data.get("stage", "ic"),
             status=AdvisoryStatus(data.get("status", "PENDING")),
             priority=data.get("priority", 0),
+            title=data.get("title", ""),
+            abstract=data.get("abstract", ""),
             created_at=data.get("created_at", ""),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),

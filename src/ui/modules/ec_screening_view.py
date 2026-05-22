@@ -90,93 +90,58 @@ def reset_session_for_new_articles(session, articles_count: int):
         session.ec_completed = min(session.ec_completed, articles_count)
 
 
-def _count_prefiltered(articles, protocol_version: str, stage: str) -> int:
-    """Count prefiltered advisories across articles."""
-    count = 0
-    for article in articles:
-        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
-        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
-        if not title:
-            continue
-        try:
-            if stage == "ec":
-                adv = get_ec_advisory(title, abstract, protocol_version)
-            else:
-                from src.advisory import get_advisory
-                adv = get_advisory(title, abstract, protocol_version, stage=stage)
-            if adv and getattr(adv, 'prefilter_applied', False):
-                count += 1
-        except Exception:
-            pass
-    return count
+def _get_cache_counts(protocol_version: str, stage: str) -> Dict[str, int]:
+    """Get batch prefilter/quarantine/LLM counts from cache (single pass)."""
+    from src.advisory.advisory_cache import get_advisory_cache
+    cache = get_advisory_cache()
+    return {
+        "prefiltered": cache.count_prefiltered(protocol_version, stage),
+        "quarantined": cache.count_quarantined(protocol_version, stage),
+        "llm": cache.count_llm_generated(protocol_version, stage),
+    }
 
 
-def _count_quarantined(articles, protocol_version: str, stage: str) -> int:
-    """Count quarantined advisories across articles."""
-    count = 0
-    for article in articles:
-        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
-        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
-        if not title:
-            continue
-        try:
-            if stage == "ec":
-                adv = get_ec_advisory(title, abstract, protocol_version)
-            else:
-                from src.advisory import get_advisory
-                adv = get_advisory(title, abstract, protocol_version, stage=stage)
-            if adv and "QUARANTINED" in (getattr(adv, 'stage_validation', "") or ""):
-                count += 1
-        except Exception:
-            pass
-    return count
+def _auto_refresh_if_worker_active(stage: str = "ic"):
+    """Auto-rerun when advisory worker is actively generating for the given stage.
+    
+    Bounded to minimum REFRESH_INTERVAL seconds between reruns to prevent
+    render storms. Uses session state to track last refresh timestamp.
+    
+    Must NOT wrap st.rerun() in try/except Exception — RerunException is how
+    Streamlit triggers reruns and catching it silently freezes the dashboard.
+    """
+    REFRESH_INTERVAL = 3.0
 
+    now = time.time()
+    last_refresh = st.session_state.get(f"_last_refresh_{stage}", 0.0)
+    if now - last_refresh < REFRESH_INTERVAL:
+        return
 
-def _count_llm_advisories(articles, protocol_version: str, stage: str) -> int:
-    """Count LLM-generated advisories (not prefiltered) across articles."""
-    count = 0
-    for article in articles:
-        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
-        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
-        if not title:
-            continue
-        try:
-            if stage == "ec":
-                adv = get_ec_advisory(title, abstract, protocol_version)
-            else:
-                from src.advisory import get_advisory
-                adv = get_advisory(title, abstract, protocol_version, stage=stage)
-            if adv and not getattr(adv, 'prefilter_applied', False) and adv.is_available():
-                count += 1
-        except Exception:
-            pass
-    return count
+    from src.advisory import is_advisory_generation_active
+    from src.advisory.advisory_queue import get_advisory_queue
 
-
-def _auto_refresh_if_worker_active():
-    """Auto-rerun when advisory worker is actively generating."""
+    should_refresh = False
     try:
-        from src.advisory import is_advisory_generation_active
-        from src.advisory.advisory_queue import get_advisory_queue
-        queue = get_advisory_queue()
-        has_pending = queue and len(queue.get_pending()) > 0
-        is_active = is_advisory_generation_active()
-        if is_active or has_pending:
-            placeholder = st.empty()
-            with placeholder:
-                st.caption("🔄 Auto-refreshing...")
-            time.sleep(1.5)
-            st.rerun()
+        queue = get_advisory_queue(stage=stage)
+        has_pending = queue is not None and len(queue.get_pending()) > 0
+        is_active = is_advisory_generation_active(stage=stage)
+        should_refresh = is_active or has_pending
     except Exception:
-        pass
+        return
+
+    if should_refresh:
+        st.session_state[f"_last_refresh_{stage}"] = now
+        st.caption("🔄 Updating...")
+        time.sleep(0.3)
+        st.rerun()
 
 
-def render_advisory_status_banner():
-    """Render advisory generation progress banner."""
+def render_advisory_status_banner(stage: str = "ic"):
+    """Render advisory generation progress banner for the given stage."""
     try:
         from src.advisory import get_advisory_pipeline_status, is_advisory_generation_active
         
-        status = get_advisory_pipeline_status()
+        status = get_advisory_pipeline_status(stage=stage)
         
         generated = status.get("generated_count", 0)
         pending = status.get("pending_count", 0)
@@ -227,9 +192,11 @@ def render_ec_screening():
 
     protocol = st.session_state.research_protocol
 
-    was_locked = ensure_protocol_locked(protocol)
-    if was_locked:
-        print("[PROTOCOL] Auto-locked DRAFT protocol for screening")
+    if not getattr(st.session_state, "_protocol_lock_attempted_ec", False):
+        was_locked = ensure_protocol_locked(protocol)
+        if was_locked:
+            print("[PROTOCOL] Auto-locked DRAFT protocol for screening")
+        st.session_state._protocol_lock_attempted_ec = True
 
     is_valid, error_msg = validate_protocol_for_screening(protocol)
     if not is_valid:
@@ -402,59 +369,58 @@ def render_screening_workspace(session):
             st.caption(f"Wrong includes: {cal_summary.get('false_inclusion', 0)}")
 
         with st.expander("⚡ OPERATIONAL TELEMETRY", expanded=False):
+            from src.advisory.advisory_orchestrator import get_advisory_pipeline_status
+            try:
+                pipeline_status = get_advisory_pipeline_status("ec")
+            except Exception:
+                pipeline_status = {}
+
+            queue_pending = pipeline_status.get("pending_count", 0) if pipeline_status else 0
+            queue_generated = pipeline_status.get("generated_count", 0) if pipeline_status else 0
+            queue_failed = pipeline_status.get("failed_count", 0) if pipeline_status else 0
+            workers_active = pipeline_status.get("workers_active", 0) if pipeline_status else 0
+
             telemetry_col1, telemetry_col2, telemetry_col3, telemetry_col4 = st.columns(4)
             with telemetry_col1:
-                st.metric("Total", total)
+                st.metric("Total Articles", total)
             with telemetry_col2:
-                st.metric("Reviewed", reviewed)
+                st.metric("Advisories Generated", queue_generated)
             with telemetry_col3:
-                st.metric("Pending", total - reviewed)
+                st.metric("Queue Pending", queue_pending)
             with telemetry_col4:
-                from src.advisory.advisory_orchestrator import get_advisory_pipeline_status
-                try:
-                    pipeline_status = get_advisory_pipeline_status("ec")
-                    st.metric("Active Workers", pipeline_status.get("workers_active", 0))
-                except:
-                    st.metric("Active Workers", 0)
+                st.metric("Active Workers", workers_active)
             
             from src.advisory.advisory_cache import get_advisory_cache
             cache = get_advisory_cache()
             cache_size = len(cache)
-            
-            from src.advisory.advisory_queue import get_advisory_queue
-            queue = get_advisory_queue()
-            queue_size = len(queue) if queue else 0
 
             t1_col1, t1_col2, t1_col3, t1_col4 = st.columns(4)
             with t1_col1:
-                st.metric("Prefiltered", _count_prefiltered(articles, protocol_version, "ec"))
+                st.metric("Cache Entries", cache_size)
             with t1_col2:
-                st.metric("Quarantined", _count_quarantined(articles, protocol_version, "ec"))
+                st.metric("Failed", queue_failed)
             with t1_col3:
-                llm_total = _count_llm_advisories(articles, protocol_version, "ec")
-                llm_bypass = _count_prefiltered(articles, protocol_version, "ec")
-                total_adv = llm_total + llm_bypass
-                bypass_rate = f"{llm_bypass / max(total_adv, 1):.0%}"
-                st.metric("LLM Bypass Rate", bypass_rate)
-            with t1_col4:
-                st.metric("LLM Advisories", llm_total)
-            
-            t2_col1, t2_col2, t2_col3, t2_col4 = st.columns(4)
-            with t2_col1:
-                st.metric("Cache", cache_size)
-            with t2_col2:
-                st.metric("Queue", queue_size)
-            with t2_col3:
-                if queue_size > 0:
-                    pending = len(queue.get_pending())
-                    st.metric("Pending", pending)
-                else:
-                    st.metric("Pending", 0)
-            with t2_col4:
                 from src.advisory.calibration_tracker import get_calibration_summary
                 cal = get_calibration_summary()
                 escalations = cal.get('critical_overrides', 0) + cal.get('high_overrides', 0)
                 st.metric("Escalations", escalations)
+            with t1_col4:
+                st.metric("Human Reviewed", reviewed)
+            
+            t2_col1, t2_col2, t2_col3, t2_col4 = st.columns(4)
+            cache_counts = _get_cache_counts(protocol_version, "ec")
+            prefiltered = cache_counts["prefiltered"]
+            llm_total = cache_counts["llm"]
+            total_adv = llm_total + prefiltered
+            bypass_rate = f"{prefiltered / max(total_adv, 1):.0%}"
+            with t2_col1:
+                st.metric("Prefiltered", prefiltered)
+            with t2_col2:
+                st.metric("Quarantined", cache_counts["quarantined"])
+            with t2_col3:
+                st.metric("LLM Bypass Rate", bypass_rate)
+            with t2_col4:
+                st.metric("LLM Advisories", llm_total)
             
             if "runtime_events" not in st.session_state:
                 st.session_state.runtime_events = []
@@ -556,9 +522,9 @@ def render_screening_workspace(session):
             session.current_index = current_idx + 1
             st.rerun()
 
-    render_advisory_status_banner()
+    render_advisory_status_banner(stage="ec")
 
-    _auto_refresh_if_worker_active()
+    _auto_refresh_if_worker_active(stage="ec")
 
     st.markdown(f"**Queue:** {queue_filter} | **Paper:** {current_idx + 1} / {total}")
 

@@ -133,7 +133,9 @@ class AdvisoryQueue:
                 article_id=article_id,
                 stage=stage,
                 status=AdvisoryStatus.PENDING,
-                priority=idx
+                priority=idx,
+                title=title,
+                abstract=abstract,
             )
             items.append(item)
         

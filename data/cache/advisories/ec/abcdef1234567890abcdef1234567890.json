@@ -1,0 +1,57 @@
+{
+  "cache_key": "abcdef1234567890abcdef1234567890",
+  "protocol_version": "1.0",
+  "decision": "INCLUDE",
+  "confidence": 0.85,
+  "triggered_criteria": [
+    "EC1"
+  ],
+  "non_triggered_criteria": [
+    "EC2"
+  ],
+  "criterion_evaluations": [
+    {
+      "criterion_id": "EC1",
+      "criterion_name": "Population",
+      "satisfied": true,
+      "evidence": "study examined adults over 65",
+      "confidence": 0.85
+    },
+    {
+      "criterion_id": "EC2",
+      "criterion_name": "Intervention",
+      "satisfied": false,
+      "evidence": "no intervention described",
+      "confidence": 0.75
+    }
+  ],
+  "justification": "Study meets EC1 criteria for population.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "risk_classification": "UNKNOWN",
+  "risk_reason": "",
+  "validation_queue": "UNKNOWN",
+  "requires_validation": false,
+  "generated_at": null,
+  "generation_duration_ms": null,
+  "topic_relevance": null,
+  "raw_confidence": 0.0,
+  "parser_confidence": 0.0,
+  "routing_confidence": 0.0,
+  "evidence_confidence": 0.0,
+  "decision_confidence": 0.0,
+  "calibration_provenance": {},
+  "grounding_evidence": [
+    "study examined adults over 65"
+  ],
+  "evidence_span": 0,
+  "metadata_fields_used": [],
+  "heuristic_contributions": {},
+  "prompt_hash": "",
+  "routing_rationale": "",
+  "stage_validation": "",
+  "prefilter_applied": false,
+  "prefilter_reason": "",
+  "model_used": ""
+}

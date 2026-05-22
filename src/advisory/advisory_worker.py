@@ -453,8 +453,8 @@ class AdvisoryWorker:
         request = AdvisoryRequest(
             cache_key=item.cache_key,
             protocol_version=item.protocol_version,
-            title="",
-            abstract="",
+            title=getattr(item, 'title', '') or '',
+            abstract=getattr(item, 'abstract', '') or '',
             literature_type="WL",
             metadata={"article_id": item.article_id, "stage": stage}
         )
@@ -860,11 +860,22 @@ class AdvisoryWorker:
 
             try:
                 from .stage_guard import validate_criteria_stage_isolation, quarantine_advisory
-                stage_violations = validate_criteria_stage_isolation(advisory.triggered_criteria or [], advisory.non_triggered_criteria or [], advisory.criterion_evaluations or [], stage_lower)
-                if stage_violations:
-                    advisory = quarantine_advisory(advisory, stage_violations)
-                    advisory.stage_validation = f"QUARANTINED: {'; '.join(stage_violations)}"
-                    print(f"[STAGE_GUARD] Quarantined {article_id}: {stage_violations}")
+                isolation_report = validate_criteria_stage_isolation(
+                    advisory.triggered_criteria or [],
+                    advisory.non_triggered_criteria or [],
+                    advisory.criterion_evaluations or [],
+                    stage_lower
+                )
+                if not isolation_report.passed:
+                    advisory = quarantine_advisory(
+                        advisory,
+                        isolation_report.stage,
+                        "; ".join(isolation_report.contaminated_criteria)
+                    )
+                    advisory.stage_validation = (
+                        f"QUARANTINED: {'; '.join(isolation_report.contaminated_criteria)}"
+                    )
+                    print(f"[STAGE_GUARD] Quarantined {article_id}: {isolation_report.contaminated_criteria}")
                 else:
                     advisory.stage_validation = "passed"
             except Exception as e:

@@ -43,64 +43,15 @@ from src.advisory.advisory_scheduler import set_active_stage
 _st_cache_key_calls = 0
 from src.core.protocol_utils import get_protocol_value
 
-from src.advisory import get_ec_advisory
-
-
-def _ic_count_prefiltered(articles, protocol_version: str, stage: str) -> int:
-    count = 0
-    for article in articles:
-        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
-        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
-        if not title:
-            continue
-        try:
-            if stage == "ec":
-                adv = get_ec_advisory(title, abstract, protocol_version)
-            else:
-                adv = get_advisory(title, abstract, protocol_version, stage=stage)
-            if adv and getattr(adv, 'prefilter_applied', False):
-                count += 1
-        except Exception:
-            pass
-    return count
-
-
-def _ic_count_quarantined(articles, protocol_version: str, stage: str) -> int:
-    count = 0
-    for article in articles:
-        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
-        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
-        if not title:
-            continue
-        try:
-            if stage == "ec":
-                adv = get_ec_advisory(title, abstract, protocol_version)
-            else:
-                adv = get_advisory(title, abstract, protocol_version, stage=stage)
-            if adv and "QUARANTINED" in (getattr(adv, 'stage_validation', "") or ""):
-                count += 1
-        except Exception:
-            pass
-    return count
-
-
-def _ic_count_llm(articles, protocol_version: str, stage: str) -> int:
-    count = 0
-    for article in articles:
-        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
-        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
-        if not title:
-            continue
-        try:
-            if stage == "ec":
-                adv = get_ec_advisory(title, abstract, protocol_version)
-            else:
-                adv = get_advisory(title, abstract, protocol_version, stage=stage)
-            if adv and not getattr(adv, 'prefilter_applied', False) and adv.is_available():
-                count += 1
-        except Exception:
-            pass
-    return count
+def _ic_get_cache_counts(protocol_version: str, stage: str) -> Dict[str, int]:
+    """Get batch prefilter/quarantine/LLM counts from cache (single pass)."""
+    from src.advisory.advisory_cache import get_advisory_cache
+    cache = get_advisory_cache()
+    return {
+        "prefiltered": cache.count_prefiltered(protocol_version, stage),
+        "quarantined": cache.count_quarantined(protocol_version, stage),
+        "llm": cache.count_llm_generated(protocol_version, stage),
+    }
 
 
 
@@ -291,32 +242,36 @@ def render_screening_workspace(session):
     
     _render_ic_advisory_status_banner()
 
-    try:
-        from src.advisory import is_advisory_generation_active
-        from src.advisory.advisory_queue import get_advisory_queue
-        queue = get_advisory_queue()
-        has_pending = queue and len(queue.get_pending()) > 0
-        is_active = is_advisory_generation_active()
-        if is_active or has_pending:
-            placeholder = st.empty()
-            with placeholder:
-                st.caption("🔄 Auto-refreshing...")
-            time.sleep(1.5)
+    now = time.time()
+    last_refresh = st.session_state.get("_last_refresh_ic", 0.0)
+    if now - last_refresh >= 3.0:
+        should_refresh = False
+        try:
+            from src.advisory import is_advisory_generation_active
+            from src.advisory.advisory_queue import get_advisory_queue
+            queue = get_advisory_queue(stage="ic")
+            has_pending = queue is not None and len(queue.get_pending()) > 0
+            is_active = is_advisory_generation_active(stage="ic")
+            should_refresh = is_active or has_pending
+        except Exception:
+            should_refresh = False
+
+        if should_refresh:
+            st.session_state["_last_refresh_ic"] = now
+            st.caption("🔄 Updating IC...")
+            time.sleep(0.3)
             st.rerun()
-    except Exception:
-        pass
 
     pv = get_protocol_value(st.session_state.get("research_protocol"), "protocol_version", "1.0")
-    prefiltered = _ic_count_prefiltered(articles, pv, "ic")
-    quarantined = _ic_count_quarantined(articles, pv, "ic")
-    llm_total = _ic_count_llm(articles, pv, "ic")
+    cache_counts = _ic_get_cache_counts(pv, "ic")
+    prefiltered = cache_counts["prefiltered"]
+    llm_total = cache_counts["llm"]
+    total_adv = llm_total + prefiltered
+    bypass_rate = f"{prefiltered / max(total_adv, 1):.0%}"
     prefilter_col1, prefilter_col2, prefilter_col3, prefilter_col4 = st.columns(4)
     with prefilter_col1: st.metric("Prefiltered", prefiltered)
-    with prefilter_col2: st.metric("Quarantined", quarantined)
-    with prefilter_col3:
-        total_adv = llm_total + prefiltered
-        bypass_rate = f"{prefiltered / max(total_adv, 1):.0%}"
-        st.metric("LLM Bypass Rate", bypass_rate)
+    with prefilter_col2: st.metric("Quarantined", cache_counts["quarantined"])
+    with prefilter_col3: st.metric("LLM Bypass Rate", bypass_rate)
     with prefilter_col4: st.metric("LLM Advisories", llm_total)
     
     if articles and 0 <= current_idx < total:
@@ -899,7 +854,7 @@ def _render_ic_advisory_status_banner():
     try:
         from src.advisory import get_advisory_pipeline_status, is_advisory_generation_active
         
-        status = get_advisory_pipeline_status()
+        status = get_advisory_pipeline_status(stage="ic")
         
         generated = status.get("generated_count", 0)
         pending = status.get("pending_count", 0)

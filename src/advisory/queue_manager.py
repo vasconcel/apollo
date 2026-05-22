@@ -5,11 +5,12 @@ Provides deterministic queue filtering for risk-oriented review workflow.
 Includes memoization for scalability.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from enum import Enum
 from functools import lru_cache
 import hashlib
 import json
+import time
 
 from .advisory_models import (
     RiskClassification,
@@ -22,6 +23,9 @@ from .advisory_models import (
 from .advisory_cache import get_advisory, get_advisory_status
 
 
+QUEUE_CACHE_TTL = 5.0
+
+
 class ReviewMode(str, Enum):
     """Review mode selectors."""
     FOCUSED_RISK_REVIEW = "FOCUSED_RISK_REVIEW"
@@ -29,8 +33,8 @@ class ReviewMode(str, Enum):
     CALIBRATION_REVIEW = "CALIBRATION_REVIEW"
 
 
-_queue_summary_cache: Dict[str, Dict] = {}
-_queue_filter_cache: Dict[str, List] = {}
+_queue_summary_cache: Dict[str, Tuple[float, Dict]] = {}
+_queue_filter_cache: Dict[str, Tuple[float, List]] = {}
 
 
 def _get_articles_cache_key(articles: List, stage: str) -> str:
@@ -48,17 +52,22 @@ def get_cached_queue_summary(
     stage: str
 ) -> Dict:
     """
-    Get cached queue summary - recomputes only when article set changes.
+    Get queue summary with TTL-based caching (5 second expiry).
+    The cache key includes article IDs, but a TTL ensures live worker
+    progress is reflected even when the article set is unchanged.
     """
     global _queue_summary_cache
     
     cache_key = f"{_get_articles_cache_key(articles, stage)}_{protocol_version}"
+    now = time.time()
     
     if cache_key in _queue_summary_cache:
-        return _queue_summary_cache[cache_key]
+        timestamp, result = _queue_summary_cache[cache_key]
+        if now - timestamp < QUEUE_CACHE_TTL:
+            return result
     
     result = compute_queue_summary(articles, protocol_version, stage)
-    _queue_summary_cache[cache_key] = result
+    _queue_summary_cache[cache_key] = (now, result)
     
     if len(_queue_summary_cache) > 10:
         oldest_key = next(iter(_queue_summary_cache))
@@ -90,7 +99,24 @@ def get_article_risk_info(
     advisory = get_advisory(title, abstract, protocol_version, stage=stage)
     status = get_advisory_status(title, abstract, protocol_version, stage=stage)
 
-    if not advisory or status != AdvisoryStatus.COMPLETED:
+    if not advisory:
+        return {
+            "risk_classification": "NO_ADVISORY",
+            "requires_validation": False,
+            "validation_queue": "NO_ADVISORY",
+            "advisory_available": False,
+            "confidence": 0.0,
+            "metadata_completeness": 0.0,
+            "decision": "NONE",
+        }
+
+    available_statuses = {
+        AdvisoryStatus.COMPLETED,
+        AdvisoryStatus.PREFILTERED,
+        AdvisoryStatus.QUARANTINED,
+        AdvisoryStatus.FALLBACK,
+    }
+    if status not in available_statuses:
         return {
             "risk_classification": "NO_ADVISORY",
             "requires_validation": False,
@@ -165,9 +191,12 @@ def filter_articles_by_queue(
         return articles
 
     cache_key = f"{_get_articles_cache_key(articles, stage)}_{protocol_version}_{queue_filter}"
+    now = time.time()
     
     if cache_key in _queue_filter_cache:
-        return _queue_filter_cache[cache_key]
+        timestamp, cached = _queue_filter_cache[cache_key]
+        if now - timestamp < QUEUE_CACHE_TTL:
+            return cached
 
     filtered = []
     for article in articles:
@@ -216,7 +245,7 @@ def filter_articles_by_queue(
             if not risk_info.get("advisory_available", False):
                 filtered.append(article)
 
-    _queue_filter_cache[cache_key] = filtered
+    _queue_filter_cache[cache_key] = (now, filtered)
     
     if len(_queue_filter_cache) > 20:
         oldest_key = next(iter(_queue_filter_cache))

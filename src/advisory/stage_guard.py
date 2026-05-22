@@ -135,6 +135,7 @@ def quarantine_advisory(advisory: Any, stage: str, reason: str) -> Any:
         advisory.decision = AdvisoryDecision.UNCERTAIN
         advisory.justification = f"[QUARANTINED] {reason} | Original: {advisory.justification}"
         advisory.triggered_criteria = []
+        advisory.non_triggered_criteria = []
         if hasattr(advisory, 'criterion_evaluations'):
             advisory.criterion_evaluations = []
         advisory.error = f"STAGE_CONTAMINATION: {reason}"

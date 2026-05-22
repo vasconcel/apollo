@@ -1,54 +1,11 @@
 {
   "cache_key": "31cb607d959c306f102299cb40a8a8fd",
   "protocol_version": "1.0",
-  "decision": "INCLUDE",
+  "decision": "INSUFFICIENT_EVIDENCE",
   "confidence": 1.0,
   "triggered_criteria": [],
-  "criterion_evaluations": [
-    {
-      "criterion_id": "EC1",
-      "criterion_name": "EC1",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC2",
-      "criterion_name": "EC2",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC3",
-      "criterion_name": "EC3",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC4",
-      "criterion_name": "EC4",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC5",
-      "criterion_name": "EC5",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC6",
-      "criterion_name": "EC6",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    }
-  ],
-  "justification": "The provided metadata does not contain sufficient information to trigger any exclusion criteria. The literature type is classified as White Literature, which is peer-reviewed, but no other relevant details are available.",
+  "criterion_evaluations": [],
+  "justification": "Missing both title and abstract — insufficient for screening",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
@@ -56,6 +13,23 @@
   "risk_reason": "",
   "validation_queue": "UNKNOWN",
   "requires_validation": false,
-  "generated_at": "2026-05-22T02:37:44.569728",
-  "generation_duration_ms": 1578.6395072937012
+  "generated_at": "2026-05-22T03:59:40.905606",
+  "generation_duration_ms": 0.001430511474609375,
+  "topic_relevance": null,
+  "raw_confidence": 0.0,
+  "parser_confidence": 0.0,
+  "routing_confidence": 0.0,
+  "evidence_confidence": 0.0,
+  "decision_confidence": 0.0,
+  "calibration_provenance": {},
+  "grounding_evidence": [],
+  "evidence_span": [],
+  "metadata_fields_used": [],
+  "heuristic_contributions": {},
+  "prompt_hash": "",
+  "routing_rationale": "",
+  "stage_validation": {},
+  "prefilter_applied": true,
+  "prefilter_reason": "empty_metadata",
+  "model_used": "prefilter"
 }

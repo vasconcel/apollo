@@ -58,6 +58,16 @@ class AdvisoryStatus(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     UNAVAILABLE = "UNAVAILABLE"
+    PREFILTERED = "PREFILTERED"
+    QUARANTINED = "QUARANTINED"
+    FALLBACK = "FALLBACK"
+
+
+ALL_ADVISORY_STATUSES = {s.value for s in AdvisoryStatus}
+
+
+def is_known_status(value: str) -> bool:
+    return value in ALL_ADVISORY_STATUSES
 
 
 class AdvisoryDecision(str, Enum):

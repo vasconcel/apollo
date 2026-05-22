@@ -2,58 +2,34 @@
   "cache_key": "35d36ceae49bbbee3f168fb46de8ddaf",
   "protocol_version": "1.0",
   "decision": "INSUFFICIENT_EVIDENCE",
-  "confidence": 0.2,
+  "confidence": 1.0,
   "triggered_criteria": [],
-  "criterion_evaluations": [
-    {
-      "criterion_id": "EC1",
-      "criterion_name": "EC1",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC2",
-      "criterion_name": "EC2",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC3",
-      "criterion_name": "EC3",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC4",
-      "criterion_name": "EC4",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC5",
-      "criterion_name": "EC5",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
-    }
-  ],
-  "justification": "No abstract available — cannot assess criteria. Title alone is insufficient for reliable exclusion criteria determination.",
+  "criterion_evaluations": [],
+  "justification": "Missing both title and abstract — insufficient for screening",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
-  "risk_classification": "CRITICAL_REVIEW",
-  "risk_reason": "Advisory cannot determine: INSUFFICIENT_EVIDENCE",
-  "validation_queue": "CRITICAL_REVIEW",
-  "requires_validation": true,
-  "generated_at": "2026-05-22T03:39:30.274280",
-  "generation_duration_ms": 6833.717107772827,
-  "topic_relevance": {
-    "domain_relevance_score": 0.0,
-    "topical_alignment": 0.0,
-    "rq_alignment_strength": 0.0
-  }
+  "risk_classification": "UNKNOWN",
+  "risk_reason": "",
+  "validation_queue": "UNKNOWN",
+  "requires_validation": false,
+  "generated_at": "2026-05-22T03:59:37.822379",
+  "generation_duration_ms": 0.001430511474609375,
+  "topic_relevance": null,
+  "raw_confidence": 0.0,
+  "parser_confidence": 0.0,
+  "routing_confidence": 0.0,
+  "evidence_confidence": 0.0,
+  "decision_confidence": 0.0,
+  "calibration_provenance": {},
+  "grounding_evidence": [],
+  "evidence_span": [],
+  "metadata_fields_used": [],
+  "heuristic_contributions": {},
+  "prompt_hash": "",
+  "routing_rationale": "",
+  "stage_validation": {},
+  "prefilter_applied": true,
+  "prefilter_reason": "empty_metadata",
+  "model_used": "prefilter"
 }

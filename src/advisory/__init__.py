@@ -28,6 +28,8 @@ Usage:
 
 from .advisory_models import (
     AdvisoryStatus,
+    ALL_ADVISORY_STATUSES,
+    is_known_status,
     AdvisoryDecision,
     AdvisoryResult,
     AdvisoryRequest,
@@ -111,6 +113,8 @@ from .advisory_scheduler import (
 __all__ = [
     # Models
     "AdvisoryStatus",
+    "ALL_ADVISORY_STATUSES",
+    "is_known_status",
     "AdvisoryDecision",
     "AdvisoryResult",
     "AdvisoryRequest",

@@ -43,6 +43,65 @@ from src.advisory.advisory_scheduler import set_active_stage
 _st_cache_key_calls = 0
 from src.core.protocol_utils import get_protocol_value
 
+from src.advisory import get_ec_advisory
+
+
+def _ic_count_prefiltered(articles, protocol_version: str, stage: str) -> int:
+    count = 0
+    for article in articles:
+        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
+        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
+        if not title:
+            continue
+        try:
+            if stage == "ec":
+                adv = get_ec_advisory(title, abstract, protocol_version)
+            else:
+                adv = get_advisory(title, abstract, protocol_version, stage=stage)
+            if adv and getattr(adv, 'prefilter_applied', False):
+                count += 1
+        except Exception:
+            pass
+    return count
+
+
+def _ic_count_quarantined(articles, protocol_version: str, stage: str) -> int:
+    count = 0
+    for article in articles:
+        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
+        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
+        if not title:
+            continue
+        try:
+            if stage == "ec":
+                adv = get_ec_advisory(title, abstract, protocol_version)
+            else:
+                adv = get_advisory(title, abstract, protocol_version, stage=stage)
+            if adv and "QUARANTINED" in (getattr(adv, 'stage_validation', "") or ""):
+                count += 1
+        except Exception:
+            pass
+    return count
+
+
+def _ic_count_llm(articles, protocol_version: str, stage: str) -> int:
+    count = 0
+    for article in articles:
+        title = getattr(article, 'title', '') if hasattr(article, 'title') else ""
+        abstract = getattr(article, 'abstract', '') if hasattr(article, 'abstract') else ""
+        if not title:
+            continue
+        try:
+            if stage == "ec":
+                adv = get_ec_advisory(title, abstract, protocol_version)
+            else:
+                adv = get_advisory(title, abstract, protocol_version, stage=stage)
+            if adv and not getattr(adv, 'prefilter_applied', False) and adv.is_available():
+                count += 1
+        except Exception:
+            pass
+    return count
+
 
 
 
@@ -231,6 +290,34 @@ def render_screening_workspace(session):
             st.rerun()
     
     _render_ic_advisory_status_banner()
+
+    try:
+        from src.advisory import is_advisory_generation_active
+        from src.advisory.advisory_queue import get_advisory_queue
+        queue = get_advisory_queue()
+        has_pending = queue and len(queue.get_pending()) > 0
+        is_active = is_advisory_generation_active()
+        if is_active or has_pending:
+            placeholder = st.empty()
+            with placeholder:
+                st.caption("🔄 Auto-refreshing...")
+            time.sleep(1.5)
+            st.rerun()
+    except Exception:
+        pass
+
+    pv = get_protocol_value(st.session_state.get("research_protocol"), "protocol_version", "1.0")
+    prefiltered = _ic_count_prefiltered(articles, pv, "ic")
+    quarantined = _ic_count_quarantined(articles, pv, "ic")
+    llm_total = _ic_count_llm(articles, pv, "ic")
+    prefilter_col1, prefilter_col2, prefilter_col3, prefilter_col4 = st.columns(4)
+    with prefilter_col1: st.metric("Prefiltered", prefiltered)
+    with prefilter_col2: st.metric("Quarantined", quarantined)
+    with prefilter_col3:
+        total_adv = llm_total + prefiltered
+        bypass_rate = f"{prefiltered / max(total_adv, 1):.0%}"
+        st.metric("LLM Bypass Rate", bypass_rate)
+    with prefilter_col4: st.metric("LLM Advisories", llm_total)
     
     if articles and 0 <= current_idx < total:
         article = articles[current_idx]
@@ -597,8 +684,14 @@ def render_ai_advisory_panel(article, current_idx: int):
         with st.expander("🤖 AI ADVISORY", expanded=False):
             print(f"[IC ADVISORY RENDER] Title: {title[:30]}... | Status: {status} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'} | Available: {advisory.is_available() if advisory and hasattr(advisory, 'is_available') else False}")
 
-            is_completed = status == AdvisoryStatus.COMPLETED
-            if is_completed:
+            is_available_status = status in (
+                AdvisoryStatus.COMPLETED,
+                AdvisoryStatus.PREFILTERED,
+                AdvisoryStatus.QUARANTINED,
+                AdvisoryStatus.FALLBACK,
+            )
+
+            if is_available_status and (advisory and advisory.is_available()):
                 decision_val = advisory.decision if advisory else None
                 is_uncertain = decision_val in (
                     AdvisoryDecision.UNCERTAIN,
@@ -606,48 +699,63 @@ def render_ai_advisory_panel(article, current_idx: int):
                     AdvisoryDecision.CANNOT_DETERMINE,
                 ) if decision_val else False
 
-                if (advisory and advisory.is_available()) or is_uncertain:
-                    st.caption(f"Status: {safe_status(status)} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'}")
+                prefilter_applied = getattr(advisory, 'prefilter_applied', False)
+                prefilter_reason = getattr(advisory, 'prefilter_reason', "") or ""
+                stage_validation = getattr(advisory, 'stage_validation', "") or ""
+                is_quarantined = "QUARANTINED" in stage_validation
 
-                    if is_uncertain and advisory:
-                        evidence_strength = compute_evidence_strength(advisory)
-                        uncertainty_score = compute_uncertainty_score(advisory)
-                        st.warning("⚠ AI could not determine relevance with sufficient confidence. Manual review required.")
-                        st.markdown(f"**Uncertainty Score:** {uncertainty_score:.2f} | **Evidence Strength:** {evidence_strength:.2f}")
+                if prefilter_applied:
+                    st.info(f"⚡ PREFILTERED: {prefilter_reason}")
+                if is_quarantined:
+                    st.warning(f"⚠️ QUARANTINED: {stage_validation}")
 
-                    advisory_dict = {
-                        "decision": safe_decision(advisory.decision) if advisory else "N/A",
-                        "confidence": advisory.confidence if advisory else 0.0,
-                        "triggered_criteria": advisory.triggered_criteria if advisory else [],
-                        "criterion_evaluations": {
-                            ce.criterion_id: {
-                                "criterion_name": ce.criterion_name,
-                                "satisfied": ce.satisfied,
-                                "evidence": ce.evidence,
-                                "confidence": ce.confidence
-                            }
-                            for ce in (advisory.criterion_evaluations if advisory else [])
-                        },
-                        "justification": advisory.justification if advisory else ""
-                    }
-                    render_suggestion_details(advisory_dict)
+                status_str = safe_status(status)
+                if prefilter_applied:
+                    status_str = f"PREFILTERED ({prefilter_reason})"
+                st.caption(f"Status: {status_str} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'}")
+
+                if is_uncertain and advisory:
+                    evidence_strength = compute_evidence_strength(advisory)
+                    uncertainty_score = compute_uncertainty_score(advisory)
+                    st.warning("⚠ AI could not determine relevance with sufficient confidence. Manual review required.")
+                    st.markdown(f"**Uncertainty Score:** {uncertainty_score:.2f} | **Evidence Strength:** {evidence_strength:.2f}")
+
+                advisory_dict = {
+                    "decision": safe_decision(advisory.decision) if advisory else "N/A",
+                    "confidence": advisory.confidence if advisory else 0.0,
+                    "triggered_criteria": advisory.triggered_criteria if advisory else [],
+                    "criterion_evaluations": {
+                        ce.criterion_id: {
+                            "criterion_name": ce.criterion_name,
+                            "satisfied": ce.satisfied,
+                            "evidence": ce.evidence,
+                            "confidence": ce.confidence
+                        }
+                        for ce in (advisory.criterion_evaluations if advisory else [])
+                    },
+                    "justification": advisory.justification if advisory else "",
+                    "prefilter_applied": prefilter_applied,
+                    "prefilter_reason": prefilter_reason,
+                }
+                render_suggestion_details(advisory_dict)
+            else:
+                if status == AdvisoryStatus.PENDING:
+                    st.caption("⏳ Advisory pending — manual screening operational")
+                    print(f"[IC ADVISORY STATE] PENDING | Article: {title[:30]}...")
+                elif status == AdvisoryStatus.PROCESSING:
+                    st.caption("🔄 Advisory generating — please wait...")
+                    print(f"[IC ADVISORY STATE] PROCESSING | Article: {title[:30]}...")
+                elif status == AdvisoryStatus.FAILED:
+                    error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
+                    st.caption(f"⚠️ Advisory failed: {error_msg}")
+                    print(f"[IC ADVISORY STATE] FAILED | Article: {title[:30]}... | Error: {error_msg}")
+                elif status == AdvisoryStatus.UNAVAILABLE:
+                    st.caption("○ Advisory unavailable — manual screening fully operational")
+                    print(f"[IC ADVISORY STATE] UNAVAILABLE | Article: {title[:30]}...")
                 else:
-                    if status == AdvisoryStatus.PENDING:
-                        st.caption("⏳ Advisory pending — manual screening operational")
-                        print(f"[IC ADVISORY STATE] PENDING | Article: {title[:30]}...")
-                    elif status == AdvisoryStatus.PROCESSING:
-                        st.caption("🔄 Advisory generating — please wait...")
-                        print(f"[IC ADVISORY STATE] PROCESSING | Article: {title[:30]}...")
-                    elif status == AdvisoryStatus.FAILED:
-                        error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
-                        st.caption(f"⚠️ Advisory failed: {error_msg}")
-                        print(f"[IC ADVISORY STATE] FAILED | Article: {title[:30]}... | Error: {error_msg}")
-                    elif status == AdvisoryStatus.UNAVAILABLE:
-                        st.caption("○ Advisory unavailable — manual screening fully operational")
-                        print(f"[IC ADVISORY STATE] UNAVAILABLE | Article: {title[:30]}...")
-                    else:
-                        st.caption("○ No advisory generated — manual screening operational")
-                        print(f"[IC ADVISORY STATE] UNKNOWN | Article: {title[:30]}... | Status: {status}")
+                    status_val = safe_status(status, "UNKNOWN")
+                    st.caption(f"○ Advisory state: {status_val} — manual screening operational")
+                    print(f"[IC ADVISORY STATE] UNKNOWN | Article: {title[:30]}... | Status: {status}")
 
 
 

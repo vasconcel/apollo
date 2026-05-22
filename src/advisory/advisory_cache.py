@@ -231,9 +231,23 @@ class AdvisoryCache:
         return disk_path.exists()
     
     def get_status(self, cache_key: str, protocol_version: str = "1.0", stage: str = "ic") -> AdvisoryStatus:
-        """Get status of advisory."""
+        """Get status of advisory with detection for prefiltered/quarantined/fallback."""
         advisory = self.get(cache_key, protocol_version, stage)
-        
+
+        prefilter_applied = getattr(advisory, 'prefilter_applied', False)
+        stage_validation = getattr(advisory, 'stage_validation', "") or ""
+        model_used = getattr(advisory, 'model_used', "") or ""
+
+        if getattr(advisory, 'prefilter_applied', False):
+            return AdvisoryStatus.PREFILTERED
+
+        if "QUARANTINED" in (getattr(advisory, 'stage_validation', "") or ""):
+            return AdvisoryStatus.QUARANTINED
+
+        if model_used == "prefilter" or (getattr(advisory, 'raw_confidence', -1) == 0 and model_used == ""):
+            if advisory.is_available():
+                return AdvisoryStatus.PREFILTERED
+
         if advisory.is_placeholder and advisory.error:
             if "not yet generated" in advisory.error.lower():
                 return AdvisoryStatus.PENDING

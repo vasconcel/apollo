@@ -1,8 +1,8 @@
 {
   "cache_key": "5d4d87ba1fb702d08f528a0660ceb62d",
   "protocol_version": "1.0",
-  "decision": "INCLUDE",
-  "confidence": 1.0,
+  "decision": "INSUFFICIENT_EVIDENCE",
+  "confidence": 0.2,
   "triggered_criteria": [],
   "criterion_evaluations": [
     {
@@ -39,23 +39,21 @@
       "satisfied": false,
       "evidence": [],
       "confidence": 0.0
-    },
-    {
-      "criterion_id": "EC6",
-      "criterion_name": "EC6",
-      "satisfied": false,
-      "evidence": [],
-      "confidence": 0.0
     }
   ],
-  "justification": "The provided metadata does not contain sufficient information to trigger any exclusion criteria. The literature type is classified as White Literature, which is peer-reviewed, and the year is not applicable due to the critical year rule.",
+  "justification": "No abstract available, and title alone is insufficient for reliable exclusion criteria determination.",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
-  "risk_classification": "UNKNOWN",
-  "risk_reason": "",
-  "validation_queue": "UNKNOWN",
-  "requires_validation": false,
-  "generated_at": "2026-05-22T02:37:25.826989",
-  "generation_duration_ms": 2559.269666671753
+  "risk_classification": "CRITICAL_REVIEW",
+  "risk_reason": "Advisory cannot determine: INSUFFICIENT_EVIDENCE",
+  "validation_queue": "CRITICAL_REVIEW",
+  "requires_validation": true,
+  "generated_at": "2026-05-22T03:39:10.671769",
+  "generation_duration_ms": 2874.9377727508545,
+  "topic_relevance": {
+    "domain_relevance_score": 0.0,
+    "topical_alignment": 0.0,
+    "rq_alignment_strength": 0.0
+  }
 }

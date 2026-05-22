@@ -81,6 +81,7 @@ from .advisory_models import (
     assess_autonomy,
     TopicRelevance,
     populate_risk_classification,
+    compute_calibration_provenance,
 )
 from .advisory_queue import get_advisory_queue
 from .advisory_cache import get_advisory_cache, store_advisory
@@ -612,6 +613,43 @@ class AdvisoryWorker:
         raw_response = ""
         model_used = "llama-3.3-70b-versatile"
 
+        prefilter_result = None
+        try:
+            from .prefilter import get_prefilter
+            prefilter_result = get_prefilter().check(title, abstract)
+        except Exception:
+            pass
+
+        if prefilter_result and prefilter_result.is_reject:
+            print(f"[PREFILTER] Rejected {article_id}: {prefilter_result.reason_key}")
+            decision_str = prefilter_result.decision
+            try:
+                decision = AdvisoryDecision(decision_str)
+            except ValueError:
+                decision = AdvisoryDecision.EXCLUDE
+            return AdvisoryResult(
+                cache_key=request.cache_key,
+                protocol_version=request.protocol_version,
+                decision=decision,
+                confidence=prefilter_result.confidence,
+                justification=prefilter_result.reason,
+                generated_at=datetime.utcnow().isoformat(),
+                generation_duration_ms=prefilter_result.elapsed_ms,
+                grounding_evidence=[],
+                grounding_strength=1.0,
+                hallucination_risk_score=0.0,
+                prefilter_applied=True,
+                prefilter_reason=prefilter_result.reason_key,
+                model_used="prefilter",
+            )
+
+        prompt_hash = ""
+        try:
+            if hasattr(self.llm, '_last_prompt_hash'):
+                prompt_hash = self.llm._last_prompt_hash
+        except Exception:
+            pass
+
         try:
             if stage_lower == "ec":
                 from src.core.llm_assistant import LLMAssistant
@@ -761,11 +799,27 @@ class AdvisoryWorker:
                 rq_alignment_strength=suggestion_dict.get("rq_alignment_strength", 0.0)
             )
 
+            calibration_provenance = compute_calibration_provenance(
+                raw_confidence=raw_confidence,
+                final_confidence=calibrated_confidence,
+                grounding_strength=grounding_strength,
+                metadata_completeness=metadata_completeness,
+                has_evidence=has_evidence,
+                has_triggered_criteria=has_triggered_criteria,
+                decision=safe_enum_value(decision) if decision else "",
+            )
+
             advisory = AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
                 decision=decision,
                 confidence=calibrated_confidence,
+                raw_confidence=raw_confidence,
+                parser_confidence=raw_confidence,
+                routing_confidence=raw_confidence,
+                evidence_confidence=grounding_strength,
+                decision_confidence=calibrated_confidence,
+                calibration_provenance=calibration_provenance,
                 triggered_criteria=triggered_criteria,
                 criterion_evaluations=criterion_evaluations,
                 justification=justification,
@@ -778,6 +832,17 @@ class AdvisoryWorker:
                 unsupported_claims_detected=unsupported_detected,
                 hallucination_risk_score=hallucination_risk,
                 topic_relevance=topic_relevance,
+                evidence_span=len(evidence_snippets) if evidence_snippets else 0,
+                metadata_fields_used={
+                    k: True for k in (metadata or {}) if metadata.get(k)
+                },
+                heuristic_contributions=[],
+                prompt_hash=prompt_hash,
+                routing_rationale=f"stage={stage_lower}, decision={safe_enum_value(decision)}, confidence={calibrated_confidence:.2f}",
+                stage_validation="passed",
+                prefilter_applied=False,
+                prefilter_reason="",
+                model_used=model_used,
             )
 
             ambiguity_detected = decision in (
@@ -792,6 +857,31 @@ class AdvisoryWorker:
                 criterion_grounding_score=grounding_strength,
                 ambiguity_detected=ambiguity_detected,
             )
+
+            try:
+                from .stage_guard import validate_criteria_stage_isolation, quarantine_advisory
+                stage_violations = validate_criteria_stage_isolation(advisory.triggered_criteria or [], advisory.non_triggered_criteria or [], advisory.criterion_evaluations or [], stage_lower)
+                if stage_violations:
+                    advisory = quarantine_advisory(advisory, stage_violations)
+                    advisory.stage_validation = f"QUARANTINED: {'; '.join(stage_violations)}"
+                    print(f"[STAGE_GUARD] Quarantined {article_id}: {stage_violations}")
+                else:
+                    advisory.stage_validation = "passed"
+            except Exception as e:
+                print(f"[STAGE_GUARD] Validation error for {article_id}: {e}")
+
+            try:
+                from .advisory_models import check_methodological_safeguards, check_criterion_hallucination
+                safeguards = check_methodological_safeguards(advisory)
+                if safeguards:
+                    print(f"[SAFEGUARD] Warnings for {article_id}: {safeguards}")
+                criterion_warnings = check_criterion_hallucination(
+                    triggered_criteria, justification, title, abstract or ""
+                )
+                if criterion_warnings:
+                    print(f"[SAFEGUARD] Criterion warnings for {article_id}: {criterion_warnings}")
+            except Exception as e:
+                print(f"[SAFEGUARD] Check error for {article_id}: {e}")
 
             return advisory
 

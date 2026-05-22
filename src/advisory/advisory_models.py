@@ -788,7 +788,24 @@ class AdvisoryResult:
     generation_duration_ms: Optional[float] = None
 
     topic_relevance: Optional["TopicRelevance"] = None
-    
+
+    raw_confidence: float = 0.0
+    parser_confidence: float = 0.0
+    routing_confidence: float = 0.0
+    evidence_confidence: float = 0.0
+    decision_confidence: float = 0.0
+    calibration_provenance: Dict[str, Any] = field(default_factory=dict)
+
+    evidence_span: List[str] = field(default_factory=list)
+    metadata_fields_used: List[str] = field(default_factory=list)
+    heuristic_contributions: Dict[str, Any] = field(default_factory=dict)
+    prompt_hash: str = ""
+    routing_rationale: str = ""
+    stage_validation: Dict[str, Any] = field(default_factory=dict)
+    prefilter_applied: bool = False
+    prefilter_reason: str = ""
+    model_used: str = ""
+
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSON persistence - SAFE."""
         return {
@@ -817,7 +834,23 @@ class AdvisoryResult:
             "requires_validation": bool(self.requires_validation),
             "generated_at": self.generated_at,
             "generation_duration_ms": self.generation_duration_ms,
-            "topic_relevance": self.topic_relevance.to_dict() if self.topic_relevance else None
+            "topic_relevance": self.topic_relevance.to_dict() if self.topic_relevance else None,
+            "raw_confidence": self.raw_confidence,
+            "parser_confidence": self.parser_confidence,
+            "routing_confidence": self.routing_confidence,
+            "evidence_confidence": self.evidence_confidence,
+            "decision_confidence": self.decision_confidence,
+            "calibration_provenance": self.calibration_provenance,
+            "grounding_evidence": self.grounding_evidence,
+            "evidence_span": self.evidence_span,
+            "metadata_fields_used": self.metadata_fields_used,
+            "heuristic_contributions": self.heuristic_contributions,
+            "prompt_hash": self.prompt_hash,
+            "routing_rationale": self.routing_rationale,
+            "stage_validation": self.stage_validation,
+            "prefilter_applied": self.prefilter_applied,
+            "prefilter_reason": self.prefilter_reason,
+            "model_used": self.model_used,
         }
 
     @classmethod
@@ -853,7 +886,22 @@ class AdvisoryResult:
             is_placeholder=data.get("is_placeholder", False),
             generated_at=data.get("generated_at"),
             generation_duration_ms=data.get("generation_duration_ms"),
-            topic_relevance=TopicRelevance.from_dict(data["topic_relevance"]) if data.get("topic_relevance") else None
+            topic_relevance=TopicRelevance.from_dict(data["topic_relevance"]) if data.get("topic_relevance") else None,
+            raw_confidence=float(data.get("raw_confidence", 0.0)),
+            parser_confidence=float(data.get("parser_confidence", 0.0)),
+            routing_confidence=float(data.get("routing_confidence", 0.0)),
+            evidence_confidence=float(data.get("evidence_confidence", 0.0)),
+            decision_confidence=float(data.get("decision_confidence", 0.0)),
+            calibration_provenance=data.get("calibration_provenance", {}),
+            evidence_span=data.get("evidence_span", []),
+            metadata_fields_used=data.get("metadata_fields_used", []),
+            heuristic_contributions=data.get("heuristic_contributions", {}),
+            prompt_hash=data.get("prompt_hash", ""),
+            routing_rationale=data.get("routing_rationale", ""),
+            stage_validation=data.get("stage_validation", {}),
+            prefilter_applied=bool(data.get("prefilter_applied", False)),
+            prefilter_reason=data.get("prefilter_reason", ""),
+            model_used=data.get("model_used", ""),
         )
     
     def is_available(self) -> bool:
@@ -900,6 +948,103 @@ class AdvisoryResult:
             error=reason,
             generated_at=datetime.utcnow().isoformat()
         )
+
+
+def check_methodological_safeguards(advisory: "AdvisoryResult") -> List[str]:
+    """Validate advisory against methodological guardrails. Returns list of warnings."""
+    warnings: List[str] = []
+    if advisory.decision == AdvisoryDecision.INCLUDE:
+        if advisory.confidence >= 0.95 and not advisory.grounding_evidence:
+            warnings.append("OVERCONFIDENT_INCLUDE: confidence>=0.95 with no grounding evidence")
+        if advisory.confidence >= 0.90 and not advisory.justification:
+            warnings.append("EMPTY_JUSTIFICATION: INCLUDE with empty justification")
+        if advisory.confidence >= 0.90 and not advisory.triggered_criteria:
+            warnings.append("EVIDENCE_FREE_DECISION: INCLUDE with no triggered criteria")
+        if len(advisory.justification or "") < 20:
+            warnings.append("INSUFFICIENT_JUSTIFICATION: justification too short for INCLUDE")
+    if advisory.decision == AdvisoryDecision.EXCLUDE:
+        if not advisory.justification:
+            warnings.append("EMPTY_JUSTIFICATION: EXCLUDE with empty justification")
+        if advisory.confidence >= 0.90 and not advisory.grounding_evidence:
+            warnings.append("UNSUPPORTED_EXCLUSION: high-confidence EXCLUDE with no evidence")
+    if not advisory.grounding_evidence and advisory.confidence >= 0.9:
+        warnings.append("EVIDENCE_FREE_HIGH_CONFIDENCE: no grounding evidence despite high confidence")
+    if advisory.hallucination_risk_score > 0.7:
+        warnings.append(f"HIGH_HALLUCINATION_RISK: score={advisory.hallucination_risk_score:.2f}")
+    if not advisory.justification and advisory.decision not in (
+        AdvisoryDecision.UNAVAILABLE, AdvisoryDecision.INSUFFICIENT_EVIDENCE
+    ):
+        warnings.append("EMPTY_JUSTIFICATION: decision has no justification text")
+    return warnings
+
+
+def check_criterion_hallucination(
+    triggered_criteria: List[str],
+    justification: str,
+    title: str,
+    abstract: str,
+) -> List[str]:
+    """Detect criterion citations not supported by available text."""
+    warnings: List[str] = []
+    combined = f"{title} {abstract}".lower()
+    for cid in triggered_criteria or []:
+        cid_lower = cid.lower().strip()
+        keyword = cid_lower.replace("ec", "").replace("ic", "").strip()
+        if keyword and len(keyword) > 1 and keyword not in combined:
+            if keyword not in (justification or "").lower():
+                warnings.append(f"CRITERION_HALLUCINATION: {cid} cited but no textual support")
+    return warnings
+
+
+def compute_calibration_provenance(
+    raw_confidence: float,
+    final_confidence: float,
+    grounding_strength: float,
+    metadata_completeness: float,
+    has_evidence: bool,
+    has_triggered_criteria: bool,
+    decision: str = "",
+) -> Dict[str, Any]:
+    provenance: Dict[str, Any] = {
+        "raw_llm_confidence": raw_confidence,
+        "final_confidence": final_confidence,
+        "grounding_strength": grounding_strength,
+        "metadata_completeness": metadata_completeness,
+        "has_evidence": has_evidence,
+        "has_triggered_criteria": has_triggered_criteria,
+        "calibration_applied": abs(raw_confidence - final_confidence) > 0.01,
+        "calibration_delta": round(final_confidence - raw_confidence, 4),
+        "confidence_source": "llm",
+    }
+    if final_confidence < raw_confidence:
+        provenance["confidence_source"] = "calibrated_down"
+        provenance["calibration_reason"] = []
+        if grounding_strength < 0.5:
+            provenance["calibration_reason"].append("weak_grounding")
+        if not has_evidence:
+            provenance["calibration_reason"].append("missing_evidence")
+        if not has_triggered_criteria:
+            provenance["calibration_reason"].append("no_triggered_criteria")
+        if metadata_completeness < 0.5:
+            provenance["calibration_reason"].append("low_metadata_completeness")
+    elif decision == "UNCERTAIN" and raw_confidence >= 0.5:
+        provenance["confidence_source"] = "forced_uncertain"
+        provenance["calibration_reason"] = ["confidence_collapse_to_uncertain"]
+    return provenance
+
+
+def check_advisory_invariant(advisory: "AdvisoryResult") -> List[str]:
+    """Check fundamental invariants that should never be violated."""
+    violations: List[str] = []
+    if advisory.decision is None:
+        violations.append("INVARIANT: decision is None")
+    if not isinstance(advisory.confidence, (int, float)):
+        violations.append(f"INVARIANT: confidence is not numeric: {type(advisory.confidence)}")
+    elif not (0.0 <= advisory.confidence <= 1.0):
+        violations.append(f"INVARIANT: confidence out of range: {advisory.confidence}")
+    if advisory.decision == AdvisoryDecision.INCLUDE and advisory.error:
+        violations.append(f"INVARIANT: INCLUDE decision with error: {advisory.error}")
+    return violations
 
 
 @dataclass

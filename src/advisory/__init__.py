@@ -70,6 +70,20 @@ from .advisory_queue import (
     reset_failed_advisories
 )
 
+from .prefilter import (
+    PrefilterEngine,
+    PrefilterResult,
+    get_prefilter,
+)
+
+from .stage_guard import (
+    validate_criteria_stage_isolation,
+    strip_contaminated_criteria,
+    quarantine_advisory,
+    get_stage_prefixes,
+    get_opposite_stage_prefixes,
+)
+
 from .advisory_worker import (
     AdvisoryWorker,
     run_worker,
@@ -149,6 +163,18 @@ __all__ = [
     "get_active_stage",
     "should_process_stage",
     "get_worker_state",
+
+    # Prefilter
+    "PrefilterEngine",
+    "PrefilterResult",
+    "get_prefilter",
+
+    # Stage Guard
+    "validate_criteria_stage_isolation",
+    "strip_contaminated_criteria",
+    "quarantine_advisory",
+    "get_stage_prefixes",
+    "get_opposite_stage_prefixes",
 
     # Confidence & Autonomy
     "calibrate_confidence",

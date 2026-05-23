@@ -1,0 +1,96 @@
+import logging
+import re
+from typing import Optional
+
+from tqdm import tqdm
+
+from src.domain.enums import ScreeningStatus
+from src.domain.interfaces import (
+    PaperRepository,
+    ScreeningDecisionRepository,
+)
+from src.domain.models import Criterion, Paper, ScreeningDecision
+from src.use_cases.screen_paper import ScreenPaperUseCase
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_title(title: str) -> str:
+    text = title.lower().strip()
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+class RunScreeningPipelineUseCase:
+    def __init__(
+        self,
+        paper_repository: PaperRepository,
+        decision_repository: ScreeningDecisionRepository,
+        screen_paper_use_case: ScreenPaperUseCase,
+        criteria: list[Criterion],
+    ) -> None:
+        self._paper_repo = paper_repository
+        self._decision_repo = decision_repository
+        self._screen = screen_paper_use_case
+        self._criteria = criteria
+
+    async def execute(self) -> int:
+        papers = self._paper_repo.get_all_papers()
+        processed = 0
+        seen_titles: dict[str, str] = {}
+
+        try:
+            with tqdm(
+                total=len(papers),
+                desc="Screening papers",
+                unit="paper",
+            ) as pbar:
+                for paper in papers:
+                    norm = normalize_title(paper.title)
+
+                    existing = self._decision_repo.get_decision(paper.id)
+                    if existing is not None:
+                        seen_titles[norm] = paper.id
+                        pbar.set_postfix_str(f"Skipping {paper.id}")
+                        pbar.update(1)
+                        continue
+
+                    if norm in seen_titles:
+                        decision = self._make_ec6_decision(paper)
+                        self._decision_repo.save_decision(decision)
+                        processed += 1
+                        pbar.set_postfix_str(
+                            f"{paper.id} [EC6] Duplicate"
+                        )
+                        pbar.update(1)
+                        continue
+
+                    seen_titles[norm] = paper.id
+                    decision = await self._screen.execute(
+                        paper=paper,
+                        criteria=self._criteria,
+                    )
+                    self._decision_repo.save_decision(decision)
+                    processed += 1
+                    pbar.set_postfix_str(
+                        f"{paper.id} [{decision.status.value}]"
+                    )
+                    pbar.update(1)
+        except KeyboardInterrupt:
+            logger.warning(
+                "Interrupted by user after %d papers. Progress saved.",
+                processed,
+            )
+
+        return processed
+
+    @staticmethod
+    def _make_ec6_decision(paper: Paper) -> ScreeningDecision:
+        return ScreeningDecision(
+            paper_id=paper.id,
+            status=ScreeningStatus.EXCLUDED,
+            confidence_score=1.0,
+            rationale="Duplicate study detected.",
+            applied_criteria_codes=["EC6"],
+        )

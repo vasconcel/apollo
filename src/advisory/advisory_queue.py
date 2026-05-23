@@ -39,7 +39,6 @@ from .advisory_models import (
 )
 from .advisory_cache import get_advisory_cache
 from .advisory_metrics import get_metrics, _RecoveryEvent
-from .telemetry_bus import get_telemetry_bus
 
 
 class AdvisoryQueue:
@@ -613,11 +612,6 @@ class AdvisoryQueue:
 
             self._check_and_schedule_compact()
 
-        try:
-            get_telemetry_bus().record_queue_depth(stage, len(items))
-        except Exception:
-            pass
-
         self._run_pending_compact()
         return self.state
 
@@ -654,10 +648,6 @@ class AdvisoryQueue:
         with self._lock:
             item = self.get_next()
             if item is None:
-                try:
-                    get_telemetry_bus().record_queue_depth(self._stage, 0)
-                except Exception:
-                    pass
                 self._run_pending_compact()
                 return None
             self._mark_processing(item)
@@ -667,10 +657,6 @@ class AdvisoryQueue:
             metrics.queue_processing_count = self.state.processing
             metrics.queue_completed_count = self.state.completed
             metrics.queue_failed_count = self.state.failed
-            try:
-                get_telemetry_bus().record_queue_depth(self._stage, self.state.pending)
-            except Exception:
-                pass
             self._run_pending_compact()
             return item
 
@@ -709,14 +695,6 @@ class AdvisoryQueue:
             metrics.queue_completed_count = self.state.completed
             metrics.queue_processing_count = self.state.processing
 
-        try:
-            bus = get_telemetry_bus()
-            if self._acquire_timestamp > 0:
-                bus.record_processing_time(self._stage, time.time() - self._acquire_timestamp)
-            self._acquire_timestamp = 0.0
-            bus.record_queue_depth(self._stage, self.state.pending)
-        except Exception:
-            pass
         self._run_pending_compact()
 
     def mark_failed(self, item: QueueItem, error: str) -> None:
@@ -738,14 +716,6 @@ class AdvisoryQueue:
             metrics.queue_failed_count = self.state.failed
             metrics.queue_processing_count = self.state.processing
 
-        try:
-            bus = get_telemetry_bus()
-            if self._acquire_timestamp > 0:
-                bus.record_processing_time(self._stage, time.time() - self._acquire_timestamp)
-            self._acquire_timestamp = 0.0
-            bus.record_queue_depth(self._stage, self.state.pending)
-        except Exception:
-            pass
         self._run_pending_compact()
 
     def retry(self, item: QueueItem) -> bool:
@@ -784,17 +754,9 @@ class AdvisoryQueue:
         failure_class = classify_failure(item.last_error)
 
         if failure_class == "terminal":
-            try:
-                get_telemetry_bus().record_requeue_event(self._stage, "terminal")
-            except Exception:
-                pass
             return self._quarantine_item(item)
 
         if item.retry_count >= self.config.max_retries:
-            try:
-                get_telemetry_bus().record_requeue_event(self._stage, "max_retries")
-            except Exception:
-                pass
             return self._quarantine_item(item)
 
         with self._lock:
@@ -812,10 +774,6 @@ class AdvisoryQueue:
                 "retry_reason": failure_class,
             })
             get_metrics().queue_retry_count += 1
-            try:
-                get_telemetry_bus().record_requeue_event(self._stage, failure_class)
-            except Exception:
-                pass
             return True
 
     def _quarantine_item(self, item: QueueItem) -> bool:
@@ -933,11 +891,6 @@ class AdvisoryQueue:
                     p.unlink()
                 except OSError:
                     pass
-        try:
-            get_telemetry_bus().record_queue_depth(self._stage, 0)
-        except Exception:
-            pass
-
     @property
     def pending_items(self) -> List[QueueItem]:
         """Get all pending queue items (property alias)."""

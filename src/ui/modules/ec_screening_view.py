@@ -42,7 +42,6 @@ from src.advisory.advisory_models import (
     compute_uncertainty_score,
 )
 from src.advisory.advisory_scheduler import set_active_stage
-from src.advisory.calibration_tracker import log_calibration_event, get_calibration_stats
 from src.advisory.queue_manager import compute_queue_summary, get_cached_queue_summary, filter_articles_by_queue, ReviewMode, clear_queue_cache
 
 
@@ -194,9 +193,7 @@ def render_ec_screening():
     protocol = st.session_state.research_protocol
 
     if not getattr(st.session_state, "_protocol_lock_attempted_ec", False):
-        was_locked = ensure_protocol_locked(protocol)
-        if was_locked:
-            
+        ensure_protocol_locked(protocol)
         st.session_state._protocol_lock_attempted_ec = True
 
     is_valid, error_msg = validate_protocol_for_screening(protocol)
@@ -322,7 +319,6 @@ def render_screening_workspace(session):
 
     protocol_version = get_protocol_value(st.session_state.get("research_protocol", {}), "protocol_version", "1.0")
     queue_summary = get_cached_queue_summary(articles, protocol_version, "ec")
-    cal_stats = get_calibration_stats()
 
     with st.expander("📊 REVIEW QUEUE", expanded=True):
         col_crit, col_high, col_med, col_low_samp, col_low_auto, col_no_adv = st.columns(6)
@@ -343,32 +339,19 @@ def render_screening_workspace(session):
         with col_no_adv:
             st.metric("Pending", queue_summary.get("NO_ADVISORY", 0))
 
-        from src.advisory.calibration_tracker import get_calibration_summary
-        cal_summary = get_calibration_summary()
-
+        from src.advisory.advisory_reliability import get_operational_metrics
+        ops = get_operational_metrics().get_stats()
         st.markdown(f"---")
-        st.markdown("**Calibration Panel**")
-        col_agree, col_override, col_crit, col_hall = st.columns(4)
-        with col_agree:
-            st.metric("Agreement", cal_summary.get("agreement_rate", "N/A"))
-        with col_override:
-            st.metric("Override Rate", cal_summary.get("override_rate", "N/A"))
-        with col_crit:
-            st.metric("Escalated", cal_summary.get("critical_overrides", 0))
-        with col_hall:
-            st.metric("Evidence Reliability", cal_summary.get("hallucination_risk_rate", "N/A"))
-
-        col_lr_agree, col_fe, col_fi, col_prec = st.columns(4)
-        with col_lr_agree:
-            st.caption(f"Auto-screen accuracy: {cal_summary.get('low_risk_sample_agreement', 'N/A')}")
-        with col_fe:
-            st.caption(f"Missed: {cal_summary.get('false_exclusion', 0)}")
-        with col_fi:
-            st.caption(f"Wrong includes: {cal_summary.get('false_inclusion', 0)}")
+        st.markdown("**Reliability Metrics**")
+        col_prec, col_esc, col_thr, col_lat = st.columns(4)
         with col_prec:
-            from src.advisory.advisory_reliability import get_operational_metrics
-            metrics = get_operational_metrics().get_stats()
-            st.caption(f"Est. Precision: {metrics.get('estimated_precision', 'N/A')}")
+            st.metric("Est. Precision", f"{ops.get('estimated_precision', 0):.0%}")
+        with col_esc:
+            st.metric("Escalation Rate", f"{ops.get('escalation_rate', 0):.0%}")
+        with col_thr:
+            st.metric("Throughput", f"{ops.get('throughput_items_per_sec', 0):.1f}/s")
+        with col_lat:
+            st.metric("Latency", f"{ops.get('latency_avg_ms', 0):.0f}ms")
 
         with st.expander("⚡ OPERATIONAL METRICS", expanded=False):
             from src.advisory.advisory_orchestrator import get_advisory_pipeline_status
@@ -413,20 +396,15 @@ def render_screening_workspace(session):
     with col_mode:
         review_mode = st.selectbox(
             "Review Mode",
-            options=["FOCUSED_RISK_REVIEW", "SEQUENTIAL_REVIEW", "CALIBRATION_REVIEW"],
+            options=["FOCUSED_RISK_REVIEW", "SEQUENTIAL_REVIEW"],
             index=0,
             format_func=lambda x: {
                 "FOCUSED_RISK_REVIEW": "🎯 Focused Risk",
                 "SEQUENTIAL_REVIEW": "📋 Sequential",
-                "CALIBRATION_REVIEW": "📊 Calibration"
             }.get(x, x),
             key="ec_review_mode"
         )
     with col_queue:
-        if review_mode == "CALIBRATION_REVIEW":
-            st.caption("📊 Shows disagreements/overrides only")
-            queue_filter = "CALIBRATION"
-        else:
             if "ec_selected_queue" not in st.session_state:
                 st.session_state.ec_selected_queue = "ALL"
             queue_filter = st.selectbox(
@@ -449,10 +427,7 @@ def render_screening_workspace(session):
 
     filtered_articles = articles
 
-    if review_mode == "CALIBRATION_REVIEW":
-        from src.advisory.calibration_tracker import get_calibration_filtered_articles
-        filtered_articles = get_calibration_filtered_articles(articles, protocol_version, "ec")
-    elif queue_filter != "ALL":
+    if queue_filter != "ALL":
         filtered_articles = filter_articles_by_queue(articles, protocol_version, "ec", queue_filter)
 
     if queue_filter == "AUTO_LOW_RISK" and len(filtered_articles) > 20:
@@ -583,21 +558,6 @@ def render_screening_workspace(session):
                 article.revisor1 = session.researcher_id
                 session.ec_completed += 1
 
-                advisory = get_ec_advisory(article.title, article.abstract, protocol_version) if article.title else None
-                if advisory:
-                    metadata = article.metadata if hasattr(article, 'metadata') else {}
-                    ai_dec = safe_decision(advisory.decision) if hasattr(advisory, 'decision') else ""
-                    disagree = ai_dec and ai_dec.upper() != "EXCLUDE"
-                    log_calibration_event(
-                        article_id=article.article_id,
-                        protocol_version=protocol_version,
-                        stage="ec",
-                        advisory=advisory,
-                        human_decision="EXCLUDE",
-                        metadata=metadata,
-                        override_severity=override_severity if disagree else ""
-                    )
-
                 st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({manual_codes_str or 'Manual'})", icon="❌")
                 if current_idx < total - 1:
                     session.current_index = current_idx + 1
@@ -609,18 +569,6 @@ def render_screening_workspace(session):
                 article.ces1 = "NO"
                 article.revisor1 = session.researcher_id
                 session.ec_completed += 1
-
-                advisory = get_ec_advisory(article.title, article.abstract, protocol_version) if article.title else None
-                if advisory:
-                    metadata = article.metadata if hasattr(article, 'metadata') else {}
-                    log_calibration_event(
-                        article_id=article.article_id,
-                        protocol_version=protocol_version,
-                        stage="ec",
-                        advisory=advisory,
-                        human_decision="INCLUDE",
-                        metadata=metadata
-                    )
 
                 st.toast(f"✓ Article {current_idx + 1} INCLUDED", icon="✅")
                 if current_idx < total - 1:
@@ -914,15 +862,8 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                     st.metric("Weak Signals", "⚠️ Detected" if unsupported else "✓ Clear")
 
                 col_r1, col_r2, col_r3 = st.columns(3)
-                from src.advisory.advisory_reliability import compute_advisory_reliability, check_escalation
-                from src.advisory.calibration_tracker import get_calibration_summary
-                cal_data = get_calibration_summary()
-                override_rate = cal_data.get("override_rate", 0.0)
-                if isinstance(override_rate, str):
-                    try:
-                        override_rate = float(override_rate.rstrip('%')) / 100.0
-                    except ValueError:
-                        override_rate = 0.0
+                from src.advisory.advisory_reliability import compute_advisory_reliability, check_escalation, get_threshold_calibrator
+                override_rate = get_threshold_calibrator().get_override_rate("ec")
                 reliability_score = compute_advisory_reliability(advisory, override_rate=override_rate)
                 escalation = check_escalation(advisory, reliability_score)
                 with col_r1:
@@ -1000,18 +941,6 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                             if submit_action:
                                 ai_decision = safe_decision(advisory.decision) if hasattr(advisory, 'decision') else "UNKNOWN"
                                 is_disagreement = human_decision != ai_decision
-                                
-                                log_calibration_event(
-                                    article_id=article.get("id", "unknown"),
-                                    protocol_version=protocol_version,
-                                    stage="ec",
-                                    ai_decision=ai_decision,
-                                    human_decision=human_decision,
-                                    disagreement=is_disagreement,
-                                    override_severity=override_severity,
-                                    risk_classification=getattr(advisory, 'risk_classification', None),
-                                    override_reason=override_reason or "No reason provided"
-                                )
                                 
                                 from src.advisory.advisory_reliability import get_threshold_calibrator, get_operational_metrics
                                 get_threshold_calibrator().record_override("ec", was_overridden=is_disagreement)

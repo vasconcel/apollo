@@ -403,7 +403,6 @@ class TestNoOrphanedPaths:
             "src/core/export_engine.py",
             "src/core/atlas_processor.py",
             "src/core/llm_assistant.py",
-            "src/core/calibration_engine.py",
         ]
 
         for module_path in canonical_modules:

@@ -1,0 +1,3 @@
+{"ts": 92902.7484834, "v": 1.0, "tags": {"message": "calibration_start sample_size=10 total_articles=2451", "component": "calibration", "sample_size": "10"}}
+{"ts": 92902.7902511, "v": 1.0, "tags": {"message": "calibration_stage_start stage=ec sample_size=10", "component": "calibration", "stage": "ec", "sample_size": "10"}}
+{"ts": 92902.831503, "v": 1.0, "tags": {"message": "calibration_async_start", "component": "calibration"}}

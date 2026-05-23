@@ -37,7 +37,7 @@ from src.advisory.advisory_models import (
     compute_uncertainty_score,
     assess_autonomy,
 )
-from src.advisory.calibration_tracker import log_calibration_event
+
 from src.advisory.advisory_scheduler import set_active_stage
 
 _st_cache_key_calls = 0
@@ -351,18 +351,6 @@ def render_screening_workspace(session):
                 session.articles[original_idx].revisor1 = session.researcher_id
                 session.ic_completed += 1
 
-                advisory = get_advisory(article.title, article.abstract, protocol_version, stage="ic") if article.title else None
-                if advisory:
-                    metadata = article.metadata if hasattr(article, 'metadata') else {}
-                    log_calibration_event(
-                        article_id=article.article_id,
-                        protocol_version=protocol_version,
-                        stage="ic",
-                        advisory=advisory,
-                        human_decision="EXCLUDE",
-                        metadata=metadata
-                    )
-
                 st.toast(f"✗ Article {current_idx + 1} EXCLUDED ({manual_codes_str or 'Manual'})", icon="❌")
                 if current_idx < total - 1:
                     st.session_state.ic_current_index = current_idx + 1
@@ -374,18 +362,6 @@ def render_screening_workspace(session):
                 session.articles[original_idx].cis1 = manual_codes_str if manual_codes_str else "YES"
                 session.articles[original_idx].revisor1 = session.researcher_id
                 session.ic_completed += 1
-
-                advisory = get_advisory(article.title, article.abstract, protocol_version, stage="ic") if article.title else None
-                if advisory:
-                    metadata = article.metadata if hasattr(article, 'metadata') else {}
-                    log_calibration_event(
-                        article_id=article.article_id,
-                        protocol_version=protocol_version,
-                        stage="ic",
-                        advisory=advisory,
-                        human_decision="INCLUDE",
-                        metadata=metadata
-                    )
 
                 st.toast(f"✓ Article {current_idx + 1} INCLUDED ({manual_codes_str or 'YES'})", icon="✅")
                 if current_idx < total - 1:
@@ -677,15 +653,8 @@ def render_ai_advisory_panel(article, current_idx: int):
                     st.markdown(f"**Uncertainty Score:** {uncertainty_score:.2f} | **Evidence Strength:** {evidence_strength:.2f}")
 
                 if advisory:
-                    from src.advisory.advisory_reliability import compute_advisory_reliability, check_escalation
-                    from src.advisory.calibration_tracker import get_calibration_summary
-                    cal_data = get_calibration_summary()
-                    override_rate = cal_data.get("override_rate", 0.0)
-                    if isinstance(override_rate, str):
-                        try:
-                            override_rate = float(override_rate.rstrip('%')) / 100.0
-                        except ValueError:
-                            override_rate = 0.0
+                    from src.advisory.advisory_reliability import compute_advisory_reliability, check_escalation, get_threshold_calibrator
+                    override_rate = get_threshold_calibrator().get_override_rate("ic")
                     reliability_score = compute_advisory_reliability(advisory, override_rate=override_rate)
                     escalation = check_escalation(advisory, reliability_score)
                     cr1, cr2, cr3 = st.columns(3)

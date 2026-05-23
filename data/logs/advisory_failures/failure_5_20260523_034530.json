@@ -1,0 +1,45 @@
+{
+  "success": false,
+  "failure_type": null,
+  "failure_reason": "",
+  "raw_response": "\"StructuredAdvisory(stage='ec', decision='unavailable', confidence=0.0, triggered_criteria=[], non_triggered_criteria=[], criterion_evaluations={}, justification='Structured advisory unavailable. Displaying deterministic fallback summary.', reasoning_summary='LLM service unavailable. Manual review required.', ambiguity_flags=['LLM not available'], evidence_extracts=[], grounding_evidence=[], uncertainty_reasoning='', domain_alignment_reasoning='', metadata_grounding={'title_used': False, 'year_used': False, 'abstract_used': True, 'literature_type_used': False}, is_fallback=True, fallback_reason=\\\"LLM API error: Error code: 429 - {'error': {'message': 'Rate limi\\\", protocol_version='1.0', advisory_hash='3f843565342404d4', topic_relevance={'domain_relevance_score': 0.0, 'rq_alignment_strength': 0.0, 'methodological_alignment': 0.0, 'population_alignment': 0.0})\"",
+  "normalized_response": {
+    "stage": "ec",
+    "decision": "unavailable",
+    "confidence": 0.0,
+    "triggered_criteria": [],
+    "non_triggered_criteria": [],
+    "criterion_evaluations": {},
+    "justification": "Structured advisory unavailable. Displaying deterministic fallback summary.",
+    "reasoning_summary": "LLM service unavailable. Manual review required.",
+    "ambiguity_flags": [
+      "LLM not available"
+    ],
+    "evidence_extracts": [],
+    "grounding_evidence": [],
+    "uncertainty_reasoning": "",
+    "domain_alignment_reasoning": "",
+    "topic_relevance": {
+      "domain_relevance_score": 0.0,
+      "rq_alignment_strength": 0.0,
+      "methodological_alignment": 0.0,
+      "population_alignment": 0.0
+    },
+    "metadata_grounding": {
+      "title_used": false,
+      "year_used": false,
+      "abstract_used": true,
+      "literature_type_used": false
+    },
+    "is_fallback": true,
+    "fallback_reason": "LLM API error: Error code: 429 - {'error': {'message': 'Rate limi",
+    "protocol_version": "1.0",
+    "advisory_hash": "3f843565342404d4"
+  },
+  "cache_key": "31cb607d959c306f102299cb40a8a8fd",
+  "article_id": "5",
+  "protocol_version": "1.0",
+  "stage": "ec",
+  "timestamp": "2026-05-23T03:45:30.695185+00:00",
+  "model_used": "llama-3.3-70b-versatile"
+}

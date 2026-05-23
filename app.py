@@ -70,10 +70,8 @@ def render_sidebar():
             "MODULE",
             options=[
                 "Protocol Configuration",
-                "Protocol Calibration",
                 "EC Screening",
                 "IC Screening",
-                "Inter-Rater Calibration",
                 "Exports & Audit"
             ],
             index=0,
@@ -295,18 +293,12 @@ def main():
     if view == "Protocol Configuration":
         from src.ui.modules.protocol_view import render_protocol_dashboard
         render_protocol_dashboard()
-    elif view == "Protocol Calibration":
-        from src.ui.modules.protocol_calibration_view import render_protocol_calibration
-        render_protocol_calibration()
     elif view == "EC Screening":
         from src.ui.modules.ec_screening_view import render_ec_screening
         render_ec_screening()
     elif view == "IC Screening":
         from src.ui.modules.ic_screening_view import render_ic_screening
         render_ic_screening()
-    elif view == "Inter-Rater Calibration":
-        from src.ui.modules.calibration_view import render_calibration_workspace
-        render_calibration_workspace()
     else:
         from src.ui.modules.export_view import render_exports
         render_exports()

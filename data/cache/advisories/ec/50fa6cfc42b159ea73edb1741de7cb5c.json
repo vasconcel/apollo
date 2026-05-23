@@ -1,0 +1,53 @@
+{
+  "cache_key": "50fa6cfc42b159ea73edb1741de7cb5c",
+  "protocol_version": "1.0",
+  "decision": "UNAVAILABLE",
+  "confidence": 0.0,
+  "triggered_criteria": [],
+  "non_triggered_criteria": [],
+  "criterion_evaluations": [],
+  "justification": "Structured advisory unavailable. Displaying deterministic fallback summary.",
+  "error": null,
+  "is_fallback": false,
+  "is_placeholder": false,
+  "risk_classification": "CRITICAL_REVIEW",
+  "risk_reason": "Advisory cannot determine: UNAVAILABLE",
+  "validation_queue": "CRITICAL_REVIEW",
+  "requires_validation": true,
+  "generated_at": "2026-05-23T03:46:56.823742+00:00",
+  "generation_duration_ms": 592.4646854400635,
+  "topic_relevance": {
+    "domain_relevance_score": 0.0,
+    "topical_alignment": 0.0,
+    "rq_alignment_strength": 0.0
+  },
+  "raw_confidence": 0.0,
+  "parser_confidence": 0.0,
+  "routing_confidence": 0.0,
+  "evidence_confidence": 0.3,
+  "decision_confidence": 0.0,
+  "calibration_provenance": {
+    "raw_llm_confidence": 0.0,
+    "final_confidence": 0.0,
+    "grounding_strength": 0.3,
+    "metadata_completeness": 0.2,
+    "has_evidence": false,
+    "has_triggered_criteria": false,
+    "calibration_applied": false,
+    "calibration_delta": 0.0,
+    "confidence_source": "llm"
+  },
+  "grounding_evidence": [],
+  "evidence_span": 0,
+  "metadata_fields_used": {
+    "article_id": true,
+    "stage": true
+  },
+  "heuristic_contributions": [],
+  "prompt_hash": "",
+  "routing_rationale": "stage=ec, decision=UNAVAILABLE, confidence=0.00",
+  "stage_validation": "passed",
+  "prefilter_applied": false,
+  "prefilter_reason": "",
+  "model_used": "llama-3.3-70b-versatile"
+}

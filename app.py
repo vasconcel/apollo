@@ -15,6 +15,7 @@ Philosophy:
 import streamlit as st
 import logging
 import os
+import time
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
@@ -136,6 +137,18 @@ def render_sidebar():
             </div>
             ''', unsafe_allow_html=True)
 
+            from src.advisory.runtime_mode import RUNTIME_MODE, FIXED_COOLDOWN_SECONDS, MAX_WORKERS
+            st.markdown(f'''
+            <div style="border:1px solid {COLORS['border_light']};background:#1a1a2e;padding:0.3rem 0.5rem;border-radius:6px;margin-top:0.5rem;text-align:center;">
+                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['info']};letter-spacing:0.15em;">
+                    ⚡ SIMPLE SEQUENTIAL MODE
+                </div>
+                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.4rem;color:{COLORS['text_muted']};">
+                    {MAX_WORKERS} worker · {FIXED_COOLDOWN_SECONDS}s cooldown
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+
             from src.advisory.advisory_reliability import get_operational_metrics
             ops = get_operational_metrics().get_stats()
             st.markdown(f'''
@@ -160,6 +173,45 @@ def render_sidebar():
                         <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_secondary']};">{ops.get("latency_avg_ms", 0):.0f}ms</div>
                         <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Latency</div>
                     </div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+
+            from src.advisory.provider_controller import get_provider_controller
+            ph = get_provider_controller().get_health()
+            state_color = {
+                "healthy": COLORS["success"],
+                "cooldown": COLORS["warning"],
+                "degraded": "#FF0000",
+            }.get(ph["state"], COLORS["text_muted"])
+            last_req_str = time.strftime("%H:%M:%S", time.localtime(ph["last_request_time"])) if ph["last_request_time"] else "—"
+            last_429_str = time.strftime("%H:%M:%S", time.localtime(ph["last_429_time"])) if ph["last_429_time"] else "—"
+            st.markdown(f'''
+            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.5rem;border-radius:6px;margin-top:0.35rem;">
+                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.5rem;color:{COLORS['text_muted']};margin-bottom:0.35rem;">PROVIDER</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{state_color};">{ph["state"].upper()}</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">State</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};">{ph["requests_per_minute"]}/m</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Req/min</div>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:0.25rem;">
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['success']};">{ph["successful_requests"]}</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Success</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['error'] if ph['failed_requests'] > 0 else COLORS['text_muted']};">{ph["failed_requests"]}</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Failed</div>
+                    </div>
+                </div>
+                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.4rem;color:{COLORS['text_muted']};margin-top:0.25rem;text-align:center;">
+                    Last req: {last_req_str} · Last 429: {last_429_str}
+                    {f'· Cooldown: {ph["cooldown_remaining"]}s' if ph["cooldown_remaining"] > 0 else ''}
                 </div>
             </div>
             ''', unsafe_allow_html=True)
@@ -234,7 +286,9 @@ def export_session_excel(session):
 
 def main():
     """Main entry point for APOLLO Streamlit UI."""
-    
+    from src.advisory.runtime_mode import RUNTIME_MODE, FIXED_COOLDOWN_SECONDS, MAX_RETRIES, MAX_WORKERS
+    print(f"[APOLLO] Mode: {RUNTIME_MODE.upper()} | Workers: {MAX_WORKERS} | Cooldown: {FIXED_COOLDOWN_SECONDS}s | MaxRetries: {MAX_RETRIES}")
+
     render_apollo_header()
     view = render_sidebar()
     

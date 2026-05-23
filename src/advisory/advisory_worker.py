@@ -87,7 +87,8 @@ from .advisory_models import (
 from .advisory_queue import get_advisory_queue
 from .advisory_cache import get_advisory_cache, store_advisory
 from .advisory_metrics import get_metrics
-from .telemetry_bus import get_telemetry_bus
+from .runtime_mode import FIXED_COOLDOWN_SECONDS, MAX_RETRIES, RUNTIME_MODE
+from .provider_controller import get_provider_controller
 
 
 class AdvisoryFailureType(str, Enum):
@@ -149,18 +150,9 @@ def _persist_failure_artifact(parse_result: AdvisoryParseResult):
 
 
 def _log_advisory_debug(parse_result: AdvisoryParseResult):
-    """Log structured advisory debug information via telemetry."""
+    """Log structured advisory debug information."""
     status = "completed" if parse_result.success else "failed"
-    get_telemetry_bus().record_info(
-        f"advisory_generated article_id={parse_result.article_id} "
-        f"stage={parse_result.stage} status={status} "
-        f"model={parse_result.model_used or 'unknown'} "
-        f"failure={safe_enum_value(parse_result.failure_type, 'none')}",
-        component="worker",
-        article_id=str(parse_result.article_id),
-        stage=parse_result.stage,
-        status=status,
-    )
+    print(f"[WORKER] Advisory: {parse_result.article_id} | stage={parse_result.stage} | status={status} | failure={safe_enum_value(parse_result.failure_type, 'none')}")
 
 
 def normalize_suggestion_response(suggestion: Any) -> tuple[Dict[str, Any], Optional[AdvisoryFailureType], str]:
@@ -427,44 +419,27 @@ class AdvisoryWorker:
                 print(f"Warning: LLM assistant not available: {e}")
                 self._llm = None
         return self._llm
-    
-    PROCESSING_TIMEOUT_SECONDS = 120
 
     def process_item(
         self,
         item: QueueItem,
         queue: Optional["AdvisoryQueue"] = None,
-        stop_event: Optional[threading.Event] = None,
     ) -> AdvisoryResult:
         """
         Process a single queue item.
 
         Args:
             item: Queue item to process
-            queue: Queue instance (preferred). If None, fetched from global registry.
+            queue: Queue instance
 
-        This is the main entry point for worker processing.
-        GUARANTEES terminal state transition (COMPLETED or FAILED).
+        Guarantees terminal state transition (COMPLETED or FAILED).
         """
-        worker_stage = getattr(self, '_stage', 'ic')
-        item_stage = getattr(item, 'stage', 'ic')
-
-        print(f"[WORKER ITEM] WorkerStage: {worker_stage} | ItemStage: {item_stage} | Article: {item.article_id}")
-
-        if worker_stage != item_stage:
-            print(f"[DATA-PLANE VIOLATION] Worker stage={worker_stage} != Item stage={item_stage}")
-            raise RuntimeError(f"DATA-PLANE ISOLATION VIOLATION: Worker stage '{worker_stage}' cannot process item with stage '{item_stage}'")
-
-        stage = item_stage
-        print(f"[QUEUE] Stage: {stage} | Article: {item.article_id}")
-
+        stage = getattr(item, 'stage', 'ic')
         if queue is None:
             from .advisory_queue import get_advisory_queue
             queue = get_advisory_queue(self.config, stage=stage)
-        start_time = time.time()
 
-        # Note: item is already in PROCESSING state via acquire_next() in process_all()
-        print(f"[STATE] PROCESSING (acquired): {item.article_id} (stage={stage})")
+        print(f"[WORKER] Processing item: {item.article_id} (stage={stage})")
 
         request = AdvisoryRequest(
             cache_key=item.cache_key,
@@ -476,39 +451,22 @@ class AdvisoryWorker:
         )
 
         try:
-            bus = get_telemetry_bus()
-            bus.record_item_started(stage, item.cache_key)
-
-            advisory = self._generate_with_retry(request, stage, stop_event=stop_event)
+            advisory = self._generate_with_retry(request, stage)
             store_advisory(advisory, stage=stage)
-            if stage.lower() == "qc":
-                print(f"[QC CACHE STORE] Stage: qc | CacheKey: {item.cache_key[:16]}... | Decision: {safe_enum_value(advisory.decision)}")
-            else:
-                print(f"[CACHE STORE] Stage: {stage} | CacheKey: {item.cache_key[:16]}...")
+            print(f"[CACHE] Stored: {item.cache_key[:16]}... — {safe_enum_value(advisory.decision)}")
 
-            elapsed = time.time() - start_time
-            bus.record_latency(stage, elapsed * 1000)
-            bus.record_decision(stage, safe_enum_value(advisory.decision))
-            bus.record_confidence(stage, advisory.confidence)
-            bus.record_acceptance(stage, advisory.decision not in (
-                AdvisoryDecision.EXCLUDE, AdvisoryDecision.SKIP, AdvisoryDecision.UNAVAILABLE
-            ))
             if advisory.error:
                 queue.mark_failed(item, advisory.error)
-                bus.record_item_failed(stage, item.cache_key, advisory.error)
-                print(f"[STATE] PROCESSING -> FAILED: {item.article_id} ({elapsed:.1f}s) Error: {advisory.error[:50]}")
+                print(f"[WORKER] Failed: {item.article_id} — {advisory.error[:80]}")
             else:
                 queue.mark_completed(item)
-                bus.record_item_completed(stage, item.cache_key, safe_enum_value(advisory.decision))
-                print(f"[STATE] PROCESSING -> COMPLETED: {item.article_id} ({elapsed:.1f}s) Decision: {safe_enum_value(advisory.decision)}")
+                print(f"[WORKER] Completed: {item.article_id} — {safe_enum_value(advisory.decision)}")
 
             return advisory
 
         except Exception as e:
-            elapsed = time.time() - start_time
             error_msg = f"Worker exception: {str(e)[:100]}"
-            print(f"[STATE] PROCESSING -> FAILED: {item.article_id} ({elapsed:.1f}s) Exception: {error_msg}")
-
+            print(f"[ERROR] {item.article_id}: {error_msg}")
             failed_advisory = AdvisoryResult(
                 cache_key=request.cache_key,
                 protocol_version=request.protocol_version,
@@ -520,102 +478,72 @@ class AdvisoryWorker:
             )
             store_advisory(failed_advisory, stage=stage)
             queue.mark_failed(item, error_msg)
-
             return failed_advisory
-
-        finally:
-            elapsed = time.time() - start_time
-            if elapsed > self.PROCESSING_TIMEOUT_SECONDS:
-                print(f"[WATCHDOG] {item.article_id} processing exceeded {elapsed:.1f}s timeout")
     
     def _generate_with_retry(
         self,
         request: AdvisoryRequest,
         stage: str = "ic",
-        stop_event: Optional[threading.Event] = None,
     ) -> AdvisoryResult:
-        """Generate advisory via the LLM Gateway.
+        """Generate advisory with simple sequential retry.
 
-        Routes through the centralized governance layer which handles
-        concurrency, rate limiting, circuit breaking, deduplication,
-        and deterministic retry.
-
-        Falls back to legacy retry if gateway is unavailable.
+        MAX_RETRIES = 2. Fixed cooldown between retries.
+        No exponential backoff. No jitter. No gateway layer.
+        On exhaustion: return UNAVAILABLE with requires_validation=True.
         """
-        from .llm_gateway import get_llm_gateway, compute_article_hash
-
-        def provider_call():
-            """Inner callable: the actual LLM invocation (what gets retried)."""
-            return self._generate_advisory(request, stage)
-
-        try:
-            self._update_heartbeat("provider_attempt")
-            gateway = get_llm_gateway(self.config)
-            article_hash = compute_article_hash(
-                request.title, request.abstract, request.protocol_version
-            )
-            fp_key = None
-            try:
-                from .llm_gateway import compute_request_fingerprint
-                stage_key = stage or getattr(request, 'stage', 'ic')
-                fp_key = compute_request_fingerprint(
-                    request.protocol_version, article_hash, stage_key
-                )
-            except Exception:
-                pass
-
-            result = gateway.generate_advisory(
-                request=request,
-                execute_fn=provider_call,
-                provider="default",
-                fingerprint=fp_key,
-                cancel_event=stop_event,
-            )
-            self._update_heartbeat("success")
-            self._update_heartbeat("progress")
-            return result
-
-        except Exception as e:
-            print(f"[GATEWAY] Error: {e}, falling back to legacy retry")
-            return self._legacy_generate_with_retry(request, stage, stop_event=stop_event)
-
-    def _legacy_generate_with_retry(
-        self,
-        request: AdvisoryRequest,
-        stage: str = "ic",
-        stop_event: Optional[threading.Event] = None,
-    ) -> AdvisoryResult:
-        """Legacy retry logic (fallback if gateway is unavailable)."""
-        bus = get_telemetry_bus()
+        pc = get_provider_controller()
         last_error = None
-        for attempt in range(self.config.max_retries + 1):
-            if stop_event and stop_event.is_set():
-                print(f"[LEGACY RETRY] Stop event set, aborting retry for {request.cache_key[:16]}...")
-                break
+
+        for attempt in range(MAX_RETRIES + 1):
+            pc.wait_if_needed()
+            if not pc.check_availability():
+                print(f"[LLM] Provider unavailable (state={pc.get_health()['state']}) — UNAVAILABLE")
+                return AdvisoryResult(
+                    cache_key=request.cache_key,
+                    protocol_version=request.protocol_version,
+                    decision=AdvisoryDecision.UNAVAILABLE,
+                    confidence=0.0,
+                    justification=f"Provider unavailable: {pc.get_health()['state']}",
+                    error=f"provider_unavailable: {pc.get_health()['state']}",
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    hallucination_risk_score=1.0,
+                    grounding_strength=0.0,
+                    unsupported_claims_detected=True,
+                )
+
+            pc.record_request()
             try:
                 advisory = self._generate_advisory(request, stage)
-                if advisory.error and "429" in advisory.error:
-                    bus.record_429("groq")
-                    if attempt < self.config.max_retries:
-                        bus.record_retry(stage)
-                        backoff = self._calculate_backoff(attempt)
-                        print(f"Rate limited, retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.config.max_retries + 1})")
-                        self._interruptible_sleep(backoff, stop_event)
+                if advisory.error and "429" in (advisory.error or ""):
+                    pc.record_failure(is_429=True)
+                    print(f"[LLM] Rate limited (429) — retry {attempt + 1}/{MAX_RETRIES + 1}")
+                    if attempt < MAX_RETRIES:
+                        time.sleep(FIXED_COOLDOWN_SECONDS)
                         continue
-                return advisory
+                else:
+                    pc.record_success()
+                    return advisory
             except Exception as e:
                 last_error = str(e)
-                if attempt < self.config.max_retries:
-                    bus.record_retry(stage)
-                    backoff = self._calculate_backoff(attempt)
-                    print(f"Error: {last_error}, retrying in {backoff:.1f}s")
-                    self._interruptible_sleep(backoff, stop_event)
+                pc.record_failure(is_429=False)
+                print(f"[LLM] Error: {last_error[:80]} — retry {attempt + 1}/{MAX_RETRIES + 1}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(FIXED_COOLDOWN_SECONDS)
                 else:
                     break
-        return AdvisoryResult.create_failed(
-            reason=last_error or "Max retries exceeded",
+
+        print(f"[LLM] Retries exhausted for {request.cache_key[:16]}...")
+        return AdvisoryResult(
             cache_key=request.cache_key,
-            protocol_version=request.protocol_version
+            protocol_version=request.protocol_version,
+            decision=AdvisoryDecision.UNAVAILABLE,
+            confidence=0.0,
+            justification=f"Provider failure after {MAX_RETRIES + 1} attempts: {last_error or 'max retries'}",
+            error=f"provider_failure: {last_error or 'max retries exceeded'}",
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            hallucination_risk_score=1.0,
+            grounding_strength=0.0,
+            unsupported_claims_detected=True,
         )
     
     def _generate_advisory(self, request: AdvisoryRequest, stage: str = "ic") -> AdvisoryResult:
@@ -1013,30 +941,7 @@ class AdvisoryWorker:
                 unsupported_claims_detected=True
             )
     
-    @staticmethod
-    def _interruptible_sleep(duration: float, cancel_event: Optional[threading.Event] = None):
-        """Sleep for `duration` seconds, waking early if cancel_event is set."""
-        if cancel_event is None:
-            time.sleep(duration)
-            return
-        deadline = time.time() + duration
-        while time.time() < deadline:
-            if cancel_event.is_set():
-                return
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                return
-            time.sleep(min(remaining, 0.1))
 
-    def _calculate_backoff(self, attempt: int) -> float:
-        """Calculate exponential backoff with jitter."""
-        base_backoff = self.config.backoff_base ** attempt
-        capped_backoff = min(base_backoff, self.config.backoff_max)
-        
-        jitter_range = capped_backoff * self.config.jitter
-        jitter = random.uniform(-jitter_range, jitter_range)
-        
-        return max(0.1, capped_backoff + jitter)
     
     def _load_protocol_criteria(self) -> Dict[str, str]:
         """Load IC protocol criteria via protocol query service."""
@@ -1059,91 +964,47 @@ class AdvisoryWorker:
     
     def process_all(self, max_items: Optional[int] = None, stage: str = "ic", stop_event: Optional[threading.Event] = None) -> Dict:
         """
-        Process all pending queue items.
+        Sequential single-worker advisory generation.
 
-        Args:
-            max_items: Maximum items to process (None for all)
-            stage: Advisory stage for queue access
-            stop_event: Optional event to signal early termination
-
-        Returns:
-            Processing summary
+        One item at a time. Fixed cooldown between items.
+        No concurrency, no scheduler coordination, no telemetry bus.
         """
-        bus = get_telemetry_bus()
-        print(f"[WORKER PROCESS_ALL] Stage: {stage}")
         self._stage = stage
-        metrics = get_metrics()
-        
-        try:
-            from src.advisory.advisory_scheduler import get_advisory_scheduler, should_process_stage
-            
-            scheduler = get_advisory_scheduler()
-            scheduler_status = scheduler.get_status()
-            print(f"[WORKER PRIORITY] Active stage: {scheduler_status['active_stage']} | Worker states: {scheduler_status['worker_states']}")
-            
-            if not should_process_stage(stage):
-                print(f"[WORKER PRIORITY] Stage '{stage}' paused - active stage is '{scheduler_status['active_stage']}'")
-                return {
-                    "processed": 0,
-                    "succeeded": 0,
-                    "failed": 0,
-                    "remaining": 0,
-                    "status": "PAUSED",
-                    "active_stage": scheduler_status['active_stage']
-                }
-        except ImportError:
-            pass
-        
         queue = get_advisory_queue(self.config, stage=stage)
-        
         processed = 0
         succeeded = 0
         failed = 0
-        
+
         while True:
             if stop_event and stop_event.is_set():
-                print(f"[WORKER STOP] Stop event signaled for stage: {stage}")
-                metrics.worker_stop_count += 1
+                print(f"[WORKER] Stop event signaled")
                 break
 
             item = queue.acquire_next()
             if item is None:
-                metrics.worker_idle_cycles += 1
                 break
-            
+
             if max_items is not None and processed >= max_items:
                 break
-            
-            try:
-                from src.advisory.advisory_scheduler import should_process_stage, get_advisory_scheduler
-                if not should_process_stage(stage):
-                    print(f"[WORKER PRIORITY CHECK] Stage '{stage}' no longer active - pausing")
-                    break
-            except ImportError:
-                pass
-            
-            print(f"Processing: {item.article_id} ({item.cache_key[:8]}...)")
-            
-            result = self.process_item(item, queue=queue, stop_event=stop_event)
+
+            print(f"[WORKER] Processing: {item.article_id} ({item.cache_key[:8]}...)")
+            result = self.process_item(item, queue=queue)
             processed += 1
-            
+
             if result.error:
                 failed += 1
-                metrics.worker_failure_count += 1
-                print(f"  Failed: {result.error}")
+                print(f"[WORKER] Failed: {item.article_id} — {result.error[:80]}")
             else:
                 succeeded += 1
-                metrics.worker_generation_count += 1
-                from src.advisory.advisory_reliability import get_operational_metrics, get_threshold_calibrator
-                ops = get_operational_metrics()
-                ops.record_processed(latency_ms=getattr(result, 'generation_duration_ms', 0.0) or 0.0)
-                ops.record_queue_depth(queue.get_stats().get("pending", 0))
-                print(f"  Success: {safe_enum_value(result.decision)} ({result.confidence:.2f})")
-            
+                from src.advisory.advisory_reliability import get_operational_metrics
+                get_operational_metrics().record_processed(
+                    latency_ms=getattr(result, 'generation_duration_ms', 0.0) or 0.0
+                )
+                print(f"[WORKER] Completed: {item.article_id} — {safe_enum_value(result.decision)} ({result.confidence:.2f})")
+
             if processed < (max_items or float('inf')):
-                sleep_time = self.config.sleep_seconds
-                self._interruptible_sleep(sleep_time, stop_event)
-        
+                time.sleep(FIXED_COOLDOWN_SECONDS)
+
         return {
             "processed": processed,
             "succeeded": succeeded,

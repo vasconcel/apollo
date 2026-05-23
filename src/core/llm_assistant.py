@@ -306,28 +306,19 @@ class LLMAssistant:
             self._init_client()
 
     def _init_client(self) -> None:
-        key = os.getenv("GROQ_API_KEY")
-        print(f"!!! LLM DIAGNOSTIC !!! Key found: {bool(key)}")
-        if not key:
-            print("!!! LLM DIAGNOSTIC !!! Warning: GROQ_API_KEY is missing from environment.")
-        
         if os.environ.get("GROQ_API_KEY"):
             try:
                 from groq import Groq
-                self._client = Groq(api_key=self._api_key)
+                self._client = Groq(api_key=self._api_key, max_retries=0)
                 self._model = "llama-3.3-70b-versatile"
-                print("!!! LLM DIAGNOSTIC !!! Groq client initialized successfully")
             except ImportError:
-                print("!!! LLM DIAGNOSTIC !!! ERROR: groq library not installed")
                 pass
         else:
             try:
                 import openai
-                self._client = openai.OpenAI(api_key=self._api_key)
+                self._client = openai.OpenAI(api_key=self._api_key, max_retries=0)
                 self._model = "gpt-4o-mini"
-                print("!!! LLM DIAGNOSTIC !!! OpenAI client initialized successfully")
             except ImportError:
-                print("!!! LLM DIAGNOSTIC !!! ERROR: openai library not installed")
                 pass
 
     def is_available(self) -> bool:

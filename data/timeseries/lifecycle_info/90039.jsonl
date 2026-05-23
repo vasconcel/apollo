@@ -1,0 +1,4 @@
+{"ts": 90039.4406091, "v": 1.0, "tags": {"message": "pipeline_create stage=ec n_articles=2451 auto_start=True", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90039.460173, "v": 1.0, "tags": {"message": "orchestrator_init stage=ec", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90039.5015669, "v": 1.0, "tags": {"message": "queue_init stage=ec n=2451", "component": "orchestrator", "stage": "ec", "n_articles": "2451"}}
+{"ts": 90039.7931458, "v": 1.0, "tags": {"message": "worker_start stage=ec", "component": "orchestrator", "stage": "ec"}}

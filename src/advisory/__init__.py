@@ -200,6 +200,13 @@ from .transient_failures import (
     classify_failure_detailed,
 )
 
+from .provider_controller import (
+    ProviderState,
+    ProviderController,
+    get_provider_controller,
+    reset_provider_controller,
+)
+
 from .replay_system import (
     ReplaySnapshot,
     ReplayStore,

@@ -244,7 +244,8 @@ def render_screening_workspace(session):
 
     now = time.time()
     last_refresh = st.session_state.get("_last_refresh_ic", 0.0)
-    if now - last_refresh >= 3.0:
+    from src.advisory.runtime_mode import UI_POLL_INTERVAL_SECONDS
+    if now - last_refresh >= UI_POLL_INTERVAL_SECONDS:
         should_refresh = False
         try:
             from src.advisory import is_advisory_generation_active
@@ -645,16 +646,8 @@ def render_ai_advisory_panel(article, current_idx: int):
 
     with st.container(border=True):
         with st.expander("🤖 AI ADVISORY", expanded=False):
-            print(f"[IC ADVISORY RENDER] Title: {title[:30]}... | Status: {status} | Decision: {safe_decision(advisory.decision) if advisory else 'N/A'} | Available: {advisory.is_available() if advisory and hasattr(advisory, 'is_available') else False}")
 
-            is_available_status = status in (
-                AdvisoryStatus.COMPLETED,
-                AdvisoryStatus.PREFILTERED,
-                AdvisoryStatus.QUARANTINED,
-                AdvisoryStatus.FALLBACK,
-            )
-
-            if is_available_status and (advisory and advisory.is_available()):
+            if advisory and advisory.is_available():
                 decision_val = advisory.decision if advisory else None
                 is_uncertain = decision_val in (
                     AdvisoryDecision.UNCERTAIN,
@@ -729,24 +722,18 @@ def render_ai_advisory_panel(article, current_idx: int):
             else:
                 if status == AdvisoryStatus.PENDING:
                     st.caption("⏳ Advisory pending — manual screening operational")
-                    print(f"[IC ADVISORY STATE] PENDING | Article: {title[:30]}...")
                 elif status == AdvisoryStatus.GENERATING:
                     st.caption("🔄 Generating advisory...")
-                    print(f"[IC ADVISORY STATE] GENERATING | Article: {title[:30]}...")
                 elif status == AdvisoryStatus.PROCESSING:
                     st.caption("🔄 Advisory generating — please wait...")
-                    print(f"[IC ADVISORY STATE] PROCESSING | Article: {title[:30]}...")
                 elif status == AdvisoryStatus.FAILED:
                     error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
                     st.caption(f"⚠️ Advisory failed: {error_msg}")
-                    print(f"[IC ADVISORY STATE] FAILED | Article: {title[:30]}... | Error: {error_msg}")
                 elif status == AdvisoryStatus.UNAVAILABLE:
                     st.caption("○ Advisory unavailable — manual screening fully operational")
-                    print(f"[IC ADVISORY STATE] UNAVAILABLE | Article: {title[:30]}...")
                 else:
                     status_val = safe_status(status, "UNKNOWN")
                     st.caption(f"○ Advisory state: {status_val} — manual screening operational")
-                    print(f"[IC ADVISORY STATE] UNKNOWN | Article: {title[:30]}... | Status: {status}")
 
 
 
@@ -771,14 +758,8 @@ def render_suggestion_details(suggestion: Dict):
     
     DEFENSIVE VALIDATION: Added type checking to handle malformed advisory structures.
     """
-    if not isinstance(suggestion, dict):
-        print(f"[ADVISORY RENDER ERROR] Invalid suggestion type: {type(suggestion).__name__}")
+    if not isinstance(suggestion, dict) or not suggestion:
         st.warning("Advisory data unavailable - manual review required")
-        return
-    
-    if not suggestion:
-        print(f"[ADVISORY RENDER ERROR] Empty suggestion dict")
-        st.warning("Advisory empty - manual review required")
         return
     
     decision = suggestion.get("decision", "").upper()
@@ -830,7 +811,6 @@ def render_suggestion_details(suggestion: Dict):
     criterion_evals = suggestion.get("criterion_evaluations", {})
     
     if not isinstance(criterion_evals, dict):
-        print(f"[ADVISORY RENDER ERROR] Invalid criterion_evaluations type: {type(criterion_evals).__name__}")
         criterion_evals = {}
     
     triggered_list = suggestion.get("triggered_criteria", [])

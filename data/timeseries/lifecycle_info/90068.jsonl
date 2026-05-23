@@ -1,0 +1,9 @@
+{"ts": 90068.0192198, "v": 1.0, "tags": {"message": "pipeline_status stage=ic", "component": "orchestrator", "stage": "ic"}}
+{"ts": 90068.0723808, "v": 1.0, "tags": {"message": "advisory_generated article_id=4 stage=ec status=completed model=llama-3.3-70b-versatile failure=none", "component": "worker", "article_id": "4", "stage": "ec", "status": "completed"}}
+{"ts": 90068.4020578, "v": 1.0, "tags": {"message": "worker_stop stage=ec", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90068.4353783, "v": 1.0, "tags": {"message": "worker_stopped stage=ec", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90068.4686977, "v": 1.0, "tags": {"message": "pipeline_create stage=ec n_articles=10 auto_start=True", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90068.4974027, "v": 1.0, "tags": {"message": "orchestrator_init stage=ec", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90068.5148676, "v": 1.0, "tags": {"message": "queue_init stage=ec n=10", "component": "orchestrator", "stage": "ec", "n_articles": "10"}}
+{"ts": 90068.6021857, "v": 1.0, "tags": {"message": "worker_start stage=ec", "component": "orchestrator", "stage": "ec"}}
+{"ts": 90068.6308012, "v": 1.0, "tags": {"message": "calibration_stage_initialized stage=ec", "component": "calibration", "stage": "ec"}}

@@ -110,7 +110,8 @@ def _auto_refresh_if_worker_active(stage: str = "ic"):
     Must NOT wrap st.rerun() in try/except Exception — RerunException is how
     Streamlit triggers reruns and catching it silently freezes the dashboard.
     """
-    REFRESH_INTERVAL = 3.0
+    from src.advisory.runtime_mode import UI_POLL_INTERVAL_SECONDS
+    REFRESH_INTERVAL = UI_POLL_INTERVAL_SECONDS
 
     now = time.time()
     last_refresh = st.session_state.get(f"_last_refresh_{stage}", 0.0)
@@ -195,7 +196,7 @@ def render_ec_screening():
     if not getattr(st.session_state, "_protocol_lock_attempted_ec", False):
         was_locked = ensure_protocol_locked(protocol)
         if was_locked:
-            print("[PROTOCOL] Auto-locked DRAFT protocol for screening")
+            
         st.session_state._protocol_lock_attempted_ec = True
 
     is_valid, error_msg = validate_protocol_for_screening(protocol)
@@ -231,13 +232,10 @@ def render_ec_screening():
         from src.advisory.advisory_queue import reset_queue_for_stage
         from src.advisory.advisory_orchestrator import reset_orchestrator_for_stage
 
-        print(f"[EC SCREEN] Resetting EC pipeline state")
         reset_queue_for_stage("ec")
         reset_orchestrator_for_stage("ec")
 
         pv = get_protocol_value(protocol, "protocol_version", "1.0")
-
-        print(f"[EC SCREEN] Initializing advisory pipeline for EC stage")
 
         result = initialize_advisory_pipeline(
             articles=session.articles,
@@ -812,39 +810,13 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
         title = article.get("title", "") if hasattr(article, 'get') else ""
         abstract = article.get("abstract", "") if hasattr(article, 'get') else ""
 
-    print(f"[UI ADVISORY LOOKUP] Stage: ec | Title: {title[:50]} | Abstract: {abstract[:50] if abstract else 'empty'}...")
-    print(f"[UI ADVISORY LOOKUP] Article ID: {getattr(article, 'article_id', 'N/A')}")
-
-    cache = get_advisory_cache()
-    ui_cache_key = cache.compute_cache_key(title, abstract, protocol_version)
-    print(f"[UI ADVISORY LOOKUP] UICacheKey: {ui_cache_key} | Protocol: {protocol_version}")
-
-    # Check what's in the queue for this article
-    queue = get_advisory_queue(stage='ec')
-    matching_items = [item for item in queue.state.items if item.article_id == getattr(article, 'article_id', None)]
-    if matching_items:
-        queue_key = matching_items[0].cache_key
-        print(f"[UI ADVISORY LOOKUP] QueueCacheKey: {queue_key} | Match: {ui_cache_key == queue_key}")
-    else:
-        print(f"[UI ADVISORY LOOKUP] No matching queue item for article")
-
     advisory = get_ec_advisory(title, abstract, protocol_version)
     status = get_ec_advisory_status(title, abstract, protocol_version)
-
-    print(f"[UI ADVISORY LOAD] Status: {status} | Advisory: {advisory}")
     
     with st.container(border=True):
         with st.expander("🤖 AI ADVISORY", expanded=False):
-            print(f"[UI ADVISORY CHECK] Status: {status} | is_available: {advisory.is_available() if advisory and hasattr(advisory, 'is_available') else False}")
 
-            is_available_status = status in (
-                AdvisoryStatus.COMPLETED,
-                AdvisoryStatus.PREFILTERED,
-                AdvisoryStatus.QUARANTINED,
-                AdvisoryStatus.FALLBACK,
-            )
-
-            if is_available_status and (advisory.is_available() if advisory else False):
+            if advisory and advisory.is_available():
                 decision_val = advisory.decision
                 is_uncertain = decision_val in (
                     AdvisoryDecision.UNCERTAIN,
@@ -1073,27 +1045,20 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                 }
                 render_suggestion_details(advisory_dict)
             else:
-                print(f"[UI ADVISORY FALLBACK] Status: {status} | Decision: {advisory.decision if hasattr(advisory, 'decision') else 'N/A'}")
                 if status == AdvisoryStatus.PENDING:
                     st.caption("⏳ Advisory pending — manual screening operational")
-                    print(f"[EC ADVISORY STATE] PENDING | Status: {status}")
                 elif status == AdvisoryStatus.GENERATING:
                     st.caption("🔄 Generating advisory...")
-                    print(f"[EC ADVISORY STATE] GENERATING | Status: {status}")
                 elif status == AdvisoryStatus.PROCESSING:
                     st.caption("🔄 Advisory generating — please wait...")
-                    print(f"[EC ADVISORY STATE] PROCESSING | Status: {status}")
                 elif status == AdvisoryStatus.FAILED:
                     error_msg = advisory.error if advisory and hasattr(advisory, 'error') and advisory.error else "Unknown error"
                     st.caption(f"⚠️ Advisory failed: {error_msg}")
-                    print(f"[EC ADVISORY STATE] FAILED | Error: {error_msg}")
                 elif status == AdvisoryStatus.UNAVAILABLE:
                     st.caption("○ Advisory unavailable — manual screening fully operational")
-                    print(f"[EC ADVISORY STATE] UNAVAILABLE | Status: {status}")
                 else:
                     status_val = safe_status(status, "UNKNOWN")
                     st.caption(f"○ Advisory state: {status_val} — manual screening operational")
-                    print(f"[EC ADVISORY STATE] UNKNOWN | Status: {status}")
 
 
 
@@ -1163,14 +1128,8 @@ def render_suggestion_details(suggestion: Dict):
     
     DEFENSIVE VALIDATION: Added type checking to handle malformed advisory structures.
     """
-    if not isinstance(suggestion, dict):
-        print(f"[ADVISORY RENDER ERROR] Invalid suggestion type: {type(suggestion).__name__}")
+    if not isinstance(suggestion, dict) or not suggestion:
         st.warning("Advisory data unavailable - manual review required")
-        return
-    
-    if not suggestion:
-        print(f"[ADVISORY RENDER ERROR] Empty suggestion dict")
-        st.warning("Advisory empty - manual review required")
         return
     
     decision = suggestion.get("decision", "").upper()
@@ -1221,7 +1180,7 @@ def render_suggestion_details(suggestion: Dict):
     criterion_evals = suggestion.get("criterion_evaluations", {})
     if criterion_evals:
         if not isinstance(criterion_evals, dict):
-            print(f"[ADVISORY RENDER ERROR] Invalid criterion_evaluations type in EC: {type(criterion_evals).__name__}")
+            
             st.caption("Criterion evaluation data unavailable")
         else:
             ec_criteria = get_protocol_ec_criteria()

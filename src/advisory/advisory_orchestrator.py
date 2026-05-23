@@ -19,12 +19,6 @@ from .advisory_queue import get_advisory_queue, build_queue
 from .advisory_worker import AdvisoryWorker
 from .advisory_cache import get_advisory_cache, get_cache_stats
 from .prefilter import get_prefilter
-from .telemetry_bus import get_telemetry_bus
-
-
-_bus = get_telemetry_bus()
-
-
 class AdvisoryWorkerOrchestrator:
     """
     Manages background advisory worker lifecycle.
@@ -44,8 +38,6 @@ class AdvisoryWorkerOrchestrator:
         self._worker_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
-        _bus.record_info(f"orchestrator_init stage={stage}", component="orchestrator", stage=stage)
-        print(f"[ORCHESTRATOR INIT] Stage: {stage}")
     
     def set_protocol(self, protocol) -> None:
         """Set the protocol object for criteria retrieval."""
@@ -63,26 +55,15 @@ class AdvisoryWorkerOrchestrator:
         # Reset prefilter dedup state per pipeline init (session-scoped isolation)
         get_prefilter(stage=stage).reset()
 
-        _bus.record_info(f"queue_init stage={stage} n={len(articles)}", component="orchestrator", stage=stage, n_articles=str(len(articles)))
-        print(f"[ORCHESTRATOR] Getting queue for stage: {stage}")
         queue = get_advisory_queue(self.config, stage=stage)
-        print(f"[ORCHESTRATOR] Queue retrieved: {id(queue)}")
-
-        # CRITICAL FIX: Always rebuild queue to ensure cache keys match current articles
-        # The previous early return caused stale queue items to persist while UI shows different articles
-        print(f"[ORCHESTRATOR] Clearing existing queue for stage: {stage}")
         queue.clear()
-
-        print(f"[ORCHESTRATOR] Building queue for stage: {stage}")
-
         state = queue.build_from_articles(
             articles,
             protocol_version=protocol_version,
             stage=stage,
             skip_existing=True
         )
-
-        print(f"[ORCHESTRATOR] Queue built with {state.total} items for stage {stage}")
+        print(f"[QUEUE] Built {state.total} items for stage {stage}")
         return queue.get_stats()
     
     def start_worker(self, max_items: Optional[int] = None) -> None:
@@ -91,33 +72,21 @@ class AdvisoryWorkerOrchestrator:
 
         Runs independently from Streamlit reruns.
         """
-        print(f"[LIFECYCLE] start_worker called for stage: {self._stage}")
-        
         with self._start_lock:
-            # Guard: thread liveness is the single source of truth.
-            # Do NOT check _is_active() here — a thread sleeping in backoff
-            # is still ALIVE and must not be duplicated.
             if self._worker_thread and self._worker_thread.is_alive():
-                print(f"[LIFECYCLE] Worker thread still alive: {self._worker_thread.name}")
-                print(f"[LIFECYCLE] Prevented duplicate worker spawn for: {self._stage}")
+                print(f"[WORKER] Duplicate spawn blocked for {self._stage}")
                 return
 
-            # Reset stop event for fresh start
             self._stop_event.clear()
-
-            print(f"[ORCHESTRATOR] Starting worker for stage: {self._stage}")
-            _bus.record_info(f"worker_start stage={self._stage}", component="orchestrator", stage=self._stage)
             self._worker = AdvisoryWorker(self.config, protocol=self._protocol)
 
             def run_worker_loop():
                 try:
                     self._worker.process_all(max_items, stage=self._stage, stop_event=self._stop_event)
                 except Exception as e:
-                    _bus.record_info(f"worker_error stage={self._stage} reason={e!s}", component="orchestrator", stage=self._stage)
-                    print(f"Advisory worker error: {e}")
+                    print(f"[WORKER] Error: {e}")
                 finally:
-                    _bus.record_info(f"worker_stop stage={self._stage}", component="orchestrator", stage=self._stage)
-                    print(f"[WORKER STOP] Stage: {self._stage}")
+                    print(f"[WORKER] Stopped for {self._stage}")
 
             self._worker_thread = threading.Thread(
                 target=run_worker_loop,
@@ -125,7 +94,6 @@ class AdvisoryWorkerOrchestrator:
                 name=f"advisory-worker-{self._stage}"
             )
             self._worker_thread.start()
-            print(f"[WORKER START] Stage: {self._stage} | Thread: {self._worker_thread.name}")
 
     def _is_active(self) -> bool:
         """Check if worker should be considered active."""
@@ -136,13 +104,9 @@ class AdvisoryWorkerOrchestrator:
         self._stop_event.set()
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5.0)
-        _bus.record_info(f"worker_stopped stage={self._stage}", component="orchestrator", stage=self._stage)
-        print(f"[ORCHESTRATOR] Worker stopped for stage: {self._stage}")
     
     def get_status(self, stage: str = "ic") -> Dict:
         """Get worker status for specific stage."""
-        _bus.record_info(f"status_check stage={stage}", component="orchestrator", stage=stage)
-        print(f"[ORCHESTRATOR STATUS] Stage: {stage}")
         queue_stats = get_advisory_queue(self.config, stage=stage).get_stats()
         cache_stats = get_cache_stats()
         thread_alive = self._worker_thread.is_alive() if self._worker_thread else False
@@ -187,28 +151,14 @@ def lookup_orchestrator(stage: str = "ic") -> Optional[AdvisoryWorkerOrchestrato
     if stage not in ("ec", "ic", "qc"):
         raise ValueError(f"Invalid stage: {stage}. Must be 'ec', 'ic', or 'qc'.")
 
-    print(f"[LOOKUP ORCHESTRATOR] Stage: {stage}")
-
     global _global_orchestrator_ec, _global_orchestrator_ic, _global_orchestrator_qc
 
     stage_lower = stage.lower()
     if stage_lower == "ec":
-        if _global_orchestrator_ec is None:
-            print(f"[LOOKUP ORCHESTRATOR] Stage: ec | MISSING")
-            return None
-        print(f"[LOOKUP ORCHESTRATOR] Stage: ec | FOUND")
         return _global_orchestrator_ec
     elif stage_lower == "ic":
-        if _global_orchestrator_ic is None:
-            print(f"[LOOKUP ORCHESTRATOR] Stage: ic | MISSING")
-            return None
-        print(f"[LOOKUP ORCHESTRATOR] Stage: ic | FOUND")
         return _global_orchestrator_ic
     else:
-        if _global_orchestrator_qc is None:
-            print(f"[LOOKUP ORCHESTRATOR] Stage: qc | MISSING")
-            return None
-        print(f"[LOOKUP ORCHESTRATOR] Stage: qc | FOUND")
         return _global_orchestrator_qc
 
 
@@ -219,24 +169,15 @@ def get_orchestrator(config: Optional[AdvisoryConfig] = None, stage: str = "ic")
     stage_lower = stage.lower()
     if stage_lower == "ec":
         if _global_orchestrator_ec is None:
-            print(f"[ORCHESTRATOR CREATE] Stage: ec")
             _global_orchestrator_ec = AdvisoryWorkerOrchestrator(config, stage="ec")
-        else:
-            print(f"[ORCHESTRATOR REUSE] Stage: ec")
         return _global_orchestrator_ec
     elif stage_lower == "ic":
         if _global_orchestrator_ic is None:
-            print(f"[ORCHESTRATOR CREATE] Stage: ic")
             _global_orchestrator_ic = AdvisoryWorkerOrchestrator(config, stage="ic")
-        else:
-            print(f"[ORCHESTRATOR REUSE] Stage: ic")
         return _global_orchestrator_ic
     else:
         if _global_orchestrator_qc is None:
-            print(f"[ORCHESTRATOR CREATE] Stage: qc")
             _global_orchestrator_qc = AdvisoryWorkerOrchestrator(config, stage="qc")
-        else:
-            print(f"[ORCHESTRATOR REUSE] Stage: qc")
         return _global_orchestrator_qc
 
 
@@ -248,10 +189,9 @@ def _can_reset_stage(stage: str) -> bool:
       - Worker thread is still alive
     """
     orch = lookup_orchestrator(stage)
-    if orch is not None:
-        if orch._worker_thread is not None and orch._worker_thread.is_alive():
-            print(f"[RESET GUARD] Stage: {stage} | Worker thread still alive — reset blocked")
-            return False
+    if orch is not None and orch._worker_thread is not None and orch._worker_thread.is_alive():
+        print(f"[RESET GUARD] Worker thread still alive for {stage} — reset blocked")
+        return False
     return True
 
 
@@ -278,15 +218,12 @@ def reset_orchestrator_for_stage(stage: str = "ic", force: bool = False):
     if stage_lower == "ec":
         old = _global_orchestrator_ec
         _global_orchestrator_ec = None
-        print(f"[ORCHESTRATOR RESET] Stage: ec")
     elif stage_lower == "ic":
         old = _global_orchestrator_ic
         _global_orchestrator_ic = None
-        print(f"[ORCHESTRATOR RESET] Stage: ic")
     else:
         old = _global_orchestrator_qc
         _global_orchestrator_qc = None
-        print(f"[ORCHESTRATOR RESET] Stage: qc")
     if old is not None:
         old.stop_worker()
 
@@ -309,19 +246,13 @@ def initialize_advisory_pipeline(
     2. Start background worker (if auto_start=True)
     3. Return status for UI display
     """
-    _bus.record_info(f"pipeline_create stage={stage} n_articles={len(articles)} auto_start={auto_start}", component="orchestrator", stage=stage)
-    print(f"[PIPELINE CREATE] Stage: {stage}")
     orchestrator = get_orchestrator(stage=stage)
 
     try:
-        from src.advisory.advisory_scheduler import set_active_stage, get_advisory_scheduler
+        from src.advisory.advisory_scheduler import set_active_stage
         set_active_stage(stage)
-        scheduler_status = get_advisory_scheduler().get_status()
-        print(f"[PIPELINE] Scheduler updated: active={scheduler_status['active_stage']}")
     except ImportError:
         pass
-
-    print(f"[PIPELINE] Initializing for stage: {stage}")
 
     stats = orchestrator.initialize_queue(articles, protocol_version, stage=stage, protocol=protocol)
 
@@ -342,11 +273,8 @@ def get_advisory_pipeline_status(stage: str = "ic") -> Dict:
     Get current pipeline status for specific stage.
     READ-ONLY - uses lookup to never create runtime.
     """
-    _bus.record_info(f"pipeline_status stage={stage}", component="orchestrator", stage=stage)
-    print(f"[PIPELINE STATUS] Stage: {stage}")
     orchestrator = lookup_orchestrator(stage=stage)
     if orchestrator is None:
-        print(f"[PIPELINE STATUS] Stage: {stage} | NOT INITIALIZED")
         return {
             "stage": stage,
             "initialized": False,
@@ -365,8 +293,7 @@ def start_background_generation(stage: str = "ic", max_items: Optional[int] = No
     Start background advisory generation for specific stage.
     MUTATING - creates runtime if absent (allowed - explicit initialization path).
     """
-    _bus.record_info(f"background_start stage={stage}", component="orchestrator", stage=stage)
-    print(f"[BACKGROUND START] Stage: {stage}")
+    
     orchestrator = get_orchestrator(stage=stage)
     orchestrator.start_worker(max_items)
 
@@ -378,6 +305,5 @@ def is_advisory_generation_active(stage: str = "ic") -> bool:
     """
     orchestrator = lookup_orchestrator(stage=stage)
     if orchestrator is None:
-        print(f"[IS ACTIVE CHECK] Stage: {stage} | NOT INITIALIZED")
         return False
     return orchestrator.is_generating()

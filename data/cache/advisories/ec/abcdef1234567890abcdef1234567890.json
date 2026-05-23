@@ -53,5 +53,6 @@
   "stage_validation": "",
   "prefilter_applied": false,
   "prefilter_reason": "",
-  "model_used": ""
+  "model_used": "",
+  "screening_evidence": null
 }

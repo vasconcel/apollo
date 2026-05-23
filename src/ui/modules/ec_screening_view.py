@@ -898,6 +898,41 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                             for crit_id, evidence in advisory.criterion_grounding.items():
                                 st.markdown(f"- **{crit_id}:** {evidence[:200]}...")
 
+                if hasattr(advisory, 'screening_evidence') and advisory.screening_evidence:
+                    se = advisory.screening_evidence
+                    with st.expander("⚙️ Deterministic Screening Evidence", expanded=False):
+                        st.markdown(f"**Decision:** {se.get('decision', 'N/A')} | **Confidence:** {se.get('confidence', 0.0):.2f}")
+                        st.markdown(f"**Escalation Required:** {'Yes' if se.get('escalation_required') else 'No'}")
+                        if se.get('study_type'):
+                            st.markdown(f"**Study Type:** {se['study_type']}")
+                        if se.get('hard_negative'):
+                            st.markdown("**🔴 Hard Negative Exclusion**")
+                        triggered = se.get('triggered_rules', [])
+                        if triggered:
+                            st.markdown(f"**Triggered Rules ({len(triggered)}):**")
+                            for rid in triggered:
+                                st.markdown(f"- `{rid}`")
+                        evidence_list = se.get('evidence', [])
+                        if evidence_list:
+                            st.markdown(f"**Evidence ({len(evidence_list)}):**")
+                            for e in evidence_list:
+                                st.markdown(f"- [{e.get('evidence_type', '?')}] {e.get('rule_name', '?')} → *{e.get('match', '')[:80]}*")
+                        signals = se.get('semantic_signals', {})
+                        if signals:
+                            st.markdown(f"**Semantic Signals:**")
+                            for k, v in signals.items():
+                                st.markdown(f"- {k}: {v:.3f}")
+                        ct = se.get('consensus_trace', {})
+                        if ct:
+                            st.markdown(f"**Consensus Trace:**")
+                            src = ct.get('source_contributions', {})
+                            for k, v in src.items():
+                                val = v.get('contribution', 0)
+                                st.markdown(f"- {k}: {val:.4f}")
+                        if se.get('rationale'):
+                            with st.expander("Rationale"):
+                                st.text(se['rationale'][:500])
+
                 if not is_uncertain and not prefilter_applied and not is_quarantined:
                     col_w1, col_w2, col_w3 = st.columns(3)
 

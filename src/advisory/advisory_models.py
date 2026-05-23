@@ -819,6 +819,8 @@ class AdvisoryResult:
     prefilter_reason: str = ""
     model_used: str = ""
 
+    screening_evidence: Optional[Dict[str, Any]] = None
+
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSON persistence - SAFE."""
         return {
@@ -865,6 +867,7 @@ class AdvisoryResult:
             "prefilter_applied": self.prefilter_applied,
             "prefilter_reason": self.prefilter_reason,
             "model_used": self.model_used,
+            "screening_evidence": self.screening_evidence,
         }
 
     @classmethod
@@ -917,6 +920,7 @@ class AdvisoryResult:
             prefilter_applied=bool(data.get("prefilter_applied", False)),
             prefilter_reason=data.get("prefilter_reason", ""),
             model_used=data.get("model_used", ""),
+            screening_evidence=data.get("screening_evidence"),
         )
     
     def is_available(self) -> bool:

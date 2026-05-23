@@ -777,6 +777,41 @@ def render_suggestion_details(suggestion: Dict):
     else:
         st.markdown(f"**Justification:** {suggestion.get('justification', 'N/A')}")
 
+    screening_evidence = suggestion.get("screening_evidence")
+    if screening_evidence:
+        with st.expander("⚙️ Deterministic Screening Evidence", expanded=False):
+            st.markdown(f"**Decision:** {screening_evidence.get('decision', 'N/A')} | **Confidence:** {screening_evidence.get('confidence', 0.0):.2f}")
+            st.markdown(f"**Escalation Required:** {'Yes' if screening_evidence.get('escalation_required') else 'No'}")
+            if screening_evidence.get('study_type'):
+                st.markdown(f"**Study Type:** {screening_evidence['study_type']}")
+            if screening_evidence.get('hard_negative'):
+                st.markdown("**🔴 Hard Negative Exclusion**")
+            triggered = screening_evidence.get('triggered_rules', [])
+            if triggered:
+                st.markdown(f"**Triggered Rules ({len(triggered)}):**")
+                for rid in triggered:
+                    st.markdown(f"- `{rid}`")
+            evidence_list = screening_evidence.get('evidence', [])
+            if evidence_list:
+                st.markdown(f"**Evidence ({len(evidence_list)}):**")
+                for e in evidence_list:
+                    st.markdown(f"- [{e.get('evidence_type', '?')}] {e.get('rule_name', '?')} → *{e.get('match', '')[:80]}*")
+            signals = screening_evidence.get('semantic_signals', {})
+            if signals:
+                st.markdown(f"**Semantic Signals:**")
+                for k, v in signals.items():
+                    st.markdown(f"- {k}: {v:.3f}")
+            ct = screening_evidence.get('consensus_trace', {})
+            if ct:
+                st.markdown(f"**Consensus Trace:**")
+                src = ct.get('source_contributions', {})
+                for k, v in src.items():
+                    val = v.get('contribution', 0)
+                    st.markdown(f"- {k}: {val:.4f}")
+            if screening_evidence.get('rationale'):
+                with st.expander("Rationale"):
+                    st.text(screening_evidence['rationale'][:500])
+
     criterion_evals = suggestion.get("criterion_evaluations", {})
     
     if not isinstance(criterion_evals, dict):

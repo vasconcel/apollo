@@ -89,6 +89,10 @@ from .advisory_cache import get_advisory_cache, store_advisory
 from .advisory_metrics import get_metrics
 from .runtime_mode import FIXED_COOLDOWN_SECONDS, MAX_RETRIES, RUNTIME_MODE
 from .provider_controller import get_provider_controller
+from .screening_adapter import (
+    get_screening_adapter,
+    EscalationPolicy,
+)
 
 
 class AdvisoryFailureType(str, Enum):
@@ -223,6 +227,18 @@ def normalize_decision(decision_value: Any) -> str:
 
 
 VALID_DECISIONS = frozenset({"INCLUDE", "EXCLUDE", "SKIP", "UNCERTAIN", "INSUFFICIENT_EVIDENCE", "CANNOT_DETERMINE", "UNAVAILABLE"})
+
+
+def _screening_decision_to_advisory(decision) -> "AdvisoryDecision":
+    """Map ScreeningDecision to AdvisoryDecision."""
+    from src.screening.screening_result import ScreeningDecision as SD
+    mapping = {
+        SD.INCLUDE: AdvisoryDecision.INCLUDE,
+        SD.EXCLUDE: AdvisoryDecision.EXCLUDE,
+        SD.REVIEW: AdvisoryDecision.UNCERTAIN,
+        SD.UNCERTAIN: AdvisoryDecision.UNCERTAIN,
+    }
+    return mapping.get(decision, AdvisoryDecision.UNAVAILABLE)
 
 
 def _validate_response_schema(response: Dict[str, Any]) -> tuple[Optional[AdvisoryFailureType], str]:
@@ -655,6 +671,130 @@ class AdvisoryWorker:
                 model_used="prefilter",
             )
 
+        # ============================================================
+        # DETERMINISTIC-FIRST SCREENING (Phase 5A)
+        # LLM is optional and disabled by default.
+        # REVIEW is a valid terminal state — never escalates.
+        # ============================================================
+        screening_result = None
+        try:
+            adapter = get_screening_adapter()
+            if not adapter._initialized:
+                protocol_config = None
+                if self._protocol:
+                    try:
+                        from src.core.protocol_query_service import get_protocol_config
+                        protocol_config = get_protocol_config(self._protocol)
+                    except (ImportError, Exception):
+                        pass
+                adapter.initialize(protocol_config=protocol_config)
+
+            article_for_screening: Dict[str, Any] = {
+                "id": article_id,
+                "title": title or "",
+                "abstract": abstract or "",
+                "year": (metadata or {}).get("year"),
+                "venue": (metadata or {}).get("venue"),
+                "language": (metadata or {}).get("language"),
+            }
+
+            screening_result = adapter.run_deterministic(
+                article_for_screening, stage=stage_lower
+            )
+
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            # Hard negative: always return deterministic EXCLUDE
+            if screening_result.hard_negative:
+                print(f"[SCREENING] Hard negative EXCLUDE for {article_id}")
+                return AdvisoryResult(
+                    cache_key=request.cache_key,
+                    protocol_version=request.protocol_version,
+                    decision=AdvisoryDecision.EXCLUDE,
+                    confidence=screening_result.confidence,
+                    justification=screening_result.rationale,
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    generation_duration_ms=elapsed_ms,
+                    grounding_strength=1.0,
+                    hallucination_risk_score=0.0,
+                    model_used="deterministic",
+                    screening_evidence=adapter.serialize_evidence(screening_result),
+                )
+
+            # REVIEW: return as UNCERTAIN for human review queue
+            if screening_result.decision == ScreeningDecision.REVIEW:
+                print(f"[SCREENING] REVIEW for {article_id} (conf={screening_result.confidence:.2f})")
+                return AdvisoryResult(
+                    cache_key=request.cache_key,
+                    protocol_version=request.protocol_version,
+                    decision=AdvisoryDecision.UNCERTAIN,
+                    confidence=screening_result.confidence,
+                    justification=screening_result.rationale,
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    generation_duration_ms=elapsed_ms,
+                    grounding_strength=1.0,
+                    hallucination_risk_score=0.0,
+                    model_used="deterministic",
+                    screening_evidence=adapter.serialize_evidence(screening_result),
+                )
+
+            # Deterministic INCLUDE/EXCLUDE with sufficient confidence
+            if not EscalationPolicy.requires_escalation(
+                screening_result, article_for_screening
+            ):
+                reason = EscalationPolicy.escalation_reason(
+                    screening_result, article_for_screening
+                )
+                print(f"[SCREENING] Deterministic-only for {article_id}: {screening_result.decision.value} (conf={screening_result.confidence:.2f})")
+                decision = _screening_decision_to_advisory(screening_result.decision)
+                return AdvisoryResult(
+                    cache_key=request.cache_key,
+                    protocol_version=request.protocol_version,
+                    decision=decision,
+                    confidence=screening_result.confidence,
+                    justification=screening_result.rationale or reason,
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    generation_duration_ms=elapsed_ms,
+                    grounding_strength=1.0,
+                    hallucination_risk_score=0.0,
+                    model_used="deterministic",
+                    screening_evidence=adapter.serialize_evidence(screening_result),
+                )
+
+            # Escalation required — only proceed if LLM is enabled
+            if not adapter.llm_enabled:
+                print(f"[SCREENING] Escalation needed but LLM disabled for {article_id} — returning REVIEW")
+                return AdvisoryResult(
+                    cache_key=request.cache_key,
+                    protocol_version=request.protocol_version,
+                    decision=AdvisoryDecision.UNCERTAIN,
+                    confidence=screening_result.confidence,
+                    justification=screening_result.rationale,
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    generation_duration_ms=elapsed_ms,
+                    grounding_strength=1.0,
+                    hallucination_risk_score=0.0,
+                    model_used="deterministic",
+                    screening_evidence=adapter.serialize_evidence(screening_result),
+                )
+
+            reason = EscalationPolicy.escalation_reason(
+                screening_result, article_for_screening
+            )
+            print(f"[SCREENING] Escalating {article_id} to LLM: {reason}")
+        except Exception as e:
+            print(f"[SCREENING] Deterministic screening error: {e}")
+            if not adapter.llm_enabled:
+                return AdvisoryResult(
+                    cache_key=request.cache_key,
+                    protocol_version=request.protocol_version,
+                    decision=AdvisoryDecision.UNAVAILABLE,
+                    confidence=0.0,
+                    justification=f"Screening error: {e}",
+                    generated_at=datetime.now(timezone.utc).isoformat(),
+                    error=str(e),
+                )
+
         prompt_hash = ""
         try:
             if hasattr(self.llm, '_last_prompt_hash'):
@@ -855,6 +995,11 @@ class AdvisoryWorker:
                 prefilter_applied=False,
                 prefilter_reason="",
                 model_used=model_used,
+                screening_evidence=(
+                    adapter.serialize_evidence(screening_result)
+                    if screening_result is not None
+                    else None
+                ),
             )
 
             ambiguity_detected = decision in (

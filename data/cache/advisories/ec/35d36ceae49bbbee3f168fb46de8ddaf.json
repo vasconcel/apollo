@@ -14,8 +14,8 @@
   "risk_reason": "Advisory cannot determine: UNAVAILABLE",
   "validation_queue": "CRITICAL_REVIEW",
   "requires_validation": true,
-  "generated_at": "2026-05-23T03:45:24.675326+00:00",
-  "generation_duration_ms": 578.2742500305176,
+  "generated_at": "2026-05-23T05:04:10.634057+00:00",
+  "generation_duration_ms": 576.4811038970947,
   "topic_relevance": {
     "domain_relevance_score": 0.0,
     "topical_alignment": 0.0,
@@ -49,5 +49,15 @@
   "stage_validation": "passed",
   "prefilter_applied": false,
   "prefilter_reason": "",
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "llama-3.3-70b-versatile",
+  "screening_evidence": {
+    "decision": "UNCERTAIN",
+    "confidence": 0.0,
+    "evidence": [],
+    "triggered_rules": [],
+    "semantic_signals": {},
+    "escalation_required": true,
+    "rationale": "No rules triggered. Defaulting to UNCERTAIN (confidence: 0.00).",
+    "processing_stage": "ec"
+  }
 }

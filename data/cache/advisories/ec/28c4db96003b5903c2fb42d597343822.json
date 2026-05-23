@@ -42,7 +42,7 @@
       "confidence": 0.0
     }
   ],
-  "justification": "The abstract discusses diversity and inclusion in software development but does not explicitly address recruitment and selection processes. The paper's focus is on challenges and opportunities to improve software developer diversity and inclusion, which may be related to but does not directly address the protocol's domain.",
+  "justification": "The abstract discusses diversity and inclusion in software development but does not explicitly address recruitment and selection processes. The paper's focus is on challenges and opportunities to improve Software Developer Diversity and Inclusion, which may not directly align with the protocol's criteria.",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
@@ -50,8 +50,8 @@
   "risk_reason": "Advisory expressed uncertainty",
   "validation_queue": "PRIORITY_REVIEW",
   "requires_validation": true,
-  "generated_at": "2026-05-23T03:45:20.049767+00:00",
-  "generation_duration_ms": 2414.034128189087,
+  "generated_at": "2026-05-23T05:04:05.985225+00:00",
+  "generation_duration_ms": 2227.253198623657,
   "topic_relevance": {
     "domain_relevance_score": 0.0,
     "topical_alignment": 0.0,
@@ -85,5 +85,15 @@
   "stage_validation": "passed",
   "prefilter_applied": false,
   "prefilter_reason": "",
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "llama-3.3-70b-versatile",
+  "screening_evidence": {
+    "decision": "UNCERTAIN",
+    "confidence": 0.0,
+    "evidence": [],
+    "triggered_rules": [],
+    "semantic_signals": {},
+    "escalation_required": true,
+    "rationale": "No rules triggered. Defaulting to UNCERTAIN (confidence: 0.00).",
+    "processing_stage": "ec"
+  }
 }

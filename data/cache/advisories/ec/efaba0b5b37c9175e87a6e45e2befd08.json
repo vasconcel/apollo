@@ -50,8 +50,8 @@
   "risk_reason": "Advisory expressed uncertainty",
   "validation_queue": "PRIORITY_REVIEW",
   "requires_validation": true,
-  "generated_at": "2026-05-23T03:45:13.598855+00:00",
-  "generation_duration_ms": 2248.5299110412598,
+  "generated_at": "2026-05-23T05:03:59.721402+00:00",
+  "generation_duration_ms": 2206.9294452667236,
   "topic_relevance": {
     "domain_relevance_score": 0.0,
     "topical_alignment": 0.0,
@@ -85,5 +85,15 @@
   "stage_validation": "passed",
   "prefilter_applied": false,
   "prefilter_reason": "",
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "llama-3.3-70b-versatile",
+  "screening_evidence": {
+    "decision": "UNCERTAIN",
+    "confidence": 0.0,
+    "evidence": [],
+    "triggered_rules": [],
+    "semantic_signals": {},
+    "escalation_required": true,
+    "rationale": "No rules triggered. Defaulting to UNCERTAIN (confidence: 0.00).",
+    "processing_stage": "ec"
+  }
 }

@@ -19,6 +19,10 @@ from .advisory_queue import get_advisory_queue, build_queue
 from .advisory_worker import AdvisoryWorker
 from .advisory_cache import get_advisory_cache, get_cache_stats
 from .prefilter import get_prefilter
+from .telemetry_bus import get_telemetry_bus
+
+
+_bus = get_telemetry_bus()
 
 
 class AdvisoryWorkerOrchestrator:
@@ -27,7 +31,7 @@ class AdvisoryWorkerOrchestrator:
     
     Key features:
     - Automatic queue creation
-    - Background thread execution
+    - Background worker execution
     - Progress persistence
     - Session integration
     """
@@ -40,6 +44,7 @@ class AdvisoryWorkerOrchestrator:
         self._worker_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
+        _bus.record_info(f"orchestrator_init stage={stage}", component="orchestrator", stage=stage)
         print(f"[ORCHESTRATOR INIT] Stage: {stage}")
     
     def set_protocol(self, protocol) -> None:
@@ -58,6 +63,7 @@ class AdvisoryWorkerOrchestrator:
         # Reset prefilter dedup state per pipeline init (session-scoped isolation)
         get_prefilter(stage=stage).reset()
 
+        _bus.record_info(f"queue_init stage={stage} n={len(articles)}", component="orchestrator", stage=stage, n_articles=str(len(articles)))
         print(f"[ORCHESTRATOR] Getting queue for stage: {stage}")
         queue = get_advisory_queue(self.config, stage=stage)
         print(f"[ORCHESTRATOR] Queue retrieved: {id(queue)}")
@@ -100,14 +106,17 @@ class AdvisoryWorkerOrchestrator:
             self._stop_event.clear()
 
             print(f"[ORCHESTRATOR] Starting worker for stage: {self._stage}")
+            _bus.record_info(f"worker_start stage={self._stage}", component="orchestrator", stage=self._stage)
             self._worker = AdvisoryWorker(self.config, protocol=self._protocol)
 
             def run_worker_loop():
                 try:
                     self._worker.process_all(max_items, stage=self._stage, stop_event=self._stop_event)
                 except Exception as e:
+                    _bus.record_info(f"worker_error stage={self._stage} reason={e!s}", component="orchestrator", stage=self._stage)
                     print(f"Advisory worker error: {e}")
                 finally:
+                    _bus.record_info(f"worker_stop stage={self._stage}", component="orchestrator", stage=self._stage)
                     print(f"[WORKER STOP] Stage: {self._stage}")
 
             self._worker_thread = threading.Thread(
@@ -127,10 +136,12 @@ class AdvisoryWorkerOrchestrator:
         self._stop_event.set()
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5.0)
+        _bus.record_info(f"worker_stopped stage={self._stage}", component="orchestrator", stage=self._stage)
         print(f"[ORCHESTRATOR] Worker stopped for stage: {self._stage}")
     
     def get_status(self, stage: str = "ic") -> Dict:
         """Get worker status for specific stage."""
+        _bus.record_info(f"status_check stage={stage}", component="orchestrator", stage=stage)
         print(f"[ORCHESTRATOR STATUS] Stage: {stage}")
         queue_stats = get_advisory_queue(self.config, stage=stage).get_stats()
         cache_stats = get_cache_stats()
@@ -298,6 +309,7 @@ def initialize_advisory_pipeline(
     2. Start background worker (if auto_start=True)
     3. Return status for UI display
     """
+    _bus.record_info(f"pipeline_create stage={stage} n_articles={len(articles)} auto_start={auto_start}", component="orchestrator", stage=stage)
     print(f"[PIPELINE CREATE] Stage: {stage}")
     orchestrator = get_orchestrator(stage=stage)
 
@@ -330,6 +342,7 @@ def get_advisory_pipeline_status(stage: str = "ic") -> Dict:
     Get current pipeline status for specific stage.
     READ-ONLY - uses lookup to never create runtime.
     """
+    _bus.record_info(f"pipeline_status stage={stage}", component="orchestrator", stage=stage)
     print(f"[PIPELINE STATUS] Stage: {stage}")
     orchestrator = lookup_orchestrator(stage=stage)
     if orchestrator is None:
@@ -352,6 +365,7 @@ def start_background_generation(stage: str = "ic", max_items: Optional[int] = No
     Start background advisory generation for specific stage.
     MUTATING - creates runtime if absent (allowed - explicit initialization path).
     """
+    _bus.record_info(f"background_start stage={stage}", component="orchestrator", stage=stage)
     print(f"[BACKGROUND START] Stage: {stage}")
     orchestrator = get_orchestrator(stage=stage)
     orchestrator.start_worker(max_items)

@@ -1,0 +1,3 @@
+{"ts": 89464.0693552, "v": 1.0, "tags": {"stage": "ec", "cache_key": "k", "decision": "INCLUDE"}}
+{"ts": 89464.1777481, "v": 1.0, "tags": {"stage": "ec", "cache_key": "key1", "decision": "INCLUDE"}}
+{"ts": 89464.2209933, "v": 1.0, "tags": {"stage": "ec", "cache_key": "orphan_key", "decision": "INCLUDE"}}

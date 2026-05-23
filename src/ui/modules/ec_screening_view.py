@@ -360,16 +360,21 @@ def render_screening_workspace(session):
         with col_hall:
             st.metric("Evidence Reliability", cal_summary.get("hallucination_risk_rate", "N/A"))
 
-        col_lr_agree, col_fe, col_fi = st.columns(3)
+        col_lr_agree, col_fe, col_fi, col_prec = st.columns(4)
         with col_lr_agree:
             st.caption(f"Auto-screen accuracy: {cal_summary.get('low_risk_sample_agreement', 'N/A')}")
         with col_fe:
             st.caption(f"Missed: {cal_summary.get('false_exclusion', 0)}")
         with col_fi:
             st.caption(f"Wrong includes: {cal_summary.get('false_inclusion', 0)}")
+        with col_prec:
+            from src.advisory.advisory_reliability import get_operational_metrics
+            metrics = get_operational_metrics().get_stats()
+            st.caption(f"Est. Precision: {metrics.get('estimated_precision', 'N/A')}")
 
-        with st.expander("⚡ OPERATIONAL TELEMETRY", expanded=False):
+        with st.expander("⚡ OPERATIONAL METRICS", expanded=False):
             from src.advisory.advisory_orchestrator import get_advisory_pipeline_status
+            from src.advisory.advisory_reliability import get_operational_metrics
             try:
                 pipeline_status = get_advisory_pipeline_status("ec")
             except Exception:
@@ -377,58 +382,34 @@ def render_screening_workspace(session):
 
             queue_pending = pipeline_status.get("pending_count", 0) if pipeline_status else 0
             queue_generated = pipeline_status.get("generated_count", 0) if pipeline_status else 0
-            queue_failed = pipeline_status.get("failed_count", 0) if pipeline_status else 0
             workers_active = pipeline_status.get("workers_active", 0) if pipeline_status else 0
 
-            telemetry_col1, telemetry_col2, telemetry_col3, telemetry_col4 = st.columns(4)
-            with telemetry_col1:
-                st.metric("Total Articles", total)
-            with telemetry_col2:
-                st.metric("Advisories Generated", queue_generated)
-            with telemetry_col3:
-                st.metric("Queue Pending", queue_pending)
-            with telemetry_col4:
+            ops = get_operational_metrics().get_stats()
+
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.metric("Throughput", f"{ops.get('throughput_items_per_sec', 0):.1f}/s")
+            with m2:
+                st.metric("Queue Depth", queue_pending)
+            with m3:
+                st.metric("Avg Latency", f"{ops.get('latency_avg_ms', 0):.0f}ms")
+            with m4:
+                st.metric("Escalation Rate", f"{ops.get('escalation_rate', 0):.0%}")
+
+            m5, m6, m7, m8 = st.columns(4)
+            with m5:
+                st.metric("Est. Precision", f"{ops.get('estimated_precision', 0):.0%}")
+            with m6:
+                st.metric("Agreement Rate", f"{ops.get('human_agreement_rate', 0):.0%}")
+            with m7:
+                st.metric("Total Processed", ops.get('total_processed', 0))
+            with m8:
                 st.metric("Active Workers", workers_active)
-            
+
             from src.advisory.advisory_cache import get_advisory_cache
             cache = get_advisory_cache()
             cache_size = len(cache)
-
-            t1_col1, t1_col2, t1_col3, t1_col4 = st.columns(4)
-            with t1_col1:
-                st.metric("Cache Entries", cache_size)
-            with t1_col2:
-                st.metric("Failed", queue_failed)
-            with t1_col3:
-                from src.advisory.calibration_tracker import get_calibration_summary
-                cal = get_calibration_summary()
-                escalations = cal.get('critical_overrides', 0) + cal.get('high_overrides', 0)
-                st.metric("Escalations", escalations)
-            with t1_col4:
-                st.metric("Human Reviewed", reviewed)
-            
-            t2_col1, t2_col2, t2_col3, t2_col4 = st.columns(4)
-            cache_counts = _get_cache_counts(protocol_version, "ec")
-            prefiltered = cache_counts["prefiltered"]
-            llm_total = cache_counts["llm"]
-            total_adv = llm_total + prefiltered
-            bypass_rate = f"{prefiltered / max(total_adv, 1):.0%}"
-            with t2_col1:
-                st.metric("Prefiltered", prefiltered)
-            with t2_col2:
-                st.metric("Quarantined", cache_counts["quarantined"])
-            with t2_col3:
-                st.metric("LLM Bypass Rate", bypass_rate)
-            with t2_col4:
-                st.metric("LLM Advisories", llm_total)
-            
-            if "runtime_events" not in st.session_state:
-                st.session_state.runtime_events = []
-            
-            if len(st.session_state.runtime_events) > 0:
-                with st.expander("📜 RUNTIME EVENTS", expanded=False):
-                    for event in list(st.session_state.runtime_events)[-10:]:
-                        st.caption(event)
+            st.caption(f"Cache entries: {cache_size}")
 
     col_mode, col_queue = st.columns([1, 2])
     with col_mode:
@@ -960,6 +941,36 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                     unsupported = getattr(advisory, 'unsupported_claims_detected', False)
                     st.metric("Weak Signals", "⚠️ Detected" if unsupported else "✓ Clear")
 
+                col_r1, col_r2, col_r3 = st.columns(3)
+                from src.advisory.advisory_reliability import compute_advisory_reliability, check_escalation
+                from src.advisory.calibration_tracker import get_calibration_summary
+                cal_data = get_calibration_summary()
+                override_rate = cal_data.get("override_rate", 0.0)
+                if isinstance(override_rate, str):
+                    try:
+                        override_rate = float(override_rate.rstrip('%')) / 100.0
+                    except ValueError:
+                        override_rate = 0.0
+                reliability_score = compute_advisory_reliability(advisory, override_rate=override_rate)
+                escalation = check_escalation(advisory, reliability_score)
+                with col_r1:
+                    score_pct = f"{reliability_score:.0%}"
+                    if reliability_score >= 0.7:
+                        st.metric("Reliability", score_pct, delta="✓ Reliable")
+                    elif reliability_score >= 0.5:
+                        st.metric("Reliability", score_pct, delta="⚠ Borderline")
+                    else:
+                        st.metric("Reliability", score_pct, delta="✗ Low")
+                with col_r2:
+                    st.metric("Escalate", "⚠️ Yes" if escalation["escalate"] else "✓ No")
+                with col_r3:
+                    st.metric("Precision Est.", f"{cal_data.get('agreement_rate', 'N/A')}")
+
+                if escalation["reasons"]:
+                    with st.expander("🔔 Escalation Reasons", expanded=True):
+                        for reason in escalation["reasons"]:
+                            st.caption(f"- {reason}")
+
                 if is_uncertain:
                     st.warning("⚠ AI could not determine relevance with sufficient confidence. Manual review required.")
                     st.markdown(f"**Uncertainty Score:** {uncertainty_score:.2f} | **Evidence Strength:** {evidence_strength:.2f}")
@@ -1029,6 +1040,12 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                                     risk_classification=getattr(advisory, 'risk_classification', None),
                                     override_reason=override_reason or "No reason provided"
                                 )
+                                
+                                from src.advisory.advisory_reliability import get_threshold_calibrator, get_operational_metrics
+                                get_threshold_calibrator().record_override("ec", was_overridden=is_disagreement)
+                                get_operational_metrics().record_escalation(escalated=is_disagreement)
+                                if not is_disagreement:
+                                    get_operational_metrics().record_agreement(agreed=True)
                                 
                                 st.success(f"✓ Review logged: {human_decision} (was {ai_decision})")
                                 if current_idx < total - 1:

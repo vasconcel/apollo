@@ -273,6 +273,14 @@ def render_screening_workspace(session):
     with prefilter_col2: st.metric("Quarantined", cache_counts["quarantined"])
     with prefilter_col3: st.metric("LLM Bypass Rate", bypass_rate)
     with prefilter_col4: st.metric("LLM Advisories", llm_total)
+
+    from src.advisory.advisory_reliability import get_operational_metrics
+    ops = get_operational_metrics().get_stats()
+    cal_pref1, cal_pref2, cal_pref3, cal_pref4 = st.columns(4)
+    with cal_pref1: st.metric("Agreement", ops.get("human_agreement_rate", "N/A"))
+    with cal_pref2: st.metric("Est. Precision", f"{ops.get('estimated_precision', 0):.0%}")
+    with cal_pref3: st.metric("Escalation Rate", f"{ops.get('escalation_rate', 0):.0%}")
+    with cal_pref4: st.metric("Throughput", f"{ops.get('throughput_items_per_sec', 0):.1f}/s")
     
     if articles and 0 <= current_idx < total:
         article = articles[current_idx]
@@ -674,6 +682,31 @@ def render_ai_advisory_panel(article, current_idx: int):
                     uncertainty_score = compute_uncertainty_score(advisory)
                     st.warning("⚠ AI could not determine relevance with sufficient confidence. Manual review required.")
                     st.markdown(f"**Uncertainty Score:** {uncertainty_score:.2f} | **Evidence Strength:** {evidence_strength:.2f}")
+
+                if advisory:
+                    from src.advisory.advisory_reliability import compute_advisory_reliability, check_escalation
+                    from src.advisory.calibration_tracker import get_calibration_summary
+                    cal_data = get_calibration_summary()
+                    override_rate = cal_data.get("override_rate", 0.0)
+                    if isinstance(override_rate, str):
+                        try:
+                            override_rate = float(override_rate.rstrip('%')) / 100.0
+                        except ValueError:
+                            override_rate = 0.0
+                    reliability_score = compute_advisory_reliability(advisory, override_rate=override_rate)
+                    escalation = check_escalation(advisory, reliability_score)
+                    cr1, cr2, cr3 = st.columns(3)
+                    with cr1:
+                        score_pct = f"{reliability_score:.0%}"
+                        st.metric("Reliability", score_pct, delta="✓ Reliable" if reliability_score >= 0.7 else "⚠ Borderline" if reliability_score >= 0.5 else "✗ Low")
+                    with cr2:
+                        st.metric("Grounding", f"{getattr(advisory, 'grounding_strength', 0):.0%}")
+                    with cr3:
+                        st.metric("Escalate", "⚠️ Yes" if escalation["escalate"] else "✓ No")
+                    if escalation["reasons"]:
+                        with st.expander("🔔 Escalation Reasons", expanded=False):
+                            for reason in escalation["reasons"]:
+                                st.caption(f"- {reason}")
 
                 advisory_dict = {
                     "decision": safe_decision(advisory.decision) if advisory else "N/A",

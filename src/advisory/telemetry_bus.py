@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from .telemetry_timeseries import TimeSeriesStore, get_timeseries_store
 from .telemetry_clock import stamp_event, EventEnvelope, get_logical_clock
 from .telemetry_backpressure import get_backpressure_controller
+from .telemetry_persist import get_event_sink
 
 
 DEFAULT_MAX_QUEUE_SIZE = 10000
@@ -159,8 +160,11 @@ class TelemetryBus:
         """Synchronously drain all pending events to the store.
 
         Called automatically on shutdown. Also callable manually.
+        Persists each event to the EventSink for replay.
         """
         store = self._resolve_store()
+        sink = get_event_sink()
+        batch: List[EventEnvelope] = []
         while not self._queue.empty():
             try:
                 envelope = self._queue.get(block=False)
@@ -168,15 +172,28 @@ class TelemetryBus:
                     continue
                 store.record(envelope.metric, envelope.value, envelope.tags)
                 self._append_to_event_log(envelope)
+                batch.append(envelope)
                 self._flush_count += 1
             except queue.Empty:
                 break
             except Exception:
                 self._drops.inc_flush_failure()
+        if batch:
+            try:
+                sink.write_batch(batch)
+            except Exception:
+                pass
 
     def _flush_loop(self):
-        """Background flush loop. Polls queue and writes to store."""
+        """Background flush loop. Polls queue and writes to store.
+
+        Batches events from the queue and writes to both TimeSeriesStore
+        and EventSink for persistence and replayability.
+        """
         store = self._resolve_store()
+        sink = get_event_sink()
+        batch: List[EventEnvelope] = []
+        batch_deadline = time.time() + 5.0
         while not self._stop_event.is_set():
             try:
                 envelope = self._queue.get(timeout=self._flush_interval)
@@ -184,11 +201,27 @@ class TelemetryBus:
                     continue
                 store.record(envelope.metric, envelope.value, envelope.tags)
                 self._append_to_event_log(envelope)
+                batch.append(envelope)
                 self._flush_count += 1
+                # Flush batch if it's large enough or time has elapsed
+                if len(batch) >= 50 or time.time() >= batch_deadline:
+                    if batch:
+                        try:
+                            sink.write_batch(batch)
+                        except Exception:
+                            pass
+                        batch.clear()
+                    batch_deadline = time.time() + 5.0
             except queue.Empty:
                 continue
             except Exception:
                 self._drops.inc_flush_failure()
+        # Final flush of remaining batch on stop
+        if batch:
+            try:
+                sink.write_batch(batch)
+            except Exception:
+                pass
 
     def _resolve_store(self) -> TimeSeriesStore:
         if self._store is None:
@@ -325,6 +358,20 @@ class TelemetryBus:
 
     def record_quality_score(self, stage: str, score: float):
         self._enqueue("quality_score", score, {"stage": stage}, source="worker")
+
+    # ------------------------------------------------------------------
+    # Lifecycle / informational events (orchestrator, UI, print replacement)
+    # ------------------------------------------------------------------
+
+    def record_info(self, message: str, component: str = "system", **kwargs):
+        """Record an informational lifecycle event.
+
+        Used for orchestration events, print() replacements,
+        and general runtime observability.
+        """
+        tags = {"message": message[:256], "component": component}
+        tags.update({k: str(v)[:64] for k, v in kwargs.items()})
+        self._enqueue("lifecycle_info", 1.0, tags, source=component)
 
     # ------------------------------------------------------------------
     # Admin

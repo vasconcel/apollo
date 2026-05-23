@@ -23,6 +23,7 @@ from .advisory_cache import get_advisory_cache, get_cache_stats
 from .advisory_metrics import get_metrics, reset_metrics
 from .calibration_artifact import build_calibration_artifact, save_calibration_artifact
 from .protocol_diagnostics import run_diagnostics
+from .telemetry_bus import get_telemetry_bus
 
 
 CALIBRATION_STAGES = ("ec", "ic")
@@ -264,11 +265,14 @@ class CalibrationRunner:
 
     def _run_stage(self, stage: str, sample: List) -> bool:
         """Run a single screening stage on the calibration sample."""
+        bus = get_telemetry_bus()
         if self._stop_event.is_set():
             self._error = f"Calibration stopped before {stage.upper()}"
+            bus.record_info(f"calibration_stage_stopped stage={stage} reason=user_stop", component="calibration", stage=stage)
             return False
 
         self._current_stage = stage
+        bus.record_info(f"calibration_stage_start stage={stage} sample_size={len(sample)}", component="calibration", stage=stage, sample_size=str(len(sample)))
         reset_queue_for_stage(stage, force=True)
         reset_orchestrator_for_stage(stage, force=True)
 
@@ -280,9 +284,15 @@ class CalibrationRunner:
                 auto_start=True,
                 protocol=self.protocol,
             )
-            return result.get("queue_initialized", False)
+            ok = result.get("queue_initialized", False)
+            if ok:
+                bus.record_info(f"calibration_stage_initialized stage={stage}", component="calibration", stage=stage)
+            else:
+                bus.record_info(f"calibration_stage_failed stage={stage} reason=init_failed", component="calibration", stage=stage)
+            return ok
         except Exception as e:
             self._error = f"Failed to initialize {stage.upper()}: {e}"
+            bus.record_info(f"calibration_stage_error stage={stage} reason={e!s}", component="calibration", stage=stage)
             return False
 
     def _wait_for_completion(self, stage: str, timeout: float = 600.0) -> bool:
@@ -315,44 +325,55 @@ class CalibrationRunner:
         Returns:
             Calibration report dict.
         """
+        bus = get_telemetry_bus()
         self._status = "running"
         overall_start = time.time()
+        bus.record_info(f"calibration_start sample_size={self.sample_size} total_articles={len(self.articles)}", component="calibration", sample_size=str(self.sample_size))
 
         sample = _select_calibration_sample(self.articles, self.sample_size)
         if not sample:
             self._status = "error"
             self._error = "No articles for calibration sample"
+            bus.record_info("calibration_failed reason=no_sample", component="calibration")
             return {"status": "error", "error": self._error}
 
         # EC stage
         ec_start = time.time()
         if self._stop_event.is_set():
             self._status = "stopped"
+            bus.record_info("calibration_stopped reason=user_stop_before_ec", component="calibration")
             return {"status": "stopped", "error": self._error}
 
         if not self._run_stage("ec", sample):
             self._status = "error"
+            bus.record_info(f"calibration_failed reason=ec_stage_failed error={self._error!s}", component="calibration")
             return {"status": "error", "error": self._error}
 
         if not self._wait_for_completion("ec"):
             self._status = "error" if self._error else "stopped"
+            bus.record_info(f"calibration_failed reason=ec_wait_failed error={self._error!s}", component="calibration")
             return {"status": self._status, "error": self._error}
         ec_duration = time.time() - ec_start
+        bus.record_info(f"calibration_stage_complete stage=ec duration_s={ec_duration:.1f}", component="calibration", stage="ec")
 
         # IC stage
         if self._stop_event.is_set():
             self._status = "stopped"
+            bus.record_info("calibration_stopped reason=user_stop_before_ic", component="calibration")
             return {"status": "stopped", "error": "Calibration stopped before IC"}
 
         ic_start = time.time()
         if not self._run_stage("ic", sample):
             self._status = "error"
+            bus.record_info(f"calibration_failed reason=ic_stage_failed error={self._error!s}", component="calibration")
             return {"status": "error", "error": self._error}
 
         if not self._wait_for_completion("ic"):
             self._status = "error"
+            bus.record_info(f"calibration_failed reason=ic_wait_failed error={self._error!s}", component="calibration")
             return {"status": "error", "error": self._error}
         ic_duration = time.time() - ic_start
+        bus.record_info(f"calibration_stage_complete stage=ic duration_s={ic_duration:.1f}", component="calibration", stage="ic")
 
         total_duration = time.time() - overall_start
 
@@ -408,6 +429,7 @@ class CalibrationRunner:
         self._report["diagnostics"] = diagnostics
 
         self._status = "completed"
+        bus.record_info(f"calibration_completed duration_s={total_duration:.1f} artifact={self._artifact_path}", component="calibration")
         return self._report
 
     def run_async(self) -> Optional[threading.Thread]:
@@ -430,4 +452,5 @@ class CalibrationRunner:
             self._status = "running"
             self._thread = threading.Thread(target=self.run, daemon=True)
             self._thread.start()
+            get_telemetry_bus().record_info("calibration_async_start", component="calibration")
             return self._thread

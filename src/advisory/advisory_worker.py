@@ -149,42 +149,18 @@ def _persist_failure_artifact(parse_result: AdvisoryParseResult):
 
 
 def _log_advisory_debug(parse_result: AdvisoryParseResult):
-    """Log structured advisory debug information."""
-    print(f"\n{'='*60}")
-    print("[ADVISORY DEBUG]")
-    print(f"{'='*60}")
-    print(f"Article ID: {parse_result.article_id}")
-    print(f"Stage: {parse_result.stage}")
-    print(f"Protocol Version: {parse_result.protocol_version}")
-    print(f"Cache Key: {safe_preview(parse_result.cache_key, 20)}")
-
-    print(f"\nRAW RESPONSE")
-    print(f"------------------------------------------------------------")
-    print(safe_preview(parse_result.raw_response, 500))
-
-    print(f"\nNORMALIZED RESPONSE")
-    print(f"------------------------------------------------------------")
-    print(safe_preview(parse_result.normalized_response, 500))
-
-    print(f"\nPARSE STATUS")
-    print(f"------------------------------------------------------------")
-    print(f"SUCCESS" if parse_result.success else f"FAILED: {safe_enum_value(parse_result.failure_type, 'UNKNOWN')}")
-
-    if parse_result.failure_reason:
-        print(f"\nFAILURE REASON")
-        print(f"------------------------------------------------------------")
-        print(parse_result.failure_reason)
-
-    print(f"\nFINAL STATUS")
-    print(f"------------------------------------------------------------")
-    print(f"COMPLETED" if parse_result.success else "FAILED")
-
-    if parse_result.model_used:
-        print(f"\nMODEL")
-        print(f"------------------------------------------------------------")
-        print(parse_result.model_used)
-
-    print(f"{'='*60}\n")
+    """Log structured advisory debug information via telemetry."""
+    status = "completed" if parse_result.success else "failed"
+    get_telemetry_bus().record_info(
+        f"advisory_generated article_id={parse_result.article_id} "
+        f"stage={parse_result.stage} status={status} "
+        f"model={parse_result.model_used or 'unknown'} "
+        f"failure={safe_enum_value(parse_result.failure_type, 'none')}",
+        component="worker",
+        article_id=str(parse_result.article_id),
+        stage=parse_result.stage,
+        status=status,
+    )
 
 
 def normalize_suggestion_response(suggestion: Any) -> tuple[Dict[str, Any], Optional[AdvisoryFailureType], str]:
@@ -1158,6 +1134,10 @@ class AdvisoryWorker:
             else:
                 succeeded += 1
                 metrics.worker_generation_count += 1
+                from src.advisory.advisory_reliability import get_operational_metrics, get_threshold_calibrator
+                ops = get_operational_metrics()
+                ops.record_processed(latency_ms=getattr(result, 'generation_duration_ms', 0.0) or 0.0)
+                ops.record_queue_depth(queue.get_stats().get("pending", 0))
                 print(f"  Success: {safe_enum_value(result.decision)} ({result.confidence:.2f})")
             
             if processed < (max_items or float('inf')):

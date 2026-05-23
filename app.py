@@ -136,6 +136,34 @@ def render_sidebar():
             </div>
             ''', unsafe_allow_html=True)
 
+            from src.advisory.advisory_reliability import get_operational_metrics
+            ops = get_operational_metrics().get_stats()
+            st.markdown(f'''
+            <div style="border:1px solid {COLORS['border_light']};background:{COLORS['bg_card']};padding:0.5rem;border-radius:6px;margin-top:0.5rem;">
+                <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.5rem;color:{COLORS['text_muted']};margin-bottom:0.35rem;">SYSTEM RELIABILITY</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['success']};">{ops.get("estimated_precision", 0):.0%}</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Precision</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['warning']};">{ops.get("escalation_rate", 0):.0%}</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Escalation</div>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:0.25rem;">
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['cyan']};">{ops.get("throughput_items_per_sec", 0):.1f}/s</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Throughput</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.65rem;color:{COLORS['text_secondary']};">{ops.get("latency_avg_ms", 0):.0f}ms</div>
+                        <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.45rem;color:{COLORS['text_muted']};">Latency</div>
+                    </div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+
         st.markdown(f"""
         <div style="font-family:{TYPOGRAPHY['mono']};font-size:0.55rem;color:{COLORS['text_muted']};letter-spacing:0.1em;padding:0.75rem 0 0.5rem 0;border-bottom:1px solid {COLORS['border_light']};margin-top:0.75rem;">
             WORKFLOW

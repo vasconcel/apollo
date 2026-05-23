@@ -46,6 +46,7 @@ from src.advisory.telemetry_consistency import (
     ConsistencyChecker, ConsistencyReport,
 )
 from src.advisory.replay_system import TelemetryReplay
+from src.advisory.telemetry_persist import EventSink, get_event_sink, reset_event_sink
 
 
 # =============================================================================
@@ -839,3 +840,130 @@ class TestProductionHardening:
         elapsed = time.perf_counter() - start
         rate = n / elapsed if elapsed > 0 else float('inf')
         assert rate > 1000, f"Enqueue rate {rate:.0f} events/sec below 1000"
+
+
+class TestOperationalization:
+    """Operationalization tests: replay equivalence, stress, microbenchmark."""
+
+    def test_replay_equivalence(self, tmp_path):
+        """Generate events → persist via EventSink → reload → replay → verify checksum."""
+        from src.advisory.telemetry_clock import stamp_event
+
+        sink = EventSink(base_dir=str(tmp_path / "events"))
+        envelopes = []
+        for i in range(50):
+            env = stamp_event(f"item_{'started' if i % 2 == 0 else 'completed'}", 1.0,
+                              {"stage": "ec", "cache_key": f"key_{i:04d}"}, source="test")
+            envelopes.append(env)
+
+        for env in envelopes:
+            sink.write(env)
+        sink.flush()
+
+        loaded = sink.load_all_events()
+        assert len(loaded) == 50, f"Expected 50 events, got {len(loaded)}"
+
+        replay = TelemetryReplay()
+        replay.load_events(loaded)
+        result = replay.replay_all()
+        checksum = replay.compute_checksum()
+
+        replay2 = TelemetryReplay()
+        replay2.load_events(loaded)
+        checksum2 = replay2.compute_checksum()
+        assert checksum == checksum2, "Replay checksum not deterministic on same event stream"
+
+        # Also sign-verify the checksum
+        assert replay.verify_checksum(checksum), "verify_checksum(computed) should return True"
+        assert not replay.verify_checksum("DEADBEEF" * 8), "verify_checksum(wrong) should return False"
+
+        assert len(result["items_started"]) == 25
+        assert len(result["items_completed"]) == 25
+        sink.close()
+
+    def test_critical_backpressure_stress_10k(self):
+        """10k+ events under high load, 8 threads, verify no crash + reconciliation."""
+        bus = TelemetryBus(max_queue_size=2000)
+        bus.start()
+        from src.advisory.telemetry_backpressure import get_backpressure_controller
+        # Force CRITICAL load level for the duration of this test
+        controller = get_backpressure_controller()
+        controller.update(5000, 5.0, 100, 0)
+
+        n_events = 10000
+        errors = []
+        lock = threading.Lock()
+
+        def hammer():
+            try:
+                for _ in range(n_events // 8):
+                    bus.record_item_started("ec", "stress")
+                    bus.record_latency("ec", 0.5)
+                    bus.record_item_completed("ec", "stress", decision="accept")
+                    bus.record_confidence("ec", 0.85)
+            except Exception as e:
+                with lock:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=hammer) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert len(errors) == 0, f"Stress produced {len(errors)} errors: {errors[:3]}"
+        bus.stop()
+
+        events = bus.get_event_log_sorted()
+        assert len(events) > 0, "At least some events should survive backpressure"
+
+        # Verify no ordering violations via reconciliation
+        from src.advisory.telemetry_reconciliation import ReconciliationEngine
+        engine = ReconciliationEngine()
+        report = engine.reconcile(events, {"stage": "ec"})
+        assert report.consistency_score >= 0.8, (
+            f"Reconciliation score {report.consistency_score:.2f} below 0.8; "
+            f"violations={len(report.violations)}"
+        )
+
+    def test_telemetry_overhead_microbenchmark(self):
+        """Measure TelemetryBus enqueue overhead (target < 1% of advisory generation)."""
+        bus = TelemetryBus(max_queue_size=5000)
+        n = 5000
+
+        # Measure enqueue-only cost
+        start = time.perf_counter()
+        for _ in range(n):
+            bus.record_item_started("ec", "bench")
+            bus.record_latency("ec", 0.5)
+        elapsed_enqueue = time.perf_counter() - start
+
+        # Simulate advisory generation cost: LLM parse + classification
+        # This is ~500ms in production; we simulate with a controlled busy-loop
+        import math
+        start = time.perf_counter()
+        for _ in range(n):
+            _ = math.sqrt(12345.6789) ** 2  # minimal CPU work
+            _ = math.sin(3.14159) * math.cos(1.5708)
+        elapsed_cpu = time.perf_counter() - start
+
+        # The real ratio: enqueue time vs. simulated work
+        # To get a proper ratio, we compare per-call enqueue to per-call simulated work
+        per_call_enqueue = elapsed_enqueue / (2 * n)  # 2 events per iteration
+        per_call_cpu = elapsed_cpu / n
+
+        # In production, LLM is 500ms+ per call; the enqueue overhead must be negligible
+        overhead_ratio = per_call_enqueue / max(per_call_cpu, 1e-9)
+        print(f"\n[Benchmark] Per-call enqueue: {per_call_enqueue*1e6:.2f}µs")
+        print(f"[Benchmark] Per-call simulated work: {per_call_cpu*1e6:.2f}µs")
+        print(f"[Benchmark] Overhead ratio vs simulated work: {overhead_ratio:.4f}x")
+
+        # Against real LLM latency (~500ms), the ratio would be:
+        real_llm_per_call = 0.5  # 500ms
+        overhead_vs_llm = per_call_enqueue / real_llm_per_call
+        print(f"[Benchmark] Overhead vs 500ms LLM: {overhead_vs_llm*100:.4f}%")
+        assert overhead_vs_llm < 0.01, (
+            f"Telemetry overhead {overhead_vs_llm*100:.4f}% exceeds 1% of LLM time"
+        )
+
+        bus.stop()

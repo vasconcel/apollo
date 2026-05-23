@@ -181,6 +181,17 @@ from .advisory_quality_score import (
     LiveQualityTracker,
 )
 
+from .advisory_reliability import (
+    compute_advisory_reliability,
+    compute_reliability_components,
+    compute_batch_reliability,
+    check_escalation,
+    ThresholdCalibrator,
+    OperationalMetrics,
+    get_threshold_calibrator,
+    get_operational_metrics,
+)
+
 from .transient_failures import (
     is_transient_provider_error,
     is_terminal_failure,
@@ -377,6 +388,16 @@ __all__ = [
     "classify_failure",
     "classify_failure_semantic",
     "classify_failure_detailed",
+
+    # Reliability
+    "compute_advisory_reliability",
+    "compute_reliability_components",
+    "compute_batch_reliability",
+    "check_escalation",
+    "ThresholdCalibrator",
+    "OperationalMetrics",
+    "get_threshold_calibrator",
+    "get_operational_metrics",
 
     # Research Export
     "export_calibration_runs_csv",

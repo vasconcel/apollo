@@ -4,6 +4,7 @@
   "decision": "UNCERTAIN",
   "confidence": 0.4,
   "triggered_criteria": [],
+  "non_triggered_criteria": [],
   "criterion_evaluations": [
     {
       "criterion_id": "IC1",
@@ -41,7 +42,7 @@
       "confidence": 0.0
     }
   ],
-  "justification": "The abstract discusses diversity and inclusion in software development but does not explicitly address recruitment and selection processes. The paper's focus is on challenges and opportunities to improve Software Developer Diversity and Inclusion, which may be related to but does not directly address the protocol's domain.",
+  "justification": "The abstract discusses diversity and inclusion in software development, but does not explicitly address recruitment and selection processes. The paper's focus is on challenges and opportunities to improve software developer diversity and inclusion, which may be related to the review domain but lacks direct relevance.",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
@@ -49,8 +50,8 @@
   "risk_reason": "Advisory expressed uncertainty",
   "validation_queue": "PRIORITY_REVIEW",
   "requires_validation": true,
-  "generated_at": "2026-05-22T05:01:54.145158",
-  "generation_duration_ms": 2279.3729305267334,
+  "generated_at": "2026-05-22T15:39:18.768518+00:00",
+  "generation_duration_ms": 2420.152425765991,
   "topic_relevance": {
     "domain_relevance_score": 0.0,
     "topical_alignment": 0.0,

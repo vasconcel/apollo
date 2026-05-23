@@ -1060,6 +1060,9 @@ def render_ai_advisory_panel(article, current_idx: int, total: int, session):
                 if status == AdvisoryStatus.PENDING:
                     st.caption("⏳ Advisory pending — manual screening operational")
                     print(f"[EC ADVISORY STATE] PENDING | Status: {status}")
+                elif status == AdvisoryStatus.GENERATING:
+                    st.caption("🔄 Generating advisory...")
+                    print(f"[EC ADVISORY STATE] GENERATING | Status: {status}")
                 elif status == AdvisoryStatus.PROCESSING:
                     st.caption("🔄 Advisory generating — please wait...")
                     print(f"[EC ADVISORY STATE] PROCESSING | Status: {status}")

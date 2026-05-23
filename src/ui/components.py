@@ -258,11 +258,11 @@ def criteria_panel(criteria: Dict[str, str], title: str = "CRITERIA"):
 def action_button(label: str, icon: str = "", disabled: bool = False, style: str = "default"):
     """Render action button in terminal style."""
     if style == "primary":
-        return st.button(f"{icon} {label}" if icon else label, type="primary", disabled=disabled, use_container_width=True)
+        return st.button(f"{icon} {label}" if icon else label, type="primary", disabled=disabled, width="stretch")
     elif style == "secondary":
-        return st.button(f"{icon} {label}" if icon else label, type="secondary", disabled=disabled, use_container_width=True)
+        return st.button(f"{icon} {label}" if icon else label, type="secondary", disabled=disabled, width="stretch")
     else:
-        return st.button(f"{icon} {label}" if icon else label, disabled=disabled, use_container_width=True)
+        return st.button(f"{icon} {label}" if icon else label, disabled=disabled, width="stretch")
 
 
 def divider():

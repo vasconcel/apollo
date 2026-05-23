@@ -12,7 +12,7 @@ import json
 import hashlib
 from pathlib import Path
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .advisory_models import (
     CalibrationEvent,
@@ -88,7 +88,7 @@ def log_calibration_event(
         disagreement=disagreement,
         override_reason=override_reason,
         override_severity=override_severity,
-        timestamp=datetime.utcnow().isoformat()
+        timestamp=datetime.now(timezone.utc).isoformat()
     )
 
     _append_event(event)
@@ -206,7 +206,7 @@ def compute_calibration_metrics() -> Dict:
         "agreement_by_metadata": {k: round(v, 3) for k, v in metadata_agreement.items()},
         "false_exclusion_estimate": false_exclusion_est,
         "false_inclusion_estimate": false_inclusion_est,
-        "last_updated": datetime.utcnow().isoformat()
+        "last_updated": datetime.now(timezone.utc).isoformat()
     }
 
 

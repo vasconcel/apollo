@@ -9,6 +9,7 @@ COLORS = {
     "bg_deep": "#0D0D0E",
     "bg_surface": "#141416",
     "bg_elevated": "#1A1A1D",
+    "bg_dark": "#0D0D0E",
     "bg_card": "#1C1C1F",
     "border": "#2A2A2E",
     "border_light": "#3A3A40",

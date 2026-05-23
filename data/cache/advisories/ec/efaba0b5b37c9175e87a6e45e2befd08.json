@@ -4,6 +4,7 @@
   "decision": "UNCERTAIN",
   "confidence": 0.4,
   "triggered_criteria": [],
+  "non_triggered_criteria": [],
   "criterion_evaluations": [
     {
       "criterion_id": "IC1",
@@ -49,8 +50,8 @@
   "risk_reason": "Advisory expressed uncertainty",
   "validation_queue": "PRIORITY_REVIEW",
   "requires_validation": true,
-  "generated_at": "2026-05-22T05:01:48.747349",
-  "generation_duration_ms": 2496.2234497070312,
+  "generated_at": "2026-05-22T15:39:13.311891+00:00",
+  "generation_duration_ms": 2521.1617946624756,
   "topic_relevance": {
     "domain_relevance_score": 0.0,
     "topical_alignment": 0.0,

@@ -301,14 +301,14 @@ def tab_screening(df: pd.DataFrame):
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        btn = st.button("🤖 Analisar IA", type="secondary", use_container_width=True)
+        btn = st.button("🤖 Analisar IA", type="secondary", width="stretch")
         if btn:
             with st.spinner("Analisando..."):
                 result = get_ai_triage_suggestion(article.get('title', ''), abstract)
                 st.session_state['ai_result'] = result
             st.rerun()
     with c2:
-        save_btn = st.button("💾 Salvar", type="primary", use_container_width=True)
+        save_btn = st.button("💾 Salvar", type="primary", width="stretch")
 
     if save_btn:
         if ec_selected:

@@ -22,7 +22,7 @@ import traceback
 import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import threading
@@ -86,6 +86,8 @@ from .advisory_models import (
 )
 from .advisory_queue import get_advisory_queue
 from .advisory_cache import get_advisory_cache, store_advisory
+from .advisory_metrics import get_metrics
+from .telemetry_bus import get_telemetry_bus
 
 
 class AdvisoryFailureType(str, Enum):
@@ -134,7 +136,7 @@ def _persist_failure_artifact(parse_result: AdvisoryParseResult):
     """Persist failure artifact to disk for debugging."""
     try:
         log_path = _get_advisory_failure_log_path()
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"failure_{parse_result.article_id}_{timestamp}.json"
         filepath = log_path / filename
 
@@ -395,6 +397,7 @@ class AdvisoryWorker:
     - Exponential backoff
     - Retry logic
     - Progress persistence
+    - Heartbeat tracking
     
     Protocol criteria are loaded from the protocol object passed at init
     or via set_protocol(). This eliminates the previous dependency on
@@ -406,6 +409,31 @@ class AdvisoryWorker:
         self._llm = None
         self._protocol_criteria: Optional[Dict] = None
         self._protocol = protocol
+        self._heartbeat_lock = threading.Lock()
+        self._last_progress_at: float = 0.0
+        self._last_provider_attempt_at: float = 0.0
+        self._last_success_at: float = 0.0
+    
+    def _update_heartbeat(self, field: str):
+        """Update a heartbeat timestamp under lock."""
+        with self._heartbeat_lock:
+            now = time.monotonic()
+            if field == "progress":
+                self._last_progress_at = now
+            elif field == "provider_attempt":
+                self._last_provider_attempt_at = now
+            elif field == "success":
+                self._last_success_at = now
+                self._last_progress_at = now
+    
+    def get_heartbeat_stats(self) -> Dict:
+        """Get frozen heartbeat timestamps for telemetry."""
+        with self._heartbeat_lock:
+            return {
+                "last_progress_at": self._last_progress_at,
+                "last_provider_attempt_at": self._last_provider_attempt_at,
+                "last_success_at": self._last_success_at,
+            }
     
     def set_protocol(self, protocol) -> None:
         """Set the protocol object for criteria retrieval."""
@@ -426,9 +454,18 @@ class AdvisoryWorker:
     
     PROCESSING_TIMEOUT_SECONDS = 120
 
-    def process_item(self, item: QueueItem) -> AdvisoryResult:
+    def process_item(
+        self,
+        item: QueueItem,
+        queue: Optional["AdvisoryQueue"] = None,
+        stop_event: Optional[threading.Event] = None,
+    ) -> AdvisoryResult:
         """
         Process a single queue item.
+
+        Args:
+            item: Queue item to process
+            queue: Queue instance (preferred). If None, fetched from global registry.
 
         This is the main entry point for worker processing.
         GUARANTEES terminal state transition (COMPLETED or FAILED).
@@ -445,7 +482,9 @@ class AdvisoryWorker:
         stage = item_stage
         print(f"[QUEUE] Stage: {stage} | Article: {item.article_id}")
 
-        queue = get_advisory_queue(self.config, stage=stage)
+        if queue is None:
+            from .advisory_queue import get_advisory_queue
+            queue = get_advisory_queue(self.config, stage=stage)
         start_time = time.time()
 
         # Note: item is already in PROCESSING state via acquire_next() in process_all()
@@ -461,7 +500,10 @@ class AdvisoryWorker:
         )
 
         try:
-            advisory = self._generate_with_retry(request, stage)
+            bus = get_telemetry_bus()
+            bus.record_item_started(stage, item.cache_key)
+
+            advisory = self._generate_with_retry(request, stage, stop_event=stop_event)
             store_advisory(advisory, stage=stage)
             if stage.lower() == "qc":
                 print(f"[QC CACHE STORE] Stage: qc | CacheKey: {item.cache_key[:16]}... | Decision: {safe_enum_value(advisory.decision)}")
@@ -469,11 +511,19 @@ class AdvisoryWorker:
                 print(f"[CACHE STORE] Stage: {stage} | CacheKey: {item.cache_key[:16]}...")
 
             elapsed = time.time() - start_time
+            bus.record_latency(stage, elapsed * 1000)
+            bus.record_decision(stage, safe_enum_value(advisory.decision))
+            bus.record_confidence(stage, advisory.confidence)
+            bus.record_acceptance(stage, advisory.decision not in (
+                AdvisoryDecision.EXCLUDE, AdvisoryDecision.SKIP, AdvisoryDecision.UNAVAILABLE
+            ))
             if advisory.error:
                 queue.mark_failed(item, advisory.error)
+                bus.record_item_failed(stage, item.cache_key, advisory.error)
                 print(f"[STATE] PROCESSING -> FAILED: {item.article_id} ({elapsed:.1f}s) Error: {advisory.error[:50]}")
             else:
                 queue.mark_completed(item)
+                bus.record_item_completed(stage, item.cache_key, safe_enum_value(advisory.decision))
                 print(f"[STATE] PROCESSING -> COMPLETED: {item.article_id} ({elapsed:.1f}s) Decision: {safe_enum_value(advisory.decision)}")
 
             return advisory
@@ -490,7 +540,7 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification=f"Worker exception: {str(e)}",
                 error=error_msg,
-                generated_at=datetime.utcnow().isoformat()
+                generated_at=datetime.now(timezone.utc).isoformat()
             )
             store_advisory(failed_advisory, stage=stage)
             queue.mark_failed(item, error_msg)
@@ -502,33 +552,90 @@ class AdvisoryWorker:
             if elapsed > self.PROCESSING_TIMEOUT_SECONDS:
                 print(f"[WATCHDOG] {item.article_id} processing exceeded {elapsed:.1f}s timeout")
     
-    def _generate_with_retry(self, request: AdvisoryRequest, stage: str = "ic") -> AdvisoryResult:
-        """Generate advisory with retry logic."""
-        last_error = None
+    def _generate_with_retry(
+        self,
+        request: AdvisoryRequest,
+        stage: str = "ic",
+        stop_event: Optional[threading.Event] = None,
+    ) -> AdvisoryResult:
+        """Generate advisory via the LLM Gateway.
 
+        Routes through the centralized governance layer which handles
+        concurrency, rate limiting, circuit breaking, deduplication,
+        and deterministic retry.
+
+        Falls back to legacy retry if gateway is unavailable.
+        """
+        from .llm_gateway import get_llm_gateway, compute_article_hash
+
+        def provider_call():
+            """Inner callable: the actual LLM invocation (what gets retried)."""
+            return self._generate_advisory(request, stage)
+
+        try:
+            self._update_heartbeat("provider_attempt")
+            gateway = get_llm_gateway(self.config)
+            article_hash = compute_article_hash(
+                request.title, request.abstract, request.protocol_version
+            )
+            fp_key = None
+            try:
+                from .llm_gateway import compute_request_fingerprint
+                stage_key = stage or getattr(request, 'stage', 'ic')
+                fp_key = compute_request_fingerprint(
+                    request.protocol_version, article_hash, stage_key
+                )
+            except Exception:
+                pass
+
+            result = gateway.generate_advisory(
+                request=request,
+                execute_fn=provider_call,
+                provider="default",
+                fingerprint=fp_key,
+                cancel_event=stop_event,
+            )
+            self._update_heartbeat("success")
+            self._update_heartbeat("progress")
+            return result
+
+        except Exception as e:
+            print(f"[GATEWAY] Error: {e}, falling back to legacy retry")
+            return self._legacy_generate_with_retry(request, stage, stop_event=stop_event)
+
+    def _legacy_generate_with_retry(
+        self,
+        request: AdvisoryRequest,
+        stage: str = "ic",
+        stop_event: Optional[threading.Event] = None,
+    ) -> AdvisoryResult:
+        """Legacy retry logic (fallback if gateway is unavailable)."""
+        bus = get_telemetry_bus()
+        last_error = None
         for attempt in range(self.config.max_retries + 1):
+            if stop_event and stop_event.is_set():
+                print(f"[LEGACY RETRY] Stop event set, aborting retry for {request.cache_key[:16]}...")
+                break
             try:
                 advisory = self._generate_advisory(request, stage)
-                
                 if advisory.error and "429" in advisory.error:
+                    bus.record_429("groq")
                     if attempt < self.config.max_retries:
+                        bus.record_retry(stage)
                         backoff = self._calculate_backoff(attempt)
                         print(f"Rate limited, retrying in {backoff:.1f}s (attempt {attempt + 1}/{self.config.max_retries + 1})")
-                        time.sleep(backoff)
+                        self._interruptible_sleep(backoff, stop_event)
                         continue
-                
                 return advisory
-                
             except Exception as e:
                 last_error = str(e)
-                
                 if attempt < self.config.max_retries:
+                    bus.record_retry(stage)
                     backoff = self._calculate_backoff(attempt)
                     print(f"Error: {last_error}, retrying in {backoff:.1f}s")
-                    time.sleep(backoff)
+                    self._interruptible_sleep(backoff, stop_event)
                 else:
                     break
-        
         return AdvisoryResult.create_failed(
             reason=last_error or "Max retries exceeded",
             cache_key=request.cache_key,
@@ -553,7 +660,7 @@ class AdvisoryWorker:
                 article_id=article_id,
                 protocol_version=request.protocol_version,
                 stage=stage,
-                timestamp=datetime.utcnow().isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat()
             )
             _log_advisory_debug(parse_result)
             _persist_failure_artifact(parse_result)
@@ -565,7 +672,7 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification="LLM not available",
                 error="LLM_UNAVAILABLE: LLM assistant not initialized",
-                generated_at=datetime.utcnow().isoformat(),
+                generated_at=datetime.now(timezone.utc).isoformat(),
                 hallucination_risk_score=1.0,
                 grounding_strength=0.0,
                 unsupported_claims_detected=True
@@ -582,7 +689,7 @@ class AdvisoryWorker:
                 article_id=article_id,
                 protocol_version=request.protocol_version,
                 stage=stage,
-                timestamp=datetime.utcnow().isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat()
             )
             _log_advisory_debug(parse_result)
             _persist_failure_artifact(parse_result)
@@ -594,7 +701,7 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification="LLM service unavailable",
                 error="LLM_UNAVAILABLE: LLM not available",
-                generated_at=datetime.utcnow().isoformat(),
+                generated_at=datetime.now(timezone.utc).isoformat(),
                 hallucination_risk_score=1.0,
                 grounding_strength=0.0,
                 unsupported_claims_detected=True
@@ -634,7 +741,7 @@ class AdvisoryWorker:
                 decision=decision,
                 confidence=prefilter_result.confidence,
                 justification=prefilter_result.reason,
-                generated_at=datetime.utcnow().isoformat(),
+                generated_at=datetime.now(timezone.utc).isoformat(),
                 generation_duration_ms=prefilter_result.elapsed_ms,
                 grounding_evidence=[],
                 grounding_strength=1.0,
@@ -731,7 +838,7 @@ class AdvisoryWorker:
                 article_id=article_id,
                 protocol_version=request.protocol_version,
                 stage=stage,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 model_used=model_used
             )
             _log_advisory_debug(parse_result)
@@ -825,7 +932,7 @@ class AdvisoryWorker:
                 criterion_evaluations=criterion_evaluations,
                 justification=justification,
                 error=error_msg,
-                generated_at=datetime.utcnow().isoformat(),
+                generated_at=datetime.now(timezone.utc).isoformat(),
                 generation_duration_ms=duration_ms,
                 grounding_evidence=evidence_snippets,
                 criterion_grounding=criterion_grounding,
@@ -895,6 +1002,8 @@ class AdvisoryWorker:
             except Exception as e:
                 print(f"[SAFEGUARD] Check error for {article_id}: {e}")
 
+            duration_ms = (time.time() - start_time) * 1000
+            get_metrics().record_worker_latency(duration_ms)
             return advisory
 
         except Exception as e:
@@ -909,7 +1018,7 @@ class AdvisoryWorker:
                 article_id=article_id,
                 protocol_version=request.protocol_version,
                 stage=stage,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 model_used=model_used
             )
             _log_advisory_debug(parse_result)
@@ -922,12 +1031,27 @@ class AdvisoryWorker:
                 confidence=0.0,
                 justification=f"Generation failed: {str(e)}",
                 error=f"UNKNOWN: {str(e)}",
-                generated_at=datetime.utcnow().isoformat(),
+                generated_at=datetime.now(timezone.utc).isoformat(),
                 hallucination_risk_score=1.0,
                 grounding_strength=0.0,
                 unsupported_claims_detected=True
             )
     
+    @staticmethod
+    def _interruptible_sleep(duration: float, cancel_event: Optional[threading.Event] = None):
+        """Sleep for `duration` seconds, waking early if cancel_event is set."""
+        if cancel_event is None:
+            time.sleep(duration)
+            return
+        deadline = time.time() + duration
+        while time.time() < deadline:
+            if cancel_event.is_set():
+                return
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.1))
+
     def _calculate_backoff(self, attempt: int) -> float:
         """Calculate exponential backoff with jitter."""
         base_backoff = self.config.backoff_base ** attempt
@@ -969,8 +1093,10 @@ class AdvisoryWorker:
         Returns:
             Processing summary
         """
+        bus = get_telemetry_bus()
         print(f"[WORKER PROCESS_ALL] Stage: {stage}")
         self._stage = stage
+        metrics = get_metrics()
         
         try:
             from src.advisory.advisory_scheduler import get_advisory_scheduler, should_process_stage
@@ -1001,10 +1127,12 @@ class AdvisoryWorker:
         while True:
             if stop_event and stop_event.is_set():
                 print(f"[WORKER STOP] Stop event signaled for stage: {stage}")
+                metrics.worker_stop_count += 1
                 break
 
             item = queue.acquire_next()
             if item is None:
+                metrics.worker_idle_cycles += 1
                 break
             
             if max_items is not None and processed >= max_items:
@@ -1020,19 +1148,21 @@ class AdvisoryWorker:
             
             print(f"Processing: {item.article_id} ({item.cache_key[:8]}...)")
             
-            result = self.process_item(item)
+            result = self.process_item(item, queue=queue, stop_event=stop_event)
             processed += 1
             
             if result.error:
                 failed += 1
+                metrics.worker_failure_count += 1
                 print(f"  Failed: {result.error}")
             else:
                 succeeded += 1
+                metrics.worker_generation_count += 1
                 print(f"  Success: {safe_enum_value(result.decision)} ({result.confidence:.2f})")
             
             if processed < (max_items or float('inf')):
                 sleep_time = self.config.sleep_seconds
-                time.sleep(sleep_time)
+                self._interruptible_sleep(sleep_time, stop_event)
         
         return {
             "processed": processed,

@@ -88,8 +88,11 @@ class AdvisoryWorkerOrchestrator:
         print(f"[LIFECYCLE] start_worker called for stage: {self._stage}")
         
         with self._start_lock:
-            if self._is_active() and self._worker_thread and self._worker_thread.is_alive():
-                print(f"[LIFECYCLE] Worker already active: advisory-worker-{self._stage}")
+            # Guard: thread liveness is the single source of truth.
+            # Do NOT check _is_active() here — a thread sleeping in backoff
+            # is still ALIVE and must not be duplicated.
+            if self._worker_thread and self._worker_thread.is_alive():
+                print(f"[LIFECYCLE] Worker thread still alive: {self._worker_thread.name}")
                 print(f"[LIFECYCLE] Prevented duplicate worker spawn for: {self._stage}")
                 return
 
@@ -226,19 +229,55 @@ def get_orchestrator(config: Optional[AdvisoryConfig] = None, stage: str = "ic")
         return _global_orchestrator_qc
 
 
-def reset_orchestrator_for_stage(stage: str = "ic"):
-    """Reset orchestrator for specific stage."""
+def _can_reset_stage(stage: str) -> bool:
+    """Check if it is safe to reset a stage's orchestrator/queue.
+
+    Returns False if:
+      - A calibration run is in progress for this stage (checked via CalibrationService)
+      - Worker thread is still alive
+    """
+    orch = lookup_orchestrator(stage)
+    if orch is not None:
+        if orch._worker_thread is not None and orch._worker_thread.is_alive():
+            print(f"[RESET GUARD] Stage: {stage} | Worker thread still alive — reset blocked")
+            return False
+    return True
+
+
+def reset_orchestrator_for_stage(stage: str = "ic", force: bool = False):
+    """Reset orchestrator for specific stage (stops worker, discards instance).
+
+    Args:
+        stage: Advisory stage
+        force: If True, skip safety checks (for calibration runner which
+               manages its own lifecycle explicitly).
+
+    Raises:
+        RuntimeError: If stage is active and force=False
+    """
+    if not force and not _can_reset_stage(stage):
+        raise RuntimeError(
+            f"Cannot reset orchestrator for stage {stage}: worker is still active. "
+            f"Stop the worker or use force=True."
+        )
+
     global _global_orchestrator_ec, _global_orchestrator_ic, _global_orchestrator_qc
     stage_lower = stage.lower()
+    old = None
     if stage_lower == "ec":
+        old = _global_orchestrator_ec
         _global_orchestrator_ec = None
         print(f"[ORCHESTRATOR RESET] Stage: ec")
     elif stage_lower == "ic":
+        old = _global_orchestrator_ic
         _global_orchestrator_ic = None
         print(f"[ORCHESTRATOR RESET] Stage: ic")
     else:
+        old = _global_orchestrator_qc
         _global_orchestrator_qc = None
         print(f"[ORCHESTRATOR RESET] Stage: qc")
+    if old is not None:
+        old.stop_worker()
 
 
 def initialize_advisory_pipeline(

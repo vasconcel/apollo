@@ -14,6 +14,8 @@ import re
 import time
 import threading
 
+from .advisory_metrics import get_metrics
+
 
 PREFILTER_REJECT_REASONS = {
     "jobs_careers_page": "Jobs/careers listing, not a research study",
@@ -192,6 +194,7 @@ class PrefilterEngine:
     def check(self, title: str, abstract: str = "", url: str = "") -> PrefilterResult:
         start = time.time()
         self._total_count += 1
+        metrics = get_metrics()
         title_stripped = (title or "").strip()
         abstract_stripped = (abstract or "").strip()
         url_stripped = (url or "").strip()
@@ -200,6 +203,7 @@ class PrefilterEngine:
         if not title_stripped and not abstract_stripped:
             elapsed = (time.time() - start) * 1000
             self._hit_count += 1
+            metrics.prefilter_rejects += 1
             return PrefilterResult(
                 is_reject=True,
                 reason_key="empty_metadata",
@@ -224,6 +228,7 @@ class PrefilterEngine:
             if check_fn(title_stripped) or check_fn(combined):
                 elapsed = (time.time() - start) * 1000
                 self._hit_count += 1
+                metrics.prefilter_rejects += 1
                 return PrefilterResult(
                     is_reject=True,
                     reason_key=reason_key,
@@ -238,6 +243,7 @@ class PrefilterEngine:
             if norm_title in self._seen_titles:
                 elapsed = (time.time() - start) * 1000
                 self._hit_count += 1
+                metrics.prefilter_duplicate_hits += 1
                 return PrefilterResult(
                     is_reject=True,
                     reason_key="duplicate_title",
@@ -249,6 +255,7 @@ class PrefilterEngine:
             self._seen_titles[norm_title] = title_stripped[:80]
 
         elapsed = (time.time() - start) * 1000
+        metrics.prefilter_accepts += 1
         return PrefilterResult(is_reject=False, elapsed_ms=elapsed)
 
     def _detect_non_english(self, text: str) -> bool:

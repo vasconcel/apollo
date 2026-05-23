@@ -28,6 +28,7 @@ from .advisory_models import (
     AdvisoryDecision,
     AdvisoryStatus
 )
+from .advisory_metrics import get_metrics
 
 _VERBOSE = False  # Set to True for debug, False for production
 
@@ -181,21 +182,25 @@ class AdvisoryCache:
 
         if session_key in self._session_cache:
             self._session_hits += 1
+            get_metrics().cache_session_hits += 1
             cached = self._session_cache[session_key]
             self._session_cache.move_to_end(session_key)
             _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Session HIT")
             return cached
 
         self._session_misses += 1
+        get_metrics().cache_session_misses += 1
         disk_advisory = self._load_from_disk(cache_key, stage)
         if disk_advisory is not None:
             self._disk_hits += 1
+            get_metrics().cache_disk_hits += 1
             self._session_cache[session_key] = disk_advisory
             self._session_cache.move_to_end(session_key)
             _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | Disk HIT")
             return disk_advisory
 
         self._disk_misses += 1
+        get_metrics().cache_disk_misses += 1
         _log_verbose(f"[CACHE GET] Stage: {stage} | Key: {cache_key[:16]}... | MISS (not generated)")
         return AdvisoryResult.create_unavailable("Advisory not yet generated")
     
@@ -235,8 +240,12 @@ class AdvisoryCache:
         
         # LRU eviction: remove oldest entries if over limit
         max_entries = self.config.max_cache_entries
+        evicted = 0
         while len(self._session_cache) > max_entries:
             self._session_cache.popitem(last=False)
+            evicted += 1
+        if evicted:
+            get_metrics().cache_eviction_count += evicted
         
         if self.config.enable_disk_cache:
             self._save_to_disk(advisory, stage)
@@ -528,10 +537,29 @@ def get_advisory_status(
     protocol_version: str = "1.0",
     stage: str = "ic"
 ) -> AdvisoryStatus:
-    """Get status of advisory."""
+    """Get status of advisory, detecting GENERATING state from queue.
+
+    If the cache reports PENDING but the queue shows the item as
+    PROCESSING (actively being generated), returns GENERATING instead.
+    This prevents false "Advisory unavailable" rendering during active
+    generation.
+    """
     cache = get_advisory_cache()
     key = cache.compute_cache_key(title, abstract, protocol_version)
-    return cache.get_status(key, protocol_version, stage)
+    status = cache.get_status(key, protocol_version, stage)
+
+    if status == AdvisoryStatus.PENDING:
+        try:
+            from .advisory_queue import lookup_queue
+            q = lookup_queue(stage)
+            if q is not None:
+                item = q.get_item(key)
+                if item is not None and item.status == AdvisoryStatus.PROCESSING:
+                    return AdvisoryStatus.GENERATING
+        except Exception:
+            pass
+
+    return status
 
 
 def get_cache_stats() -> Dict:

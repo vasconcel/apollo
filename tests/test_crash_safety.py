@@ -413,11 +413,17 @@ class TestResetCorrectness:
         assert populated_queue.state.total == 0
         assert populated_queue.state.items == []
 
-    def test_reset_queue_for_stage_clears_both(self, populated_queue):
-        """reset_queue_for_stage must clear snapshot + WAL."""
+    def test_reset_queue_for_stage_clears_both(self, populated_queue, tmp_config):
+        """reset_queue_for_stage must clear snapshot + WAL via global queue."""
         stage = populated_queue._stage
         snapshot_path = populated_queue._queue_path
         wal_path = populated_queue._wal_path
+
+        # Register as global queue so reset_queue_for_stage can find it
+        from src.advisory.advisory_queue import _global_queue_ec
+        import src.advisory.advisory_queue as aq
+        if stage == "ec":
+            aq._global_queue_ec = populated_queue
 
         assert snapshot_path.exists()
         assert wal_path.exists()
@@ -426,6 +432,10 @@ class TestResetCorrectness:
 
         assert not snapshot_path.exists()
         assert not wal_path.exists()
+
+        # Clean up global
+        if stage == "ec":
+            aq._global_queue_ec = None
 
     def test_clear_queue_items_resets_memory(self, populated_queue):
         """Queue.clear() must clear memory state."""

@@ -10,7 +10,7 @@ Defines typed dataclasses for:
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Literal, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import hashlib
@@ -54,6 +54,7 @@ def safe_status(status: Any, default: str = "UNKNOWN") -> str:
 
 class AdvisoryStatus(str, Enum):
     PENDING = "PENDING"
+    GENERATING = "GENERATING"
     PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -110,6 +111,7 @@ class ScreeningMode(str, Enum):
     STRICT_MODE = "STRICT_MODE"
     BALANCED_MODE = "BALANCED_MODE"
     ACCELERATED_MODE = "ACCELERATED_MODE"
+    CALIBRATION = "CALIBRATION"
 
 
 class OverrideReason(str, Enum):
@@ -150,7 +152,7 @@ class CalibrationEvent:
     override_reason: str = ""
     override_severity: str = ""
 
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSONL persistence."""
@@ -192,7 +194,7 @@ class CalibrationEvent:
             disagreement=data.get("disagreement", False),
             override_reason=data.get("override_reason", ""),
             override_severity=data.get("override_severity", ""),
-            timestamp=data.get("timestamp", datetime.utcnow().isoformat())
+            timestamp=data.get("timestamp", datetime.now(timezone.utc).isoformat())
         )
 
 
@@ -959,7 +961,7 @@ class AdvisoryResult:
             justification=f"Advisory generation failed: {reason}",
             is_placeholder=False,
             error=reason,
-            generated_at=datetime.utcnow().isoformat()
+            generated_at=datetime.now(timezone.utc).isoformat()
         )
 
 
@@ -1118,13 +1120,16 @@ class QueueItem:
     title: str = ""
     abstract: str = ""
     
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     
     retry_count: int = 0
     last_error: Optional[str] = None
-    
+    retry_after: Optional[str] = None
+    retry_reason: Optional[str] = None
+    is_quarantined: bool = False
+
     def to_dict(self) -> dict:
         return {
             "cache_key": self.cache_key,
@@ -1139,7 +1144,10 @@ class QueueItem:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "retry_count": self.retry_count,
-            "last_error": self.last_error
+            "last_error": self.last_error,
+            "retry_after": self.retry_after,
+            "retry_reason": self.retry_reason,
+            "is_quarantined": self.is_quarantined,
         }
 
     @classmethod
@@ -1157,7 +1165,10 @@ class QueueItem:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             retry_count=data.get("retry_count", 0),
-            last_error=data.get("last_error")
+            last_error=data.get("last_error"),
+            retry_after=data.get("retry_after"),
+            retry_reason=data.get("retry_reason"),
+            is_quarantined=data.get("is_quarantined", False),
         )
 
 
@@ -1170,8 +1181,14 @@ class QueueState:
     completed: int = 0
     failed: int = 0
     
-    last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     last_wal_seq: int = 0
+
+    # Checkpoint metadata (operational, not advisory)
+    snapshot_created_at: str = ""
+    snapshot_item_counts: dict = field(default_factory=dict)
+    wal_compaction_count: int = 0
+    replay_operation_count: int = 0
     
     items: List[QueueItem] = field(default_factory=list)
     
@@ -1184,6 +1201,10 @@ class QueueState:
             "failed": self.failed,
             "last_updated": self.last_updated,
             "last_wal_seq": self.last_wal_seq,
+            "snapshot_created_at": self.snapshot_created_at,
+            "snapshot_item_counts": self.snapshot_item_counts,
+            "wal_compaction_count": self.wal_compaction_count,
+            "replay_operation_count": self.replay_operation_count,
             "items": [item.to_dict() for item in self.items]
         }
     
@@ -1197,6 +1218,10 @@ class QueueState:
             failed=data.get("failed", 0),
             last_updated=data.get("last_updated", ""),
             last_wal_seq=data.get("last_wal_seq", 0),
+            snapshot_created_at=data.get("snapshot_created_at", ""),
+            snapshot_item_counts=data.get("snapshot_item_counts", {}),
+            wal_compaction_count=data.get("wal_compaction_count", 0),
+            replay_operation_count=data.get("replay_operation_count", 0),
             items=[QueueItem.from_dict(item) for item in data.get("items", [])]
         )
     
@@ -1230,7 +1255,40 @@ class AdvisoryConfig:
     enable_disk_cache: bool = True
     enable_queue_state: bool = True
     max_cache_entries: int = 500
-    
+
+    # Automatic WAL compaction thresholds
+    wal_compaction_max_operations: int = 10000
+    wal_compaction_max_size_mb: float = 10.0
+    wal_compaction_interval_seconds: float = 3600.0
+
+    # Metrics persistence
+    enable_metrics_log: bool = True
+    metrics_log_path: str = "data/metrics/runtime_metrics.jsonl"
+    metrics_log_retention_count: int = 1000
+
+    # Calibration mode
+    calibration_sample_size: int = 10
+
+    # Gateway governance
+    max_concurrent_requests: int = 5
+    max_requests_per_minute_gateway: int = 30
+    max_retries_per_request: int = 3
+    retry_backoff_seconds: float = 2.0
+    provider_cooldown_seconds: float = 60.0
+    provider_cooldown_threshold: int = 3
+    max_retry_total_timeout_seconds: float = 120.0
+
+    # Diagnostic thresholds
+    diagnostics_never_triggered_threshold: float = 0.0
+    diagnostics_always_triggered_threshold: float = 0.95
+    diagnostics_high_ambiguity_threshold: float = 0.5
+    diagnostics_low_grounding_threshold: float = 0.5
+    diagnostics_confidence_instability_threshold: float = 0.3
+    diagnostics_overlap_threshold: float = 0.5
+    diagnostics_skew_acceptance_threshold_high: float = 0.95
+    diagnostics_skew_acceptance_threshold_low: float = 0.05
+    diagnostics_high_quarantine_threshold: float = 0.2
+
     def to_dict(self) -> dict:
         return {
             "cache_dir": self.cache_dir,
@@ -1242,7 +1300,30 @@ class AdvisoryConfig:
             "backoff_max": self.backoff_max,
             "jitter": self.jitter,
             "enable_disk_cache": self.enable_disk_cache,
-            "enable_queue_state": self.enable_queue_state
+            "enable_queue_state": self.enable_queue_state,
+            "wal_compaction_max_operations": self.wal_compaction_max_operations,
+            "wal_compaction_max_size_mb": self.wal_compaction_max_size_mb,
+            "wal_compaction_interval_seconds": self.wal_compaction_interval_seconds,
+            "enable_metrics_log": self.enable_metrics_log,
+            "metrics_log_path": self.metrics_log_path,
+            "metrics_log_retention_count": self.metrics_log_retention_count,
+            "calibration_sample_size": self.calibration_sample_size,
+            "max_concurrent_requests": self.max_concurrent_requests,
+            "max_requests_per_minute_gateway": self.max_requests_per_minute_gateway,
+            "max_retries_per_request": self.max_retries_per_request,
+            "retry_backoff_seconds": self.retry_backoff_seconds,
+            "provider_cooldown_seconds": self.provider_cooldown_seconds,
+            "provider_cooldown_threshold": self.provider_cooldown_threshold,
+            "max_retry_total_timeout_seconds": self.max_retry_total_timeout_seconds,
+            "diagnostics_never_triggered_threshold": self.diagnostics_never_triggered_threshold,
+            "diagnostics_always_triggered_threshold": self.diagnostics_always_triggered_threshold,
+            "diagnostics_high_ambiguity_threshold": self.diagnostics_high_ambiguity_threshold,
+            "diagnostics_low_grounding_threshold": self.diagnostics_low_grounding_threshold,
+            "diagnostics_confidence_instability_threshold": self.diagnostics_confidence_instability_threshold,
+            "diagnostics_overlap_threshold": self.diagnostics_overlap_threshold,
+            "diagnostics_skew_acceptance_threshold_high": self.diagnostics_skew_acceptance_threshold_high,
+            "diagnostics_skew_acceptance_threshold_low": self.diagnostics_skew_acceptance_threshold_low,
+            "diagnostics_high_quarantine_threshold": self.diagnostics_high_quarantine_threshold,
         }
     
     @classmethod

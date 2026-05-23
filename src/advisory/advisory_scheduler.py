@@ -10,7 +10,7 @@ Implements deterministic stage-aware advisory prioritization:
 
 from typing import Optional, Dict, Literal
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 
 WorkerState = Literal["RUNNING", "PAUSED", "IDLE"]
@@ -32,7 +32,7 @@ class SchedulerState:
         "ic": "IDLE", 
         "qc": "IDLE"
     })
-    last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     priority_hint: str = "ec"
 
 
@@ -110,7 +110,7 @@ class AdvisoryScheduler:
             
             if old_stage != stage:
                 self._state.active_stage = stage
-                self._state.last_updated = datetime.utcnow().isoformat()
+                self._state.last_updated = datetime.now(timezone.utc).isoformat()
                 self._state.priority_hint = stage
                 
                 print(f"[SCHEDULER] Active stage changed: {old_stage} -> {stage}")

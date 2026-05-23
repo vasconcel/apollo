@@ -4,6 +4,7 @@
   "decision": "UNCERTAIN",
   "confidence": 0.4,
   "triggered_criteria": [],
+  "non_triggered_criteria": [],
   "criterion_evaluations": [
     {
       "criterion_id": "IC1",
@@ -41,7 +42,7 @@
       "confidence": 0.0
     }
   ],
-  "justification": "The paper discusses fairness in technology-aided personnel selection, but it does not explicitly address recruitment and selection processes for software engineering roles. The abstract mentions the alignment between technical research findings and industry expectations, but it does not provide clear evidence of relevance to the review domain.",
+  "justification": "The abstract discusses fairness assessment methodologies in hiring, but does not explicitly address recruitment and selection processes for software engineering roles. The paper's focus on fairness in technology-aided personnel selection may be related to the review domain, but the connection is not clear.",
   "error": null,
   "is_fallback": false,
   "is_placeholder": false,
@@ -49,8 +50,8 @@
   "risk_reason": "Advisory expressed uncertainty",
   "validation_queue": "PRIORITY_REVIEW",
   "requires_validation": true,
-  "generated_at": "2026-05-22T05:01:43.100842",
-  "generation_duration_ms": 3474.9486446380615,
+  "generated_at": "2026-05-22T15:39:53.466765+00:00",
+  "generation_duration_ms": 17945.436716079712,
   "topic_relevance": {
     "domain_relevance_score": 0.0,
     "topical_alignment": 0.0,
@@ -59,12 +60,12 @@
   "raw_confidence": 0.4,
   "parser_confidence": 0.4,
   "routing_confidence": 0.4,
-  "evidence_confidence": 0.7,
+  "evidence_confidence": 0.5,
   "decision_confidence": 0.4,
   "calibration_provenance": {
     "raw_llm_confidence": 0.4,
     "final_confidence": 0.4,
-    "grounding_strength": 0.7,
+    "grounding_strength": 0.5,
     "metadata_completeness": 0.2,
     "has_evidence": false,
     "has_triggered_criteria": false,

@@ -1,10 +1,4 @@
-bibtexparser
-rispy
-openpyxl
-pandas
-streamlit
-plotly
-groq
-python-dotenv
-beautifulsoup4
-requests
+pytest>=8.0
+pydantic>=2.0
+pandas>=2.0
+openpyxl>=3.0

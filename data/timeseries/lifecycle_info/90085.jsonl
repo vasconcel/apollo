@@ -1,4 +1,0 @@
-{"ts": 90085.4445958, "v": 1.0, "tags": {"message": "advisory_generated article_id=1 stage=ec status=failed model=llama-3.3-70b-versatile failure=none", "component": "worker", "article_id": "1", "stage": "ec", "status": "failed"}}
-{"ts": 90085.8409921, "v": 1.0, "tags": {"message": "pipeline_status stage=ec", "component": "orchestrator", "stage": "ec"}}
-{"ts": 90085.8909417, "v": 1.0, "tags": {"message": "status_check stage=ec", "component": "orchestrator", "stage": "ec"}}
-{"ts": 90085.9409668, "v": 1.0, "tags": {"message": "pipeline_status stage=ic", "component": "orchestrator", "stage": "ic"}}

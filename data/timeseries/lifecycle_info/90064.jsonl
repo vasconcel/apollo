@@ -1,8 +1,0 @@
-{"ts": 90064.6941452, "v": 1.0, "tags": {"message": "pipeline_status stage=ec", "component": "orchestrator", "stage": "ec"}}
-{"ts": 90064.7343644, "v": 1.0, "tags": {"message": "status_check stage=ec", "component": "orchestrator", "stage": "ec"}}
-{"ts": 90064.7675351, "v": 1.0, "tags": {"message": "pipeline_status stage=ic", "component": "orchestrator", "stage": "ic"}}
-{"ts": 90064.8008758, "v": 1.0, "tags": {"message": "calibration_start sample_size=10 total_articles=2451", "component": "calibration", "sample_size": "10"}}
-{"ts": 90064.8342097, "v": 1.0, "tags": {"message": "calibration_stage_start stage=ec sample_size=10", "component": "calibration", "stage": "ec", "sample_size": "10"}}
-{"ts": 90064.8675572, "v": 1.0, "tags": {"message": "calibration_async_start", "component": "calibration"}}
-{"ts": 90064.8962888, "v": 1.0, "tags": {"message": "pipeline_status stage=ec", "component": "orchestrator", "stage": "ec"}}
-{"ts": 90064.9159966, "v": 1.0, "tags": {"message": "status_check stage=ec", "component": "orchestrator", "stage": "ec"}}

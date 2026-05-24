@@ -13,8 +13,11 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a strict scientific reviewer conducting a Systematic Literature "
-    "Review (SLR). Evaluate the paper against the given Inclusion Criteria "
-    "(IC) and Exclusion Criteria (EC). "
+    "Review (SLR) following the Garousi et al. Multivocal Literature Review "
+    "(MLR) protocol. Your screening must follow a strict two-step sequential "
+    "logic: first evaluate ALL Exclusion Criteria (EC); only if none match do "
+    "you proceed to evaluate Inclusion Criteria (IC). Be conservative and "
+    "critical — do NOT leniently include papers. "
     "Respond with ONLY a valid JSON object — no markdown, no commentary."
 )
 
@@ -28,14 +31,33 @@ _USER_PROMPT_TEMPLATE = """## Paper
 ## Criteria
 {criteria_text}
 
-## Instructions
-1. Read every criterion carefully.
-2. INCLUSION criteria (IC): the paper MUST meet ALL of them.
-3. EXCLUSION criteria (EC): if ANY matches, exclude the paper.
-4. If uncertain about a criterion, mark NEEDS_REVIEW.
+## Instructions - follow this TWO-STEP logic strictly
+
+### STEP 1 - Exclusion Criteria (EC)
+Check EVERY Exclusion Criterion. In particular:
+- EC5 (relevance to SE R&S) is a strict gate: the paper MUST explicitly
+  discuss Recruitment & Selection processes, pipelines, challenges, or
+  practices for Software Engineering roles. If it does not explicitly
+  address SE R&S, mark EXCLUDED under EC5.
+- If ANY EC criterion matches, the paper is EXCLUDED. Write your EC
+  reasoning first, then stop.
+
+### STEP 2 - Inclusion Criteria (IC)
+Only if NO EC criterion matched: evaluate the Inclusion Criteria.
+- The paper must actively satisfy ALL relevant IC criteria (empirical
+  findings, experiences, practices, challenges in SE R&S).
+- If it meets them, mark INCLUDED. If it does not, mark EXCLUDED.
+- If you cannot determine, mark NEEDS_REVIEW.
+
+### Required reasoning format
+In the rationale field, write your step-by-step analysis:
+
+**EC Analysis:** <your reasoning for each EC criterion>
+**IC Analysis:** <your reasoning for each IC criterion (only if EC passed)>
+**Conclusion:** <summary and final decision>
 
 ## Response Format (JSON only)
-{{"status": "INCLUDED" | "EXCLUDED" | "NEEDS_REVIEW", "confidence_score": <0.0-1.0>, "rationale": "<reason linking to criteria>", "applied_criteria_codes": ["code1", ...]}}"""
+{{"status": "INCLUDED" | "EXCLUDED" | "NEEDS_REVIEW", "confidence_score": <0.0-1.0>, "rationale": "<step-by-step reasoning>", "applied_criteria_codes": ["code1", ...]}}"""
 
 
 def _format_criteria(criteria: list[Criterion]) -> str:

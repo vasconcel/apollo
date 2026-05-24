@@ -36,6 +36,18 @@ FROM screening_decisions
 ORDER BY paper_id
 """
 
+_UPDATE_AUDIT = """
+UPDATE screening_decisions
+SET human_decision = ?, is_audited = 1
+WHERE paper_id = ?
+"""
+
+_SELECT_AUDITED = """
+SELECT paper_id, status, human_decision, rationale, applied_criteria_codes
+FROM screening_decisions
+WHERE is_audited = 1
+"""
+
 
 def _row_to_decision(row: tuple) -> ScreeningDecision:
     paper_id, status_str, confidence, rationale, codes_json = row
@@ -48,13 +60,25 @@ def _row_to_decision(row: tuple) -> ScreeningDecision:
     )
 
 
+def _migrate_audit_columns(conn: sqlite3.Connection) -> None:
+    for col in ("human_decision", "is_audited"):
+        try:
+            conn.execute(
+                f"ALTER TABLE screening_decisions ADD COLUMN {col} "
+                f"{'INTEGER DEFAULT 0' if col == 'is_audited' else 'TEXT DEFAULT NULL'}"
+            )
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+
+
 class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def __init__(self, db_path: str = "screening.db") -> None:
         self._db_path = str(db_path)
         self._conn = sqlite3.connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(_CREATE_TABLE)
-        self._conn.commit()
+        _migrate_audit_columns(self._conn)
 
     def save_decision(self, decision: ScreeningDecision) -> None:
         codes_json = json.dumps(decision.applied_criteria_codes, ensure_ascii=False)
@@ -80,3 +104,23 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def get_all_decisions(self) -> list[ScreeningDecision]:
         cursor = self._conn.execute(_SELECT_ALL)
         return [_row_to_decision(row) for row in cursor.fetchall()]
+
+    # ── Audit helpers ───────────────────────────────────────────────────────
+
+    def save_audit(self, paper_id: str, human_decision: str) -> None:
+        self._conn.execute(_UPDATE_AUDIT, (human_decision, paper_id))
+        self._conn.commit()
+
+    def get_all_audited(self) -> list[dict]:
+        cursor = self._conn.execute(_SELECT_AUDITED)
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "paper_id": row["paper_id"],
+                "status": ScreeningStatus(row["status"]),
+                "human_decision": row["human_decision"],
+                "rationale": row["rationale"],
+                "applied_criteria_codes": json.loads(row["applied_criteria_codes"]),
+            })
+        return result

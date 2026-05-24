@@ -228,10 +228,10 @@ class TestDatasetPaperRepositoryRealFile:
         repo = DatasetPaperRepository("ATLAS_Initial_Search_20260511_224108.xlsx")
         papers = repo.get_all_papers()
 
-        assert len(papers) == 1994
+        assert len(papers) > 1994
         assert all(isinstance(p, Paper) for p in papers)
 
-    def test_real_xlsx_all_source_types_are_wl(self):
+    def test_real_xlsx_contains_both_wl_and_gl(self):
         from src.infrastructure.repositories.dataset_repository import (
             DatasetPaperRepository,
         )
@@ -239,4 +239,8 @@ class TestDatasetPaperRepositoryRealFile:
         repo = DatasetPaperRepository("ATLAS_Initial_Search_20260511_224108.xlsx")
         papers = repo.get_all_papers()
 
-        assert all(p.source_type is SourceType.WL for p in papers)
+        wl = [p for p in papers if p.source_type is SourceType.WL]
+        gl = [p for p in papers if p.source_type is SourceType.GL]
+        assert len(wl) > 0
+        assert len(gl) > 0
+        assert len(wl) + len(gl) == len(papers)

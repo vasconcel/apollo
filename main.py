@@ -28,7 +28,7 @@ logging.basicConfig(
 async def main() -> None:
     dataset_path = "ATLAS_Initial_Search_20260511_224108.xlsx"
     db_path = "screening.db"
-    output_path = "data/processed/apollo_results.csv"
+    output_path = "data/processed/apollo_results.xlsx"
 
     paper_repo = DatasetPaperRepository(dataset_path)
     decision_repo = SQLiteScreeningDecisionRepository(db_path)

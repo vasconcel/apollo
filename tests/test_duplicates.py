@@ -66,7 +66,8 @@ class TestDuplicateDetectionEC6:
         assert processed == 2
         mock_screen.execute.assert_called_once_with(paper=paper1, criteria=criteria)
 
-        ec6_call = mock_decision_repo.save_decision.call_args_list[1][0][0]
+        # EC6 saved in sequential pass (call 0); LLM result saved in parallel pass (call 1)
+        ec6_call = mock_decision_repo.save_decision.call_args_list[0][0][0]
         assert ec6_call.paper_id == "p2"
         assert ec6_call.status is ScreeningStatus.EXCLUDED
         assert ec6_call.confidence_score == 1.0
@@ -131,7 +132,7 @@ class TestDuplicateDetectionEC6:
         )
         await use_case.execute()
 
-        ec6_call = mock_decision_repo.save_decision.call_args_list[1][0][0]
+        ec6_call = mock_decision_repo.save_decision.call_args_list[0][0][0]
         assert "EC6" in ec6_call.applied_criteria_codes
 
     @pytest.mark.asyncio
@@ -160,5 +161,5 @@ class TestDuplicateDetectionEC6:
         )
         await use_case.execute()
 
-        ec6_call = mock_decision_repo.save_decision.call_args_list[1][0][0]
+        ec6_call = mock_decision_repo.save_decision.call_args_list[0][0][0]
         assert "EC6" in ec6_call.applied_criteria_codes

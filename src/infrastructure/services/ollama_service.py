@@ -50,11 +50,10 @@ Only if NO EC criterion matched: evaluate the Inclusion Criteria.
 - If you cannot determine, mark NEEDS_REVIEW.
 
 ### Required reasoning format
-In the rationale field, write your step-by-step analysis:
-
-**EC Analysis:** <your reasoning for each EC criterion>
-**IC Analysis:** <your reasoning for each IC criterion (only if EC passed)>
-**Conclusion:** <summary and final decision>
+The 'AI Rationale' must be highly concise, precise, and limited to a
+maximum of 60 words. Immediately specify the exact criterion (e.g., EC5
+or IC1) and state the direct cause. Do NOT write generic introductory
+sentences or full paragraphs of summary.
 
 ## Response Format (JSON only)
 {{"status": "INCLUDED" | "EXCLUDED" | "NEEDS_REVIEW", "confidence_score": <0.0-1.0>, "rationale": "<step-by-step reasoning>", "applied_criteria_codes": ["code1", ...]}}"""

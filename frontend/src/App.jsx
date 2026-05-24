@@ -36,6 +36,7 @@ export default function App() {
   const [screenStarted, setScreenStarted] = useState(false)
 
   const pollRef = useRef(null)
+  const fetchPapersRef = useRef(null)
 
   const fetchProgress = useCallback(async () => {
     try {
@@ -45,6 +46,7 @@ export default function App() {
         setScreeningActive(true)
         setScreenStarted(true)
       }
+      return p
     } catch { /* backend may not be ready */ }
   }, [])
 
@@ -64,6 +66,9 @@ export default function App() {
     }
   }, [page, size, statusFilter, literatureType])
 
+  /* keep a mutable ref so polling interval never captures stale closure */
+  fetchPapersRef.current = fetchPapers
+
   useEffect(() => {
     fetchPapers()
   }, [fetchPapers])
@@ -72,6 +77,15 @@ export default function App() {
   useEffect(() => {
     fetchProgress()
   }, [fetchProgress])
+
+  /* poll papers every 4 s while screening runs so decisions appear in real time */
+  useEffect(() => {
+    if (!screeningActive) return
+    const interval = setInterval(() => {
+      fetchPapersRef.current()
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [screeningActive])
 
   const handleImportSuccess = (data) => {
     setImportMsg(`Imported ${data.imported_count} paper(s).`)
@@ -135,6 +149,11 @@ export default function App() {
     setLiteratureType(type)
     setPage(1)
   }
+
+  const handleRefresh = useCallback(() => {
+    fetchPapers()
+    fetchProgress()
+  }, [fetchPapers, fetchProgress])
 
   const totalPages = Math.max(1, Math.ceil(total / size))
 
@@ -212,6 +231,7 @@ export default function App() {
             onTabChange={handleTabChange}
             onPageChange={setPage}
             onLiteratureTypeChange={handleLiteratureTypeChange}
+            onRefresh={handleRefresh}
           />
         </div>
       </main>

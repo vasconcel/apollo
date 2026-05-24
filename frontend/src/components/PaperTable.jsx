@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Loader2, AlertCircle, FileText, FileSearch } from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, AlertCircle, FileText, FileSearch, ThumbsUp, ThumbsDown } from 'lucide-react'
 
 const TABS = ['All', 'Included', 'Excluded', 'Needs Review']
 
@@ -40,13 +40,30 @@ export default function PaperTable({
   onTabChange,
   onPageChange,
   onLiteratureTypeChange,
+  onRefresh,
 }) {
   const [expanded, setExpanded] = useState(null)
+  const [auditingId, setAuditingId] = useState(null)
 
   const activeTab = !statusFilter ? 'All' : statusFilter === 'INCLUDED' ? 'Included' : statusFilter === 'EXCLUDED' ? 'Excluded' : 'Needs Review'
 
   const toggleRow = (id) => {
     setExpanded((prev) => (prev === id ? null : id))
+  }
+
+  const handleAudit = async (paperId, verdict) => {
+    setAuditingId(paperId)
+    try {
+      const res = await fetch(`/api/papers/${paperId}/audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdict }),
+      })
+      if (!res.ok) return
+      if (onRefresh) onRefresh()
+    } catch { /* ignore */ } finally {
+      setAuditingId(null)
+    }
   }
 
   return (
@@ -124,7 +141,9 @@ export default function PaperTable({
                     paper={p}
                     rowNum={rowNum}
                     open={open}
+                    auditing={auditingId === p.id}
                     onToggle={() => toggleRow(p.id)}
+                    onAudit={(verdict) => handleAudit(p.id, verdict)}
                   />
                 )
               })
@@ -159,7 +178,7 @@ export default function PaperTable({
   )
 }
 
-function PaperRow({ paper, rowNum, open, onToggle }) {
+function PaperRow({ paper, rowNum, open, auditing, onToggle, onAudit }) {
   const criteria = paper.applied_criteria_codes || []
   const exclusionCriteria = criteria.filter((c) => c.startsWith('EC'))
   const inclusionCriteria = criteria.filter((c) => c.startsWith('IC'))
@@ -239,6 +258,29 @@ function PaperRow({ paper, rowNum, open, onToggle }) {
                   </div>
                 </Section>
               )}
+
+              {/* Human Audit Override */}
+              <div>
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-2">Human Audit Override</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAudit('YES') }}
+                    disabled={auditing}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                  >
+                    {auditing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ThumbsUp className="w-3.5 h-3.5" />}
+                    Approve as YES (Included)
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAudit('NO') }}
+                    disabled={auditing}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                  >
+                    {auditing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ThumbsDown className="w-3.5 h-3.5" />}
+                    Reject as NO (Excluded)
+                  </button>
+                </div>
+              </div>
             </div>
           </td>
         </tr>

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -39,6 +40,7 @@ class RunScreeningPipelineUseCase:
         papers = self._paper_repo.get_all_papers()
         processed = 0
         seen_titles: dict[str, str] = {}
+        semaphore = asyncio.Semaphore(2)
 
         try:
             with tqdm(
@@ -46,6 +48,8 @@ class RunScreeningPipelineUseCase:
                 desc="Screening papers",
                 unit="paper",
             ) as pbar:
+                # Sequential pass: skip existing decisions, mark duplicates
+                to_screen: list[Paper] = []
                 for paper in papers:
                     norm = normalize_title(paper.title)
 
@@ -67,16 +71,37 @@ class RunScreeningPipelineUseCase:
                         continue
 
                     seen_titles[norm] = paper.id
-                    decision = await self._screen.execute(
-                        paper=paper,
-                        criteria=self._criteria,
+                    to_screen.append(paper)
+
+                # Parallel pass: screen unique papers with concurrency limit
+                interrupted = False
+
+                async def screen_one(paper: Paper) -> None:
+                    nonlocal processed, interrupted
+                    if interrupted:
+                        return
+                    async with semaphore:
+                        try:
+                            decision = await self._screen.execute(
+                                paper=paper,
+                                criteria=self._criteria,
+                            )
+                        except KeyboardInterrupt:
+                            interrupted = True
+                            return
+                        self._decision_repo.save_decision(decision)
+                        processed += 1
+                        pbar.set_postfix_str(
+                            f"{paper.id} [{decision.status.value}]"
+                        )
+                        pbar.update(1)
+
+                if to_screen:
+                    await asyncio.gather(
+                        *(screen_one(p) for p in to_screen)
                     )
-                    self._decision_repo.save_decision(decision)
-                    processed += 1
-                    pbar.set_postfix_str(
-                        f"{paper.id} [{decision.status.value}]"
-                    )
-                    pbar.update(1)
+                    if interrupted:
+                        raise KeyboardInterrupt()
         except KeyboardInterrupt:
             logger.warning(
                 "Interrupted by user after %d papers. Progress saved.",

@@ -295,6 +295,11 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
         self._conn.execute(_UPDATE_AUDIT, (human_decision, paper_id))
         self._conn.commit()
 
+    def save_bulk_audit(self, paper_ids: list[str], human_decision: str) -> None:
+        params = [(human_decision, pid) for pid in paper_ids]
+        self._conn.executemany(_UPDATE_AUDIT, params)
+        self._conn.commit()
+
     def get_all_audited(self, calibration_only: bool = False) -> list[dict]:
         query = _SELECT_AUDITED_CALIBRATION if calibration_only else _SELECT_AUDITED
         cursor = self._conn.execute(query)

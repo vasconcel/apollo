@@ -272,6 +272,7 @@ class TestPapers:
         assert "rationale" in item
         assert "confidence_score" in item
         assert "applied_criteria_codes" in item
+        assert "human_decision" in item
 
 
 # ── GET /api/export ─────────────────────────────────────────────────────────

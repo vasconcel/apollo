@@ -1,6 +1,7 @@
 import math
 import re
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
@@ -151,6 +152,38 @@ def _parse_sheet(df: pd.DataFrame, sheet_name: str) -> list[Paper]:
 class DatasetPaperRepository(PaperRepository):
     def __init__(self, file_path: str | Path) -> None:
         self._file_path = Path(file_path)
+
+    def get_filtered_papers(
+        self,
+        search: Optional[str] = None,
+        title_contains: Optional[str] = None,
+        abstract_contains: Optional[str] = None,
+        year_from: Optional[int] = None,
+        year_to: Optional[int] = None,
+    ) -> list[Paper]:
+        papers = self.get_all_papers()
+        if not any([search, title_contains, abstract_contains, year_from, year_to]):
+            return papers
+        result = []
+        for p in papers:
+            if search:
+                s = search.lower()
+                if not (s in p.title.lower() or (p.abstract and s in p.abstract.lower())):
+                    continue
+            if title_contains:
+                if title_contains.lower() not in p.title.lower():
+                    continue
+            if abstract_contains:
+                if not (p.abstract and abstract_contains.lower() in p.abstract.lower()):
+                    continue
+            if year_from is not None:
+                if p.publication_year is None or p.publication_year < year_from:
+                    continue
+            if year_to is not None:
+                if p.publication_year is None or p.publication_year > year_to:
+                    continue
+            result.append(p)
+        return result
 
     def get_all_papers(self) -> list[Paper]:
         file_path = self._file_path

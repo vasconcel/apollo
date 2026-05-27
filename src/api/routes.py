@@ -276,13 +276,25 @@ async def list_papers(
     size: int = Query(50, ge=1, le=500),
     status: Optional[str] = Query(None, pattern="^(INCLUDED|EXCLUDED|NEEDS_REVIEW)$"),
     source_type: Optional[str] = Query(None, pattern="^(WL|GL)$"),
+    search: Optional[str] = Query(None),
+    title_contains: Optional[str] = Query(None),
+    abstract_contains: Optional[str] = Query(None),
+    year_from: Optional[int] = Query(None, ge=1900, le=2100),
+    year_to: Optional[int] = Query(None, ge=1900, le=2100),
 ):
     paper_repo = _get_paper_repo()
     decision_repo = _get_decision_repo()
 
-    papers = paper_repo.get_all_papers()
+    papers = paper_repo.get_filtered_papers(
+        search=search,
+        title_contains=title_contains,
+        abstract_contains=abstract_contains,
+        year_from=year_from,
+        year_to=year_to,
+    )
     decisions = decision_repo.get_all_decisions()
     decision_map = {d.paper_id: d for d in decisions}
+    human_map = decision_repo.get_human_decision_map()
 
     results = []
     for p in papers:
@@ -304,6 +316,7 @@ async def list_papers(
             "rationale": d.rationale if d else None,
             "confidence_score": d.confidence_score if d else None,
             "applied_criteria_codes": d.applied_criteria_codes if d else [],
+            "human_decision": human_map.get(p.id),
         })
 
     total = len(results)
@@ -318,6 +331,20 @@ async def list_papers(
         "total_pages": (total + size - 1) // size if total > 0 else 1,
         "items": page_results,
     }
+
+
+# ── POST /api/papers/bulk-audit ──────────────────────────────────────────────
+
+
+@router.post("/api/papers/bulk-audit")
+async def bulk_audit_papers(body: BulkAuditBody):
+    if body.verdict not in ("YES", "NO"):
+        raise HTTPException(status_code=422, detail="Verdict must be 'YES' or 'NO'.")
+    if not body.paper_ids:
+        raise HTTPException(status_code=422, detail="paper_ids must be a non-empty list.")
+    decision_repo = _get_decision_repo()
+    decision_repo.save_bulk_audit(body.paper_ids, body.verdict)
+    return {"status": "success", "count": len(body.paper_ids)}
 
 
 # ── GET /api/export ─────────────────────────────────────────────────────────
@@ -349,6 +376,11 @@ async def export_results():
 
 
 class AuditVerdict(BaseModel):
+    verdict: str
+
+
+class BulkAuditBody(BaseModel):
+    paper_ids: list[str]
     verdict: str
 
 

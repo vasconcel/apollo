@@ -32,6 +32,7 @@ export default function App() {
   const [loadingPapers, setLoadingPapers] = useState(false)
 
   const [viewTab, setViewTab] = useState('explorer')
+  const [filters, setFilters] = useState({})
 
   const [importMsg, setImportMsg] = useState(null)
   const [importError, setImportError] = useState(null)
@@ -65,6 +66,11 @@ export default function App() {
       const params = new URLSearchParams({ page, size })
       if (statusFilter) params.set('status', statusFilter)
       if (literatureType !== 'ALL') params.set('source_type', literatureType)
+      if (filters.search) params.set('search', filters.search)
+      if (filters.title_contains) params.set('title_contains', filters.title_contains)
+      if (filters.abstract_contains) params.set('abstract_contains', filters.abstract_contains)
+      if (filters.year_from) params.set('year_from', filters.year_from)
+      if (filters.year_to) params.set('year_to', filters.year_to)
       const data = await apiFetch(`/papers?${params}`)
       setPapers(data.items)
       setTotal(data.total)
@@ -73,7 +79,7 @@ export default function App() {
     } finally {
       if (!isSilent) setLoadingPapers(false)
     }
-  }, [page, size, statusFilter, literatureType])
+  }, [page, size, statusFilter, literatureType, filters])
 
   fetchPapersRef.current = fetchPapers
 
@@ -184,6 +190,11 @@ export default function App() {
     fetchPapers()
     fetchProgress()
   }, [fetchPapers, fetchProgress])
+
+  const handleFiltersChange = useCallback((newFilters) => {
+    setFilters(newFilters)
+    setPage(1)
+  }, [])
 
   const totalPages = Math.max(1, Math.ceil(total / size))
 
@@ -333,6 +344,7 @@ export default function App() {
               onPageChange={setPage}
               onLiteratureTypeChange={handleLiteratureTypeChange}
               onRefresh={handleRefresh}
+              onFiltersChange={handleFiltersChange}
             />
           ) : viewTab === 'prisma' ? (
             <PrismaFlowchart progress={progress} />

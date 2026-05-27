@@ -37,3 +37,7 @@ class ScreeningDecisionRepository(ABC):
     @abstractmethod
     def get_human_decision_map(self) -> dict[str, str]:
         """Return a dict mapping paper_id to human audit verdict ("YES"/"NO")."""
+
+    @abstractmethod
+    def save_bulk_audit(self, paper_ids: list[str], human_decision: str) -> None:
+        """Save the same human audit verdict for multiple papers in a single transaction."""

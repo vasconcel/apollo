@@ -21,32 +21,31 @@ _SYSTEM_PROMPT = (
     "Respond with ONLY a valid JSON object — no markdown, no commentary."
 )
 
-_USER_PROMPT_TEMPLATE = """## Paper
+_PROMPT_HEADER = """## Paper
 - Title: {title}
 - Abstract: {abstract}
 - Source Type: {source_type}
 - Year: {publication_year}
 - Metadata: {metadata}
 
-## Criteria
+## Criteria List
 {criteria_text}
 
 ## Instructions - follow this TWO-STEP logic strictly
 
 ### STEP 1 - Exclusion Criteria (EC)
 Check EVERY Exclusion Criterion. In particular:
-- EC5 (relevance to SE R&S) is a strict gate: the paper MUST explicitly
-  discuss Recruitment & Selection processes, pipelines, challenges, or
-  practices for Software Engineering roles. If it does not explicitly
-  address SE R&S, mark EXCLUDED under EC5.
+{ec_section}
+
 - If ANY EC criterion matches, the paper is EXCLUDED. Write your EC
   reasoning first, then stop.
 
 ### STEP 2 - Inclusion Criteria (IC)
 Only if NO EC criterion matched: evaluate the Inclusion Criteria.
-- The paper must actively satisfy ALL relevant IC criteria (empirical
-  findings, experiences, practices, challenges in SE R&S).
-- If it meets them, mark INCLUDED. If it does not, mark EXCLUDED.
+{ic_section}
+
+- If the paper satisfies the Inclusion Criteria, mark INCLUDED.
+  If it does not, mark EXCLUDED.
 - If you cannot determine, mark NEEDS_REVIEW.
 
 ### Required reasoning format
@@ -54,6 +53,10 @@ The 'AI Rationale' must be highly concise, precise, and limited to a
 maximum of 60 words. Immediately specify the exact criterion (e.g., EC5
 or IC1) and state the direct cause. Do NOT write generic introductory
 sentences or full paragraphs of summary.
+
+### CRITICAL GUIDELINES (AVOID FALSE NEGATIVES):
+1. INCLUDE border-line topics: Papers exploring "developer career paths", "tech diversity/gender barriers", or "Open Source joining trajectories" are VALID Recruitment & Selection (R&S) topics. Do NOT exclude them.
+2. EXCLUDE technical mechanics: Papers evaluating "Code Reviews", "Pull Requests", or "UI/UX Testing" must be EXCLUDED unless they explicitly target candidate screening or hiring.
 
 ## Response Format (JSON only)
 {{"status": "INCLUDED" | "EXCLUDED" | "NEEDS_REVIEW", "confidence_score": <0.0-1.0>, "rationale": "<step-by-step reasoning>", "applied_criteria_codes": ["code1", ...]}}"""
@@ -65,6 +68,16 @@ def _format_criteria(criteria: list[Criterion]) -> str:
         tag = "INCLUSION" if c.type.value == "INCLUSION" else "EXCLUSION"
         lines.append(f"  - [{tag}] {c.code}: {c.description}")
     return "\n".join(lines) if lines else "  (none)"
+
+
+def _compile_ec_section(criteria: list[Criterion]) -> str:
+    ec = [c for c in criteria if c.type.value == "EXCLUSION"]
+    return "\n".join(f"- {c.code}: {c.description}" for c in ec) or "  (none)"
+
+
+def _compile_ic_section(criteria: list[Criterion]) -> str:
+    ic = [c for c in criteria if c.type.value == "INCLUSION"]
+    return "\n".join(f"- {c.code}: {c.description}" for c in ic) or "  (none)"
 
 
 def _fallback_decision(paper_id: str, reason: str = "LLM error") -> ScreeningDecision:
@@ -133,7 +146,7 @@ class OllamaLLMService(LLMService):
                 json={
                     "model": self._model,
                     "messages": messages,
-                    "temperature": 0.1,
+                    "temperature": 0.0,
                     "response_format": {"type": "json_object"},
                 },
             )
@@ -153,18 +166,22 @@ class OllamaLLMService(LLMService):
 
     def _build_messages(self, paper: Paper, criteria: list[Criterion]) -> list[dict[str, str]]:
         criteria_text = _format_criteria(criteria)
+        ec_section = _compile_ec_section(criteria)
+        ic_section = _compile_ic_section(criteria)
 
         abstract = paper.abstract or "(no abstract)"
         metadata_str = json.dumps(paper.metadata, ensure_ascii=False)
         year_str = str(paper.publication_year) if paper.publication_year is not None else "N/A"
 
-        user_content = _USER_PROMPT_TEMPLATE.format(
+        user_content = _PROMPT_HEADER.format(
             title=paper.title,
             abstract=abstract,
             source_type=paper.source_type.value,
             publication_year=year_str,
             metadata=metadata_str,
             criteria_text=criteria_text,
+            ec_section=ec_section,
+            ic_section=ic_section,
         )
 
         return [

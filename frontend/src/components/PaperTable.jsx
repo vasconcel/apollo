@@ -1,32 +1,30 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Loader2, AlertCircle, FileText, FileSearch, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, AlertCircle, FileText, FileSearch, ThumbsUp, ThumbsDown, ShieldCheck } from 'lucide-react'
 
 const TABS = ['All', 'Included', 'Excluded', 'Needs Review']
 
 const SOURCE_TYPES = [
-  { key: 'ALL', label: 'All Literature' },
-  { key: 'WL', label: 'White Literature (WL)' },
-  { key: 'GL', label: 'Grey Literature (GL)' },
+  { key: 'ALL', label: 'ALL' },
+  { key: 'WL', label: '[ WL ]' },
+  { key: 'GL', label: '[ GL ]' },
 ]
 
 const SOURCE_BADGE = {
-  WL: { label: 'WL', classes: 'bg-sky-100 text-sky-700 border-sky-200' },
-  GL: { label: 'GL', classes: 'bg-violet-100 text-violet-700 border-violet-200' },
+  WL: { label: '[ WL ]', classes: 'text-cyan-400 border-cyan-700 drop-shadow-[0_0_4px_rgba(34,211,238,0.3)]' },
+  GL: { label: '[ GL ]', classes: 'text-fuchsia-400 border-fuchsia-700 drop-shadow-[0_0_4px_rgba(217,70,239,0.3)]' },
 }
 
-const STATUS_MAP = {
-  INCLUDED: { label: 'YES', classes: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  EXCLUDED: { label: 'NO', classes: 'bg-rose-100 text-rose-700 border-rose-200' },
-  NEEDS_REVIEW: { label: 'NEEDS_REVIEW', classes: 'bg-amber-100 text-amber-700 border-amber-200' },
-}
-
-function statusBadge(status) {
+function statusLabel(status) {
   if (!status) {
-    return <span className="inline-block rounded-md border border-gray-200 bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-400">PENDING</span>
+    return <span className="text-[12px] text-zinc-600 font-mono tracking-wider">&gt; PENDING</span>
   }
-  const m = STATUS_MAP[status]
-  if (!m) return <span className="text-xs text-gray-400">{status}</span>
-  return <span className={`inline-block rounded-md border px-2.5 py-0.5 text-xs font-medium ${m.classes}`}>{m.label}</span>
+  if (status === 'INCLUDED') {
+    return <span className="text-[12px] text-emerald-400 font-mono tracking-wider">&gt; INCLUDED</span>
+  }
+  if (status === 'EXCLUDED') {
+    return <span className="text-[12px] text-rose-400 font-mono tracking-wider">! EXCLUDED</span>
+  }
+  return <span className="text-[12px] text-amber-400 font-mono tracking-wider">? {status}</span>
 }
 
 export default function PaperTable({
@@ -67,39 +65,39 @@ export default function PaperTable({
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="border border-zinc-800 bg-zinc-900/50 rounded-sm overflow-hidden animate-glide-in">
       {/* ── Status Filters ── */}
-      <div className="flex items-center gap-1 px-4 pt-4 pb-2">
+      <div className="flex items-center gap-1 px-3 pt-3 pb-1.5 border-b border-zinc-800">
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => onTabChange(tab)}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`px-2.5 py-1 text-[11px] font-bold tracking-widest uppercase transition-all duration-150 ${
               activeTab === tab
-                ? 'bg-emerald-100 text-emerald-800'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                ? 'text-cyan-400 border-b-2 border-cyan-500'
+                : 'text-zinc-600 hover:text-zinc-400'
             }`}
           >
             {tab}
           </button>
         ))}
-        <span className="ml-auto text-xs text-gray-400 tabular-nums">{total} paper{total !== 1 ? 's' : ''}</span>
+        <span className="ml-auto text-[10px] text-zinc-600 tabular-nums tracking-wider">{total} RESULT{total !== 1 ? 'S' : ''}</span>
       </div>
 
       {/* ── Literature Type Toggle ── */}
-      <div className="flex items-center gap-1 px-4 pb-3 border-b border-gray-100">
+      <div className="flex items-center gap-1 px-3 pb-3 border-b border-zinc-800">
         {SOURCE_TYPES.map((st) => (
           <button
             key={st.key}
             onClick={() => onLiteratureTypeChange(st.key)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold tracking-wider transition-all duration-150 ${
               literatureType === st.key
-                ? 'bg-indigo-100 text-indigo-800'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                ? st.key === 'WL' ? 'text-cyan-400 bg-cyan-950/30' : st.key === 'GL' ? 'text-fuchsia-400 bg-fuchsia-950/30' : 'text-zinc-200 bg-zinc-800'
+                : 'text-zinc-600 hover:text-zinc-400'
             }`}
           >
-            {st.key === 'WL' && <FileText className="w-3.5 h-3.5" />}
-            {st.key === 'GL' && <FileSearch className="w-3.5 h-3.5" />}
+            {st.key === 'WL' && <FileText className="w-3 h-3" />}
+            {st.key === 'GL' && <FileSearch className="w-3 h-3" />}
             {st.label}
           </button>
         ))}
@@ -107,28 +105,28 @@ export default function PaperTable({
 
       {/* ── Table ── */}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead>
-            <tr className="border-b border-gray-100 bg-gray-50/50">
-              <th className="w-8 px-3 py-2.5 text-left font-medium text-gray-400 text-xs uppercase tracking-wider" />
-              <th className="px-3 py-2.5 text-left font-medium text-gray-400 text-xs uppercase tracking-wider w-10">#</th>
-              <th className="px-3 py-2.5 text-left font-medium text-gray-400 text-xs uppercase tracking-wider">Library</th>
-              <th className="px-3 py-2.5 text-left font-medium text-gray-400 text-xs uppercase tracking-wider">Title</th>
-              <th className="px-3 py-2.5 text-left font-medium text-gray-400 text-xs uppercase tracking-wider w-28">Decision</th>
+            <tr className="scanline-head border-b border-zinc-800">
+              <th className="w-8 px-2 py-2 text-left font-medium text-[10px] text-zinc-600 uppercase tracking-widest" />
+              <th className="px-2 py-2 text-left font-medium text-[10px] text-zinc-600 uppercase tracking-widest w-10">#</th>
+              <th className="px-2 py-2 text-left font-medium text-[10px] text-zinc-600 uppercase tracking-widest">Library</th>
+              <th className="px-2 py-2 text-left font-medium text-[10px] text-zinc-600 uppercase tracking-widest">Title</th>
+              <th className="px-2 py-2 text-left font-medium text-[10px] text-zinc-600 uppercase tracking-widest w-28">Decision</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-3 py-12 text-center">
-                  <Loader2 className="w-5 h-5 animate-spin text-gray-400 mx-auto" />
+                <td colSpan={5} className="px-2 py-10 text-center">
+                  <Loader2 className="w-4 h-4 animate-spin text-zinc-600 mx-auto" />
                 </td>
               </tr>
             ) : papers.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-12 text-center text-gray-400 text-sm">
-                  <AlertCircle className="w-5 h-5 mx-auto mb-1" />
-                  No papers match this filter.
+                <td colSpan={5} className="px-2 py-10 text-center text-zinc-600 text-xs">
+                  <AlertCircle className="w-4 h-4 mx-auto mb-1" />
+                  No records match filter.
                 </td>
               </tr>
             ) : (
@@ -154,23 +152,23 @@ export default function PaperTable({
 
       {/* ── Pagination ── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+        <div className="flex items-center justify-between px-3 py-2.5 border-t border-zinc-800">
           <button
             disabled={page <= 1}
             onClick={() => onPageChange(page - 1)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="px-3 py-1 text-[11px] font-bold tracking-wider text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
-            Previous
+            &lt; PREV
           </button>
-          <span className="text-sm text-gray-500 tabular-nums">
-            Page {page} of {totalPages}
+          <span className="text-[11px] text-zinc-500 tabular-nums tracking-wider">
+            PAGE {page} / {totalPages}
           </span>
           <button
             disabled={page >= totalPages}
             onClick={() => onPageChange(page + 1)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="px-3 py-1 text-[11px] font-bold tracking-wider text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
-            Next
+            NEXT &gt;
           </button>
         </div>
       )}
@@ -183,50 +181,59 @@ function PaperRow({ paper, rowNum, open, auditing, onToggle, onAudit }) {
   const exclusionCriteria = criteria.filter((c) => c.startsWith('EC'))
   const inclusionCriteria = criteria.filter((c) => c.startsWith('IC'))
 
+  const typeColor = paper.source_type === 'WL' ? 'border-l-cyan-500' : paper.source_type === 'GL' ? 'border-l-fuchsia-500' : 'border-l-zinc-600'
+
   return (
     <>
       <tr
         onClick={onToggle}
-        className={`border-b border-gray-50 cursor-pointer transition-colors hover:bg-gray-50 ${
-          open ? 'bg-gray-50' : ''
+        className={`border-b border-zinc-800/60 cursor-pointer transition-all duration-150 hover:bg-zinc-800/80 ${
+          open ? 'bg-zinc-800/60 border-l-2 ' + typeColor : ''
         }`}
       >
-        <td className="px-3 py-2.5 text-gray-400">
-          {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        <td className="px-2 py-2 text-zinc-600">
+          {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </td>
-        <td className="px-3 py-2.5 text-gray-500 tabular-nums">{rowNum}</td>
-        <td className="px-3 py-2.5 text-gray-700 max-w-[140px] truncate">{paper.source_library}</td>
-        <td className="px-3 py-2.5 text-gray-800 font-medium max-w-md">
+        <td className="px-2 py-2 text-zinc-500 tabular-nums text-[12px]">{rowNum}</td>
+        <td className="px-2 py-2 text-zinc-400 max-w-[120px] truncate text-[12px]">{paper.source_library}</td>
+        <td className="px-2 py-2 text-zinc-200 font-medium max-w-md">
           <div className="flex items-center gap-2 truncate">
             {paper.source_type && SOURCE_BADGE[paper.source_type] && (
-              <span className={`inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none shrink-0 ${SOURCE_BADGE[paper.source_type].classes}`}>
+              <span className={`inline-block border px-1 py-0.5 text-[9px] font-bold leading-none shrink-0 ${SOURCE_BADGE[paper.source_type].classes}`}>
                 {SOURCE_BADGE[paper.source_type].label}
               </span>
             )}
             <span className="truncate">{paper.title}</span>
           </div>
         </td>
-        <td className="px-3 py-2.5">{statusBadge(paper.status)}</td>
+        <td className="px-2 py-2">{statusLabel(paper.status)}</td>
       </tr>
       {open && (
         <tr key={`${paper.id}-detail`}>
-          <td colSpan={5} className="px-3 py-0 border-b border-gray-100">
-            <div className="px-10 py-4 space-y-3 bg-white text-sm leading-relaxed">
-              {/* Abstract */}
-              <Section title="Abstract">
-                <p className="text-gray-600 max-h-24 overflow-y-auto whitespace-pre-wrap">
-                  {paper.abstract || '(no abstract)'}
-                </p>
-              </Section>
+          <td colSpan={5} className="px-0 py-0 border-b border-zinc-800">
+            <div className="px-8 py-4 space-y-4 bg-zinc-950/60 text-[13px] leading-relaxed animate-glide-in">
+              {/* Abstract — Decrypted Report */}
+              <div>
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-1">
+                  &gt; ABSTRACT
+                </span>
+                <div className={`border-l-2 ${paper.source_type === 'WL' ? 'border-l-cyan-700' : paper.source_type === 'GL' ? 'border-l-fuchsia-700' : 'border-l-zinc-600'} pl-3`}>
+                  <p className="text-zinc-400 max-h-24 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                    {paper.abstract || '(no abstract)'}
+                  </p>
+                </div>
+              </div>
 
               {/* Criteria codes */}
-              <div className="flex flex-wrap gap-6">
+              <div className="flex flex-wrap gap-5">
                 {inclusionCriteria.length > 0 && (
                   <div>
-                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Inclusion Criteria</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-1">
+                      &gt; INCLUSION
+                    </span>
+                    <div className="flex flex-wrap gap-1">
                       {inclusionCriteria.map((code) => (
-                        <span key={code} className="inline-block rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        <span key={code} className="inline-block border border-emerald-800/60 bg-emerald-950/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 tracking-wider">
                           {code}
                         </span>
                       ))}
@@ -235,10 +242,12 @@ function PaperRow({ paper, rowNum, open, auditing, onToggle, onAudit }) {
                 )}
                 {exclusionCriteria.length > 0 && (
                   <div>
-                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Exclusion Criteria</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-1">
+                      &gt; EXCLUSION
+                    </span>
+                    <div className="flex flex-wrap gap-1">
                       {exclusionCriteria.map((code) => (
-                        <span key={code} className="inline-block rounded-md bg-rose-50 border border-rose-200 px-2 py-0.5 text-xs font-medium text-rose-700">
+                        <span key={code} className="inline-block border border-rose-800/60 bg-rose-950/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-400 tracking-wider">
                           {code}
                         </span>
                       ))}
@@ -246,38 +255,46 @@ function PaperRow({ paper, rowNum, open, auditing, onToggle, onAudit }) {
                   </div>
                 )}
                 {criteria.length === 0 && (
-                  <p className="text-xs text-gray-400">No criteria codes recorded.</p>
+                  <p className="text-[11px] text-zinc-600">No criteria codes recorded.</p>
                 )}
               </div>
 
-              {/* AI Rationale */}
+              {/* AI Rationale — Decrypted Report */}
               {paper.rationale && (
-                <Section title="AI Rationale">
-                  <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-gray-700 text-xs leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
-                    {paper.rationale}
+                <div>
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-1">
+                    &gt; AI RATIONALE
+                  </span>
+                  <div className={`border-l-2 ${paper.source_type === 'WL' ? 'border-l-cyan-700' : paper.source_type === 'GL' ? 'border-l-fuchsia-700' : 'border-l-zinc-600'} pl-3`}>
+                    <div className="bg-zinc-950 border border-zinc-800 p-2.5 text-zinc-400 text-[11px] leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
+                      {paper.rationale}
+                    </div>
                   </div>
-                </Section>
+                </div>
               )}
 
-              {/* Human Audit Override */}
+              {/* Human Audit Override — Neon-wire glassmorphism */}
               <div>
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-2">Human Audit Override</span>
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                  <ShieldCheck className="w-3 h-3 text-amber-400" />
+                  HUMAN AUDIT OVERRIDE
+                </span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => { e.stopPropagation(); onAudit('YES') }}
                     disabled={auditing}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                    className="inline-flex items-center gap-1.5 border-2 border-emerald-700/50 bg-emerald-950/10 backdrop-blur text-emerald-400 hover:bg-emerald-950/40 hover:shadow-[0_0_12px_rgba(16,185,129,0.2)] disabled:border-zinc-700 disabled:text-zinc-600 disabled:bg-transparent disabled:cursor-not-allowed px-3 py-1.5 text-[11px] font-bold tracking-wider transition-all duration-200"
                   >
-                    {auditing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ThumbsUp className="w-3.5 h-3.5" />}
-                    Approve as YES (Included)
+                    {auditing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3 h-3" />}
+                    &gt; APPROVE YES
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onAudit('NO') }}
                     disabled={auditing}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                    className="inline-flex items-center gap-1.5 border-2 border-rose-700/50 bg-rose-950/10 backdrop-blur text-rose-400 hover:bg-rose-950/40 hover:shadow-[0_0_12px_rgba(244,63,94,0.2)] disabled:border-zinc-700 disabled:text-zinc-600 disabled:bg-transparent disabled:cursor-not-allowed px-3 py-1.5 text-[11px] font-bold tracking-wider transition-all duration-200"
                   >
-                    {auditing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ThumbsDown className="w-3.5 h-3.5" />}
-                    Reject as NO (Excluded)
+                    {auditing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsDown className="w-3 h-3" />}
+                    ! REJECT NO
                   </button>
                 </div>
               </div>
@@ -286,14 +303,5 @@ function PaperRow({ paper, rowNum, open, auditing, onToggle, onAudit }) {
         </tr>
       )}
     </>
-  )
-}
-
-function Section({ title, children }) {
-  return (
-    <div>
-      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider block mb-1">{title}</span>
-      {children}
-    </div>
   )
 }

@@ -1,3 +1,41 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+body {
+  background-color: #09090b;
+  color: #d4d4d8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* scanline header effect for table thead */
+.scanline-head {
+  background: linear-gradient(90deg, #09090b 0%, #18181b 50%, #09090b 100%);
+  background-size: 200% 100%;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+@layer components {
+  .cyber-card {
+    @apply border border-cyber-border bg-cyber-surface/50 rounded-sm;
+  }
+  .neon-border-wl {
+    @apply border-cyan-900/50 shadow-neon-cyan;
+  }
+  .neon-border-gl {
+    @apply border-fuchsia-900/50 shadow-neon-fuchsia;
+  }
+}

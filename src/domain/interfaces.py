@@ -33,3 +33,7 @@ class ScreeningDecisionRepository(ABC):
     @abstractmethod
     def get_all_decisions(self) -> list[ScreeningDecision]:
         """Retrieve all persisted screening decisions."""
+
+    @abstractmethod
+    def get_human_decision_map(self) -> dict[str, str]:
+        """Return a dict mapping paper_id to human audit verdict ("YES"/"NO")."""

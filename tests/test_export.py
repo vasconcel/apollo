@@ -51,6 +51,7 @@ def mock_decision_repo(mocker: MockerFixture):
             applied_criteria_codes=["EC6"],
         ),
     ]
+    repo.get_human_decision_map.return_value = {}
     return repo
 
 
@@ -116,7 +117,7 @@ class TestWLSheet:
         assert ws.cell(row=2, column=6).value == "agile; review"
         assert ws.cell(row=2, column=7).value == "IC1; IC2"
         assert ws.cell(row=2, column=8).value is None
-        assert ws.cell(row=2, column=9).value == "YES"
+        assert ws.cell(row=2, column=9).value is None
 
     def test_human_columns_empty_in_data(self, mock_paper_repo, mock_decision_repo, tmp_path):
         from src.use_cases.export_papers import ExportScreenedPapersUseCase
@@ -199,12 +200,13 @@ class TestWLSheet:
         repo.get_all_decisions.return_value = [
             ScreeningDecision(
                 paper_id="10",
-                status=ScreeningStatus.NEEDS_REVIEW,
-                confidence_score=0.5,
-                rationale="Unsure",
-                applied_criteria_codes=[],
+                status=ScreeningStatus.INCLUDED,
+                confidence_score=0.95,
+                rationale="Meets criteria",
+                applied_criteria_codes=["IC1"],
             ),
         ]
+        repo.get_human_decision_map.return_value = {}
 
         output = tmp_path / "output.xlsx"
         ExportScreenedPapersUseCase(repo, repo).execute(str(output))
@@ -216,7 +218,7 @@ class TestWLSheet:
 
         assert row["Library"] == "Unknown Database"
         assert row["Palavra-Chaves"] is None
-        assert row["Revisor 1"] == "NEEDS_REVIEW"
+        assert row["Revisor 1"] is None
 
 
 class TestGLSheet:
@@ -278,7 +280,7 @@ class TestGLSheet:
         ws = wb["Grey Literature"]
 
         val = ws.cell(row=3, column=3).value
-        assert val in (0, 1, "NEEDS_REVIEW")
+        assert val in (0, 1, "NEEDS_REVIEW", None)
 
     def test_revisor2_empty(self, mock_paper_repo, mock_decision_repo, tmp_path):
         from src.use_cases.export_papers import ExportScreenedPapersUseCase
@@ -346,6 +348,7 @@ class TestSequentialNumbering:
             ScreeningDecision(paper_id="b", status=ScreeningStatus.INCLUDED, confidence_score=0.9, rationale="x", applied_criteria_codes=["IC1"]),
             ScreeningDecision(paper_id="c", status=ScreeningStatus.INCLUDED, confidence_score=0.9, rationale="x", applied_criteria_codes=["IC1"]),
         ]
+        repo.get_human_decision_map.return_value = {}
 
         output = tmp_path / "output.xlsx"
         ExportScreenedPapersUseCase(repo, repo).execute(str(output))
@@ -429,6 +432,7 @@ class TestEmptyDecisions:
 
         decision_repo = mocker.MagicMock()
         decision_repo.get_all_decisions.return_value = []
+        decision_repo.get_human_decision_map.return_value = {}
 
         output = tmp_path / "output.xlsx"
         ExportScreenedPapersUseCase(mock_paper_repo, decision_repo).execute(str(output))

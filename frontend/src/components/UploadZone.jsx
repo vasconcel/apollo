@@ -62,9 +62,12 @@ export default function UploadZone({ onSuccess, onError }) {
       onDragLeave={handleDragLeave}
       onClick={() => inputRef.current?.click()}
       className={`
-        relative cursor-pointer rounded-xl border-2 border-dashed p-6
+        relative cursor-pointer border-2 border-dashed rounded-sm p-5
         flex flex-col items-center justify-center gap-3 text-center transition-all duration-200
-        ${dragging ? 'border-emerald-400 bg-emerald-50' : 'border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50'}
+        ${dragging
+          ? 'border-cyan-400 bg-cyan-950/30 shadow-neon-cyan'
+          : 'border-zinc-700 bg-zinc-900/50 hover:border-cyan-700 hover:bg-zinc-900/80'
+        }
         ${uploading ? 'pointer-events-none opacity-60' : ''}
       `}
     >
@@ -78,24 +81,27 @@ export default function UploadZone({ onSuccess, onError }) {
 
       {uploading ? (
         <>
-          <FileSpreadsheet className="w-10 h-10 text-emerald-500 animate-pulse" />
-          <p className="text-sm font-medium text-gray-600">Importing…</p>
+          <FileSpreadsheet className="w-8 h-8 text-cyan-400 animate-neon-pulse" />
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">&gt; Ingesting&hellip;</p>
         </>
       ) : dragging ? (
         <>
-          <Upload className="w-10 h-10 text-emerald-500" />
-          <p className="text-sm font-medium text-emerald-600">Drop your file here</p>
+          <Upload className="w-8 h-8 text-cyan-400" />
+          <p className="text-xs font-medium text-cyan-400">&gt; Drop file to ingest</p>
         </>
       ) : (
         <>
-          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-            <FileX className="w-6 h-6 text-gray-400" />
+          <div className="w-10 h-10 border border-zinc-700 rounded-sm flex items-center justify-center bg-zinc-900">
+            <FileX className="w-5 h-5 text-zinc-500" />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-700">
-              <span className="text-emerald-600 underline underline-offset-2">Click to upload</span> or drag and drop
+            <p className="text-xs text-zinc-400">
+              <span className="text-cyan-400 underline underline-offset-4 decoration-cyan-800 decoration-dotted">
+                SELECT FILE
+              </span>{' '}
+              or drop here
             </p>
-            <p className="text-xs text-gray-400 mt-1">CSV, XLS or XLSX up to 50MB</p>
+            <p className="text-[10px] text-zinc-600 mt-1 tracking-widest uppercase">Data Ingestion Port</p>
           </div>
         </>
       )}

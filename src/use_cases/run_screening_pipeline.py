@@ -36,77 +36,100 @@ class RunScreeningPipelineUseCase:
         self._screen = screen_paper_use_case
         self._criteria = criteria
 
-    async def execute(self) -> int:
+    async def execute(self, calibration_paper_ids: Optional[set[str]] = None) -> int:
         papers = self._paper_repo.get_all_papers()
         processed = 0
         seen_titles: dict[str, str] = {}
         semaphore = asyncio.Semaphore(2)
 
-        try:
-            with tqdm(
-                total=len(papers),
-                desc="Screening papers",
-                unit="paper",
-            ) as pbar:
-                # Sequential pass: skip existing decisions, mark duplicates
-                to_screen: list[Paper] = []
-                for paper in papers:
-                    norm = normalize_title(paper.title)
+        # Sequential pass: filter, skip existing decisions, mark duplicates
+        to_screen: list[Paper] = []
+        for paper in papers:
+            # Strict calibration isolation: skip any paper not in the set
+            if calibration_paper_ids and paper.id not in calibration_paper_ids:
+                continue
 
-                    existing = self._decision_repo.get_decision(paper.id)
-                    if existing is not None:
-                        seen_titles[norm] = paper.id
-                        pbar.set_postfix_str(f"Skipping {paper.id}")
-                        pbar.update(1)
-                        continue
+            norm = normalize_title(paper.title)
 
-                    if norm in seen_titles:
-                        decision = self._make_ec6_decision(paper)
-                        self._decision_repo.save_decision(decision)
-                        processed += 1
-                        pbar.set_postfix_str(
-                            f"{paper.id} [EC6] Duplicate"
-                        )
-                        pbar.update(1)
-                        continue
-
-                    seen_titles[norm] = paper.id
+            existing = self._decision_repo.get_decision(paper.id)
+            if existing is not None:
+                # In calibration mode, reprocess placeholder decisions
+                if calibration_paper_ids and paper.id in calibration_paper_ids:
                     to_screen.append(paper)
+                    continue
+                # In full mode, skip ONLY if the decision is definitive (INCLUDED/EXCLUDED).
+                # Reprocess if it's still a placeholder (NEEDS_REVIEW)
+                if existing.status == ScreeningStatus.NEEDS_REVIEW:
+                    to_screen.append(paper)
+                    continue
+                seen_titles[norm] = paper.id
+                continue
 
-                # Parallel pass: screen unique papers with concurrency limit
-                interrupted = False
+            if norm in seen_titles:
+                decision = self._make_ec6_decision(paper)
+                self._decision_repo.save_decision(decision)
+                processed += 1
+                continue
 
-                async def screen_one(paper: Paper) -> None:
-                    nonlocal processed, interrupted
-                    if interrupted:
-                        return
-                    async with semaphore:
-                        try:
-                            decision = await self._screen.execute(
-                                paper=paper,
-                                criteria=self._criteria,
-                            )
-                        except KeyboardInterrupt:
-                            interrupted = True
+            seen_titles[norm] = paper.id
+            to_screen.append(paper)
+
+        # Parallel pass: screen unique papers with concurrency limit
+        interrupted = False
+
+        async def screen_one(paper: Paper) -> None:
+            nonlocal processed, interrupted
+            if interrupted:
+                return
+            async with semaphore:
+                try:
+                    decision = await self._screen.execute(
+                        paper=paper,
+                        criteria=self._criteria,
+                    )
+                except KeyboardInterrupt:
+                    interrupted = True
+                    return
+                self._decision_repo.save_decision(decision)
+                processed += 1
+
+        if to_screen:
+            try:
+                with tqdm(
+                    total=len(to_screen),
+                    desc="Screening papers",
+                    unit="paper",
+                ) as pbar:
+                    async def screen_one_with_progress(paper: Paper) -> None:
+                        nonlocal processed, interrupted
+                        if interrupted:
                             return
-                        self._decision_repo.save_decision(decision)
-                        processed += 1
-                        pbar.set_postfix_str(
-                            f"{paper.id} [{decision.status.value}]"
-                        )
-                        pbar.update(1)
+                        async with semaphore:
+                            try:
+                                decision = await self._screen.execute(
+                                    paper=paper,
+                                    criteria=self._criteria,
+                                )
+                            except KeyboardInterrupt:
+                                interrupted = True
+                                return
+                            self._decision_repo.save_decision(decision)
+                            processed += 1
+                            pbar.set_postfix_str(
+                                f"{paper.id} [{decision.status.value}]"
+                            )
+                            pbar.update(1)
 
-                if to_screen:
                     await asyncio.gather(
-                        *(screen_one(p) for p in to_screen)
+                        *(screen_one_with_progress(p) for p in to_screen)
                     )
                     if interrupted:
                         raise KeyboardInterrupt()
-        except KeyboardInterrupt:
-            logger.warning(
-                "Interrupted by user after %d papers. Progress saved.",
-                processed,
-            )
+            except KeyboardInterrupt:
+                logger.warning(
+                    "Interrupted by user after %d papers. Progress saved.",
+                    processed,
+                )
 
         return processed
 

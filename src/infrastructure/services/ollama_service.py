@@ -184,7 +184,139 @@ class OllamaLLMService(LLMService):
             ic_section=ic_section,
         )
 
+        if paper.source_type.value == "GL":
+            gl_warning = (
+                "[WARNING: The following paper is Grey Literature (GL) written by a practitioner. "
+                "Do NOT expect traditional academic structures, literature reviews, or formal empirical "
+                "methodologies. Evaluate the eligibility strictly based on whether it reports real-world "
+                "industry practices, corporate hiring procedures, blog post narratives, or lived experiences "
+                "of candidates/recruiters (IC5). If it does, do not exclude under EC5.]\n\n"
+            )
+            user_content = gl_warning + user_content
+
         return [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ]
+
+    # ── Quality Assessment ──────────────────────────────────────────────────
+
+    _QUALITY_SYSTEM_PROMPT = (
+        "You are a rigorous methodological quality assessor in a Systematic "
+        "Literature Review (SLR). Evaluate the paper against the quality "
+        "criteria below. Respond with ONLY a valid JSON object — no markdown, "
+        "no commentary."
+    )
+
+    _WL_QA_PROMPT = """## Paper
+- Title: {title}
+- Abstract: {abstract}
+- Source Type: White Literature (WL)
+- Year: {publication_year}
+
+## Quality Assessment Questions (WL — White Literature)
+
+Answer each question with 1.0 (Yes), 0.5 (Partially), or 0.0 (No).
+
+**WL-Q1**: Is the research design clearly described and appropriate for the stated objectives?
+- 1.0 = Yes, clearly described and fully appropriate.
+- 0.5 = Partially described or partially appropriate.
+- 0.0 = No, not described or inappropriate.
+
+**WL-Q2**: Is the data collection methodology clearly described and suitable for the research context?
+- 1.0 = Yes, clearly described and suitable.
+- 0.5 = Partially described or partially suitable.
+- 0.0 = No, not described or unsuitable.
+
+**WL-Q3**: Are the analytical methods rigorous and appropriate for the data collected?
+- 1.0 = Yes, rigorous and appropriate.
+- 0.5 = Partially rigorous or partially appropriate.
+- 0.0 = No, not rigorous or inappropriate.
+
+**WL-Q4**: Are the conclusions supported by the evidence and are limitations discussed?
+- 1.0 = Yes, conclusions supported and limitations discussed.
+- 0.5 = Partially supported or limitations only partially addressed.
+- 0.0 = No, conclusions unsupported or no limitations discussed.
+
+## Response Format (JSON only)
+{{"q1": <1.0|0.5|0.0>, "q2": <1.0|0.5|0.0>, "q3": <1.0|0.5|0.0>, "q4": <1.0|0.5|0.0>, "rationale": "<brief explanation>"}}"""
+
+    _GL_QA_PROMPT = """## Paper
+- Title: {title}
+- Abstract: {abstract}
+- Source Type: Grey Literature (GL)
+- Year: {publication_year}
+
+## Quality Assessment Questions (GL — Grey Literature)
+
+Answer each question with 1.0 (Yes), 0.5 (Partially), or 0.0 (No).
+
+**GL-Q1**: Is the author's expertise or organizational context explicitly stated?
+- 1.0 = Yes, explicitly stated.
+- 0.5 = Partially stated or implied.
+- 0.0 = No, not stated.
+
+**GL-Q2**: Is the source of experience transparent (e.g., specific hiring cycle, personal narrative)?
+- 1.0 = Yes, transparent.
+- 0.5 = Partially transparent.
+- 0.0 = No, not transparent.
+
+**GL-Q3**: Are the claims supported by operational artifacts (e.g., process steps, rubrics, or data)?
+- 1.0 = Yes, supported.
+- 0.5 = Partially supported.
+- 0.0 = No, unsupported.
+
+**GL-Q4**: Does the source provide insights beyond generic employer marketing (e.g., trade-offs)?
+- 1.0 = Yes, provides substantive insights.
+- 0.5 = Partially insightful.
+- 0.0 = No, generic or purely promotional.
+
+## Response Format (JSON only)
+{{"q1": <1.0|0.5|0.0>, "q2": <1.0|0.5|0.0>, "q3": <1.0|0.5|0.0>, "q4": <1.0|0.5|0.0>, "rationale": "<brief explanation>"}}"""
+
+    async def evaluate_quality(self, paper: Paper) -> dict:
+        abstract = paper.abstract or "(no abstract)"
+        year_str = str(paper.publication_year) if paper.publication_year is not None else "N/A"
+
+        if paper.source_type.value == "WL":
+            user_content = self._WL_QA_PROMPT.format(
+                title=paper.title,
+                abstract=abstract,
+                publication_year=year_str,
+            )
+        else:
+            user_content = self._GL_QA_PROMPT.format(
+                title=paper.title,
+                abstract=abstract,
+                publication_year=year_str,
+            )
+
+        messages = [
+            {"role": "system", "content": self._QUALITY_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+
+        try:
+            response = await self._client.post(
+                "/chat/completions",
+                json={
+                    "model": self._model,
+                    "messages": messages,
+                    "temperature": 0.0,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+            content: str = body["choices"][0]["message"]["content"]
+            data: dict = json.loads(content)
+            return {
+                "q1": float(data.get("q1", 0.0)),
+                "q2": float(data.get("q2", 0.0)),
+                "q3": float(data.get("q3", 0.0)),
+                "q4": float(data.get("q4", 0.0)),
+                "rationale": str(data.get("rationale", "")),
+            }
+        except Exception as exc:
+            logger.error("Quality assessment failed for paper %s: %s", paper.id, exc)
+            return {"q1": 0.0, "q2": 0.0, "q3": 0.0, "q4": 0.0, "rationale": f"Error: {exc}"}

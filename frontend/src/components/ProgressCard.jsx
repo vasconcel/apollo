@@ -1,7 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Play, Cpu, BarChart3, FlaskConical } from 'lucide-react'
 
+const TARGET_OPTIONS = [
+  { key: 'ALL', label: 'ALL' },
+  { key: 'WL', label: '[ WL ]' },
+  { key: 'GL', label: '[ GL ]' },
+]
+
 export default function ProgressCard({ progress, active, started, onStart, onStartCalibration, onProgressUpdate }) {
+  const [targetScope, setTargetScope] = useState('ALL')
   const intervalRef = useRef(null)
 
   useEffect(() => {
@@ -99,11 +106,37 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
         <StatBox label="PENDING" value={pending} color="text-amber-400" />
       </div>
 
+      {/* Target scope selector */}
+      <div>
+        <span className="text-[10px] text-zinc-500 uppercase tracking-widest block mb-1">Screening Target</span>
+        <div className="flex items-center gap-1">
+          {TARGET_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setTargetScope(opt.key)}
+              disabled={active || started}
+              className={`px-2.5 py-1 text-[11px] font-bold tracking-wider transition-all duration-150 ${
+                targetScope === opt.key
+                  ? opt.key === 'WL' ? 'text-cyan-400 bg-cyan-950/30 border border-cyan-700'
+                    : opt.key === 'GL' ? 'text-fuchsia-400 bg-fuchsia-950/30 border border-fuchsia-700'
+                    : 'text-zinc-200 bg-zinc-800 border border-zinc-600'
+                  : 'text-zinc-600 hover:text-zinc-400 border border-transparent'
+              } ${(active || started) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Action buttons */}
       <div className="space-y-2">
         {!active && !isCompleted && onStartCalibration && canCalibrate && (
           <button
-            onClick={onStartCalibration}
+            onClick={() => {
+              fetch(`/api/screening/start?mode=calibration&target=${targetScope}`, { method: 'POST' })
+              if (onStartCalibration) onStartCalibration()
+            }}
             disabled={inCalibration || screened > 0}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 border-fuchsia-800/60 text-fuchsia-400 hover:bg-fuchsia-950/30 hover:shadow-[0_0_12px_rgba(217,70,239,0.2)] disabled:border-zinc-700 disabled:text-zinc-600 disabled:cursor-not-allowed text-xs font-bold tracking-wider transition-all duration-200"
           >
@@ -113,7 +146,10 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
         )}
         {!active && !isCompleted && (
           <button
-            onClick={onStart}
+            onClick={() => {
+              fetch(`/api/screening/start?mode=full&target=${targetScope}`, { method: 'POST' })
+              if (onStart) onStart()
+            }}
             disabled={total === 0}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 border-cyan-800/60 text-cyan-400 hover:bg-cyan-950/30 hover:shadow-neon-cyan disabled:border-zinc-700 disabled:text-zinc-600 disabled:cursor-not-allowed text-xs font-bold tracking-wider transition-all duration-200"
           >

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { ShieldAlert, AlertTriangle, Info, Loader2, Play } from 'lucide-react'
+import { useState, useEffect, useCallback, Fragment, useRef } from 'react'
+import { ShieldAlert, AlertTriangle, Info, Loader2, Play, Sparkles, ChevronDown, ChevronUp, ClipboardCheck, RefreshCw, ExternalLink } from 'lucide-react'
 
 function KappaBadge({ kappa }) {
   if (kappa < 0.4) {
@@ -38,10 +38,32 @@ function ConfusionCell({ label, value, borderColor, bgColor, description, highli
   )
 }
 
+const WL_QA = [
+  { id: 'WL-Q1', text: 'Is the research design clearly described and appropriate for the stated objectives?' },
+  { id: 'WL-Q2', text: 'Is the data collection methodology clearly described and suitable for the research context?' },
+  { id: 'WL-Q3', text: 'Are the analytical methods rigorous and appropriate for the data collected?' },
+  { id: 'WL-Q4', text: 'Are the conclusions supported by the evidence and are limitations discussed?' },
+]
+
+const GL_QA = [
+  { id: 'GL-Q1', text: "Is the author's expertise or organizational context explicitly stated?" },
+  { id: 'GL-Q2', text: 'Is the source of experience transparent (e.g., specific hiring cycle, personal narrative)?' },
+  { id: 'GL-Q3', text: 'Are the claims supported by operational artifacts (e.g., process steps, rubrics, or data)?' },
+  { id: 'GL-Q4', text: 'Does the source provide insights beyond generic employer marketing (e.g., trade-offs)?' },
+]
+
 export default function AccuracyAudit() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [qaPapers, setQaPapers] = useState([])
+  const [qaPapersLoading, setQaPapersLoading] = useState(false)
+  const [qaRunning, setQaRunning] = useState(false)
+  const [qaProgress, setQaProgress] = useState(null)
+  const [qaExpanded, setQaExpanded] = useState(null)
+  const [qaValues, setQaValues] = useState({})
+  const [qaSubmitting, setQaSubmitting] = useState({})
+  const [qaRefreshKey, setQaRefreshKey] = useState(0)
 
   const fetchMetrics = async () => {
     setLoading(true)
@@ -58,9 +80,82 @@ export default function AccuracyAudit() {
     }
   }
 
+  const fetchIncludedPapers = useCallback(async () => {
+    setQaPapersLoading(true)
+    try {
+      const res = await fetch('/api/papers?status=INCLUDED&size=500')
+      if (!res.ok) throw new Error('Failed to fetch included papers')
+      const json = await res.json()
+      setQaPapers(json.items || [])
+      const qaMap = {}
+      for (const p of json.items || []) {
+        if (p.source_type === 'WL') {
+          if (p.wl_q1 != null) qaMap[p.id] = { q1: p.wl_q1, q2: p.wl_q2, q3: p.wl_q3, q4: p.wl_q4 }
+        } else {
+          if (p.gl_q1 != null) qaMap[p.id] = { q1: p.gl_q1, q2: p.gl_q2, q3: p.gl_q3, q4: p.gl_q4 }
+        }
+      }
+      setQaValues((prev) => ({ ...prev, ...qaMap }))
+    } catch { /* ignore */ } finally {
+      setQaPapersLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchMetrics()
-  }, [])
+    fetchIncludedPapers()
+  }, [qaRefreshKey])
+
+  useEffect(() => {
+    if (!qaRunning) return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/screening/progress')
+        if (res.ok) {
+          const data = await res.json()
+          setQaProgress(data)
+          if (!data.qa_active) {
+            setQaRunning(false)
+            setQaRefreshKey((k) => k + 1)
+          }
+        }
+      } catch { /* ignore */ }
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [qaRunning])
+
+  const handleRunQA = async () => {
+    setQaRunning(true)
+    try {
+      await fetch('/api/quality/assess-all', { method: 'POST' })
+    } catch { /* ignore */ }
+  }
+
+  const getQAQuestions = (sourceType) => sourceType === 'WL' ? WL_QA : GL_QA
+
+  const getQAScore = (paper) => {
+    const vals = qaValues[paper.id]
+    if (!vals) return null
+    const { q1, q2, q3, q4 } = vals
+    if (q1 == null || q2 == null || q3 == null || q4 == null) return null
+    return q1 + q2 + q3 + q4
+  }
+
+  const handleQAChange = async (paperId, qIdx, value, sourceType) => {
+    const updated = { ...(qaValues[paperId] || {}), [`q${qIdx}`]: value }
+    setQaValues((prev) => ({ ...prev, [paperId]: updated }))
+    if (updated.q1 == null || updated.q2 == null || updated.q3 == null || updated.q4 == null) return
+    setQaSubmitting((prev) => ({ ...prev, [paperId]: true }))
+    try {
+      await fetch(`/api/papers/${paperId}/quality`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q1: updated.q1, q2: updated.q2, q3: updated.q3, q4: updated.q4 }),
+      })
+    } catch { /* ignore */ } finally {
+      setQaSubmitting((prev) => ({ ...prev, [paperId]: false }))
+    }
+  }
 
   if (loading) {
     return (
@@ -194,6 +289,181 @@ export default function AccuracyAudit() {
           </p>
         </div>
       )}
+
+      {/* ── Stage 3: Quality Assurance (QA) Panel ──────────────────────────── */}
+      <div className="border-t border-zinc-800 pt-6 mt-6">
+        <div className="flex items-center gap-2 border-b border-zinc-800 pb-3 mb-4">
+          <ClipboardCheck className="w-4 h-4 text-cyan-400" />
+          <span className="text-sm font-bold text-zinc-100 tracking-wider uppercase">
+            Stage 3: Methodological Quality Assurance (QA)
+          </span>
+        </div>
+
+        {/* Run Automated QA */}
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={handleRunQA}
+            disabled={qaRunning}
+            className="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-bold tracking-wider text-cyan-400 border border-cyan-800/60 hover:bg-cyan-950/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {qaRunning ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5" />
+            )}
+            {qaRunning ? 'APOLLO is running automated QA on all included papers...' : 'Run Automated Quality Assessment (QA)'}
+          </button>
+          <button
+            onClick={() => setQaRefreshKey((k) => k + 1)}
+            disabled={qaPapersLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold tracking-wider text-zinc-500 border border-zinc-700 hover:text-zinc-300 hover:border-zinc-500 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={`w-3 h-3 ${qaPapersLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+
+        {/* QA Table */}
+        {qaPapersLoading && qaPapers.length === 0 ? (
+          <div className="py-8 text-center">
+            <Loader2 className="w-4 h-4 animate-spin text-zinc-600 mx-auto" />
+          </div>
+        ) : qaPapers.length === 0 ? (
+          <div className="border border-zinc-800 bg-zinc-900/30 rounded-sm py-8 text-center">
+            <p className="text-[11px] text-zinc-600">No included papers found. Run screening first.</p>
+          </div>
+        ) : (
+          <div className="border border-zinc-800 rounded-sm overflow-hidden">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-zinc-800 bg-zinc-900/60">
+                  <th className="w-8 px-2 py-1.5 text-left font-bold text-[9px] text-zinc-500 uppercase tracking-widest">#</th>
+                  <th className="px-2 py-1.5 text-left font-bold text-[9px] text-zinc-500 uppercase tracking-widest">Library</th>
+                  <th className="px-2 py-1.5 text-left font-bold text-[9px] text-zinc-500 uppercase tracking-widest">Title</th>
+                  <th className="w-12 px-2 py-1.5 text-left font-bold text-[9px] text-zinc-500 uppercase tracking-widest">Type</th>
+                  <th className="w-28 px-2 py-1.5 text-left font-bold text-[9px] text-zinc-500 uppercase tracking-widest">Quality Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {qaPapers.map((p, idx) => {
+                  const open = qaExpanded === p.id
+                  const score = getQAScore(p)
+                  const questions = getQAQuestions(p.source_type)
+                  const vals = qaValues[p.id] || {}
+                  const submitting = qaSubmitting[p.id] || false
+                  return (
+                    <Fragment key={p.id}>
+                      <tr
+                        onClick={() => setQaExpanded((prev) => (prev === p.id ? null : p.id))}
+                        className={`border-b border-zinc-800/60 cursor-pointer transition-all duration-150 hover:bg-zinc-800/80 ${open ? 'bg-zinc-800/60' : ''}`}
+                      >
+                        <td className="px-2 py-2 text-zinc-500 tabular-nums">{idx + 1}</td>
+                        <td className="px-2 py-2 text-zinc-400 max-w-[100px] truncate">{p.source_library}</td>
+                        <td className="px-2 py-2 text-zinc-200 max-w-md truncate">{p.title}</td>
+                        <td className="px-2 py-2">
+                          {p.source_type === 'WL' ? (
+                            <span className="inline-block border border-cyan-700 px-1 py-0.5 text-[9px] font-bold text-cyan-400 leading-none">[ WL ]</span>
+                          ) : (
+                            <span className="inline-block border border-fuchsia-700 px-1 py-0.5 text-[9px] font-bold text-fuchsia-400 leading-none">[ GL ]</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2">
+                          {qaProgress?.qa_active && p.id === qaProgress?.current_qa_paper_id ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-cyan-400">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Analyzing...
+                            </span>
+                          ) : score !== null ? (
+                            <span className={`inline-flex items-center gap-1 text-[11px] font-bold tabular-nums ${score < 2.0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {score.toFixed(1)} / 4.0
+                              {score < 2.0 && (
+                                <span className="text-[9px] text-rose-500 border border-rose-800/60 px-1 py-0.5 ml-1">QC FAIL</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-600 text-[10px]">—</span>
+                          )}
+                          <span className="ml-1.5 text-zinc-600">{open ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />}</span>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr key={`${p.id}-qa-detail`}>
+                          <td colSpan={5} className="px-0 py-0 border-b border-zinc-800">
+                            <div className="px-6 py-3 bg-zinc-950/60 animate-glide-in space-y-2">
+                              {/* Source Verification Link */}
+                              <div>
+                                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-1">
+                                  &gt; SOURCE VERIFICATION LINK
+                                </span>
+                                {p.pdf_url ? (
+                                  <a
+                                    href={p.pdf_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold tracking-wider text-emerald-400 border border-emerald-800/60 hover:bg-emerald-950/30 transition-colors"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                    Open-Access PDF
+                                  </a>
+                                ) : p.url ? (
+                                  <a
+                                    href={p.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold tracking-wider text-zinc-400 border border-zinc-700 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                    View Source (ACM/Scopus)
+                                  </a>
+                                ) : (
+                                  <p className="text-[11px] text-zinc-600">No external links available.</p>
+                                )}
+                              </div>
+                              {questions.map((q, qIdx) => {
+                                const qKey = `q${qIdx + 1}`
+                                return (
+                                  <div key={q.id} className="flex items-start gap-2 text-[11px]">
+                                    <span className={`font-bold shrink-0 w-12 leading-6 ${p.source_type === 'WL' ? 'text-cyan-400' : 'text-fuchsia-400'}`}>{q.id}</span>
+                                    <span className="text-zinc-300 flex-1 leading-6">{q.text}</span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {[1.0, 0.5, 0.0].map((val) => {
+                                        const isActive = vals[qKey] === val
+                                        const activeClass = isActive
+                                          ? val === 1.0
+                                            ? 'border-emerald-600 bg-emerald-950/30 text-emerald-400'
+                                            : val === 0.5
+                                              ? 'border-amber-600 bg-amber-950/30 text-amber-400'
+                                              : 'border-rose-600 bg-rose-950/30 text-rose-400'
+                                          : 'border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500'
+                                        return (
+                                          <button
+                                            key={val}
+                                            onClick={(e) => { e.stopPropagation(); handleQAChange(p.id, qIdx + 1, val, p.source_type) }}
+                                            disabled={submitting}
+                                            className={`px-2 py-1 text-[10px] font-bold tracking-wider border transition-colors ${activeClass}`}
+                                          >
+                                            {val === 1.0 ? 'Yes' : val === 0.5 ? 'Part.' : 'No'}
+                                          </button>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
     </div>
   )

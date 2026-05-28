@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Loader2, AlertCircle, FileText, FileSearch, ThumbsUp, ThumbsDown, ShieldCheck, Pencil, Filter, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, AlertCircle, FileText, FileSearch, ThumbsUp, ThumbsDown, ShieldCheck, Pencil, Filter, X, ClipboardCheck } from 'lucide-react'
 
 const TABS = ['All', 'Included', 'Excluded', 'Needs Review']
 
@@ -381,6 +381,14 @@ export default function PaperTable({
               Bulk Reject (Exclude)
             </button>
             <button
+              onClick={() => handleBulkAudit('RESET')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold tracking-wider text-zinc-400 border border-zinc-700 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+            >
+              <X className="w-3 h-3" />
+              Bulk Reset (Clear)
+            </button>
+            <div className="w-px h-5 bg-zinc-700" />
+            <button
               onClick={() => setSelectedPaperIds(new Set())}
               className="inline-flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-bold tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
             >
@@ -406,6 +414,40 @@ function PaperRow({ paper, rowNum, open, auditing, isSelected, onToggle, onAudit
   const handleAuditClick = (verdict) => {
     setEditing(false)
     onAudit(verdict)
+  }
+
+  const QA_QUESTIONS = [
+    { id: 'GL-Q1', text: "Is the author's expertise or organizational context explicitly stated?" },
+    { id: 'GL-Q2', text: 'Is the source of experience transparent (e.g., specific hiring cycle, personal narrative)?' },
+    { id: 'GL-Q3', text: 'Are the claims supported by operational artifacts (e.g., process steps, rubrics, or data)?' },
+    { id: 'GL-Q4', text: 'Does the source provide insights beyond generic employer marketing (e.g., trade-offs)?' },
+  ]
+
+  const [qaValues, setQaValues] = useState({
+    q1: paper.gl_q1 ?? null,
+    q2: paper.gl_q2 ?? null,
+    q3: paper.gl_q3 ?? null,
+    q4: paper.gl_q4 ?? null,
+  })
+  const [qaSubmitting, setQaSubmitting] = useState(false)
+  const qaScore = [qaValues.q1, qaValues.q2, qaValues.q3, qaValues.q4].every((v) => v !== null)
+    ? qaValues.q1 + qaValues.q2 + qaValues.q3 + qaValues.q4
+    : null
+
+  const handleQAChange = async (qIdx, value) => {
+    const updated = { ...qaValues, [`q${qIdx}`]: value }
+    setQaValues(updated)
+    if (Object.values(updated).some((v) => v === null)) return
+    setQaSubmitting(true)
+    try {
+      await fetch(`/api/papers/${paper.id}/quality`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q1: updated.q1, q2: updated.q2, q3: updated.q3, q4: updated.q4 }),
+      })
+    } catch { /* ignore */ } finally {
+      setQaSubmitting(false)
+    }
   }
 
   return (
@@ -527,6 +569,79 @@ function PaperRow({ paper, rowNum, open, auditing, isSelected, onToggle, onAudit
                       {paper.rationale}
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* GL Quality Assessment (QA) Checklist */}
+              {paper.source_type === 'GL' && (
+                <div>
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                    <ClipboardCheck className="w-3 h-3 text-fuchsia-400" />
+                    GL Quality Assessment (QA) Checklist
+                  </span>
+                  <div className="border border-fuchsia-900/40 bg-fuchsia-950/10 rounded-sm p-3 space-y-2">
+                    {QA_QUESTIONS.map((q, idx) => {
+                      const qKey = `q${idx + 1}`
+                      return (
+                        <div key={q.id} className="flex items-start gap-2 text-[11px]">
+                          <span className="text-fuchsia-400 font-bold shrink-0 w-12 leading-5">{q.id}</span>
+                          <span className="text-zinc-300 flex-1 leading-5">{q.text}</span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {[1.0, 0.5, 0.0].map((val) => {
+                              const isActive = qaValues[qKey] === val
+                              const activeClass = isActive
+                                ? val === 1.0
+                                  ? 'border-emerald-600 bg-emerald-950/30 text-emerald-400'
+                                  : val === 0.5
+                                    ? 'border-amber-600 bg-amber-950/30 text-amber-400'
+                                    : 'border-rose-600 bg-rose-950/30 text-rose-400'
+                                : 'border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500'
+                              return (
+                                <button
+                                  key={val}
+                                  onClick={(e) => { e.stopPropagation(); handleQAChange(idx + 1, val) }}
+                                  disabled={qaSubmitting}
+                                  className={`px-2 py-1 text-[10px] font-bold tracking-wider border transition-colors ${activeClass}`}
+                                >
+                                  {val === 1.0 ? 'Yes' : val === 0.5 ? 'Part.' : 'No'}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {qaScore !== null && (
+                      <div className={`mt-2 pt-2 border-t border-fuchsia-900/40 text-[11px] font-bold flex items-center gap-2 ${
+                        qaScore < 2.0 ? 'text-rose-400' : 'text-emerald-400'
+                      }`}>
+                        {qaScore < 2.0 ? (
+                          <>&#10007; Excluded: Failed Quality Assessment (Score: {qaScore.toFixed(1)}/4.0)</>
+                        ) : (
+                          <>&#10003; Quality Assessment Passed (Score: {qaScore.toFixed(1)}/4.0)</>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Full-Text PDF link */}
+              {paper.pdf_url && (
+                <div>
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-1">
+                    &gt; FULL-TEXT PDF
+                  </span>
+                  <a
+                    href={paper.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold tracking-wider text-cyan-400 border border-cyan-800/60 hover:bg-cyan-950/30 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <FileText className="w-3 h-3" />
+                    View Full-Text PDF
+                  </a>
                 </div>
               )}
 

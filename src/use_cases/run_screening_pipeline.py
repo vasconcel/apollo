@@ -36,7 +36,11 @@ class RunScreeningPipelineUseCase:
         self._screen = screen_paper_use_case
         self._criteria = criteria
 
-    async def execute(self, calibration_paper_ids: Optional[set[str]] = None) -> int:
+    async def execute(
+        self,
+        calibration_paper_ids: Optional[set[str]] = None,
+        target: str = "ALL",
+    ) -> int:
         papers = self._paper_repo.get_all_papers()
         processed = 0
         seen_titles: dict[str, str] = {}
@@ -47,6 +51,10 @@ class RunScreeningPipelineUseCase:
         for paper in papers:
             # Strict calibration isolation: skip any paper not in the set
             if calibration_paper_ids and paper.id not in calibration_paper_ids:
+                continue
+
+            # Filter by target source type
+            if target != "ALL" and paper.source_type.value != target:
                 continue
 
             norm = normalize_title(paper.title)
@@ -76,22 +84,6 @@ class RunScreeningPipelineUseCase:
 
         # Parallel pass: screen unique papers with concurrency limit
         interrupted = False
-
-        async def screen_one(paper: Paper) -> None:
-            nonlocal processed, interrupted
-            if interrupted:
-                return
-            async with semaphore:
-                try:
-                    decision = await self._screen.execute(
-                        paper=paper,
-                        criteria=self._criteria,
-                    )
-                except KeyboardInterrupt:
-                    interrupted = True
-                    return
-                self._decision_repo.save_decision(decision)
-                processed += 1
 
         if to_screen:
             try:

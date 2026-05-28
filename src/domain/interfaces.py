@@ -20,6 +20,12 @@ class LLMService(ABC):
     ) -> ScreeningDecision:
         """Evaluate a paper against criteria using an LLM and return a decision."""
 
+    @abstractmethod
+    async def evaluate_quality(self, paper: Paper) -> dict:
+        """Evaluate the methodological quality of an already Included paper.
+        Returns {"q1": float, "q2": float, "q3": float, "q4": float, "rationale": str}.
+        """
+
 
 class ScreeningDecisionRepository(ABC):
     @abstractmethod

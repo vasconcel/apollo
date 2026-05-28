@@ -89,4 +89,5 @@ class TestScreenPaperUseCase:
         mock_llm.screen_paper.assert_called_once_with(
             paper=paper,
             criteria=criteria,
+            few_shot_examples=None,
         )

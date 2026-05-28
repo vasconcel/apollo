@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import re
-from typing import Optional
+from collections.abc import Callable
+from typing import Optional, TYPE_CHECKING
 
 from tqdm import tqdm
 
@@ -12,6 +13,9 @@ from src.domain.interfaces import (
 )
 from src.domain.models import Criterion, Paper, ScreeningDecision
 from src.use_cases.screen_paper import ScreenPaperUseCase
+
+if TYPE_CHECKING:
+    from src.infrastructure.services.svm_service import SVMService
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +44,13 @@ class RunScreeningPipelineUseCase:
         self,
         calibration_paper_ids: Optional[set[str]] = None,
         target: str = "ALL",
+        cancel_check: Optional[Callable[[], bool]] = None,
+        svm_service: Optional["SVMService"] = None,
     ) -> int:
         papers = self._paper_repo.get_all_papers()
         processed = 0
         seen_titles: dict[str, str] = {}
-        semaphore = asyncio.Semaphore(2)
+        semaphore = asyncio.Semaphore(3)
 
         # Sequential pass: filter, skip existing decisions, mark duplicates
         to_screen: list[Paper] = []
@@ -61,9 +67,14 @@ class RunScreeningPipelineUseCase:
 
             existing = self._decision_repo.get_decision(paper.id)
             if existing is not None:
-                # In calibration mode, reprocess placeholder decisions
+                # In calibration mode, only reprocess placeholder decisions (NEEDS_REVIEW).
+                # Skip papers that already have a definitive INCLUDED/EXCLUDED decision
+                # so that resume picks up exactly where it left off.
                 if calibration_paper_ids and paper.id in calibration_paper_ids:
-                    to_screen.append(paper)
+                    if existing.status == ScreeningStatus.NEEDS_REVIEW:
+                        to_screen.append(paper)
+                        continue
+                    seen_titles[norm] = paper.id
                     continue
                 # In full mode, skip ONLY if the decision is definitive (INCLUDED/EXCLUDED).
                 # Reprocess if it's still a placeholder (NEEDS_REVIEW)
@@ -82,7 +93,11 @@ class RunScreeningPipelineUseCase:
             seen_titles[norm] = paper.id
             to_screen.append(paper)
 
-        # Parallel pass: screen unique papers with concurrency limit
+        # Fetch human-audited examples for few-shot prompting
+        few_shot_examples = self._decision_repo.get_few_shot_examples(limit=3)
+
+        # Sequential batch pass: screen papers in batches of 3 for instant cancellation
+        batch_size = 3
         interrupted = False
 
         if to_screen:
@@ -96,25 +111,59 @@ class RunScreeningPipelineUseCase:
                         nonlocal processed, interrupted
                         if interrupted:
                             return
+
+                        # SVM cascade: fast-track CPU exclusion, bypass LLM
+                        if svm_service is not None:
+                            should_exclude, conf = svm_service.predict_exclusion(paper)
+                            if should_exclude:
+                                decision = ScreeningDecision(
+                                    paper_id=paper.id,
+                                    status=ScreeningStatus.EXCLUDED,
+                                    confidence_score=conf,
+                                    rationale=f"SVM_AUTO_EXCLUDE (Confidence: {conf:.2f}). Bypassed LLM for speed.",
+                                    applied_criteria_codes=["SVM_FAST"],
+                                )
+                                self._decision_repo.save_decision(
+                                    decision,
+                                    title=paper.title,
+                                    abstract=paper.abstract or "",
+                                )
+                                processed += 1
+                                pbar.set_postfix_str(f"{paper.id} [SVM_FAST]")
+                                pbar.update(1)
+                                return
+
                         async with semaphore:
                             try:
                                 decision = await self._screen.execute(
                                     paper=paper,
                                     criteria=self._criteria,
+                                    few_shot_examples=few_shot_examples,
                                 )
                             except KeyboardInterrupt:
                                 interrupted = True
                                 return
-                            self._decision_repo.save_decision(decision)
+                            self._decision_repo.save_decision(
+                                decision,
+                                title=paper.title,
+                                abstract=paper.abstract or "",
+                            )
                             processed += 1
                             pbar.set_postfix_str(
                                 f"{paper.id} [{decision.status.value}]"
                             )
                             pbar.update(1)
 
-                    await asyncio.gather(
-                        *(screen_one_with_progress(p) for p in to_screen)
-                    )
+                    for i in range(0, len(to_screen), batch_size):
+                        if interrupted or (cancel_check and cancel_check()):
+                            interrupted = True
+                            break
+
+                        batch = to_screen[i : i + batch_size]
+                        await asyncio.gather(
+                            *(screen_one_with_progress(p) for p in batch)
+                        )
+
                     if interrupted:
                         raise KeyboardInterrupt()
             except KeyboardInterrupt:

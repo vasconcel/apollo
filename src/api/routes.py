@@ -22,6 +22,7 @@ from src.infrastructure.repositories.dataset_repository import DatasetPaperRepos
 from src.infrastructure.repositories.sqlite_repository import SQLiteScreeningDecisionRepository
 from src.infrastructure.services.ollama_service import OllamaLLMService
 from src.infrastructure.services.scraper import fetch_pdf_metadata_by_doi
+from src.infrastructure.services.svm_service import SVMService
 from src.use_cases.export_papers import ExportScreenedPapersUseCase
 from src.use_cases.heuristic_screening import HeuristicScreeningUseCase
 from src.use_cases.run_screening_pipeline import RunScreeningPipelineUseCase
@@ -35,10 +36,25 @@ _imported_count: int = 0
 _calibration_mode: bool = False
 _qa_active: bool = False
 _current_qa_paper_id: Optional[str] = None
+_cancel_requested: bool = False
+
+
+def is_cancel_requested() -> bool:
+    return _cancel_requested
 
 _HEURISTIC_CODES = frozenset({"EC1", "EC3", "EC4"})
 _IMPORT_DIR = Path("data/imported")
 _PROCESSED_DIR = Path("data/processed")
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatPayload(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
 
 
 class _FilteredPaperRepository:
@@ -59,15 +75,16 @@ class RetryLLMService(LLMService):
         self,
         paper: Paper,
         criteria: list,
+        few_shot_examples: Optional[list[dict]] = None,
     ) -> ScreeningDecision:
         for attempt in range(self._max_retries):
             try:
-                return await self._inner.screen_paper(paper, criteria)
+                return await self._inner.screen_paper(paper, criteria, few_shot_examples=few_shot_examples)
             except (httpx.TimeoutException, httpx.ConnectError):
                 if attempt == self._max_retries - 1:
                     raise
                 await asyncio.sleep(2 ** attempt)
-        return await self._inner.screen_paper(paper, criteria)
+        return await self._inner.screen_paper(paper, criteria, few_shot_examples=few_shot_examples)
 
     async def evaluate_quality(self, paper: Paper) -> dict:
         for attempt in range(self._max_retries):
@@ -108,7 +125,14 @@ async def system_reset():
     global _dataset_path, _screening_active, _qa_active, _current_qa_paper_id, _imported_count, _calibration_mode
 
     if _dataset_path is not None:
-        _dataset_path.unlink(missing_ok=True)
+        try:
+            _dataset_path.unlink(missing_ok=True)
+        except PermissionError as e:
+            logger.warning(
+                "Temporary dataset file '%s' could not be deleted due to a Windows file lock: %s. Proceeding with database reset anyway.",
+                _dataset_path,
+                e
+            )
         _dataset_path = None
 
     decision_repo = _get_decision_repo()
@@ -165,9 +189,11 @@ async def import_papers(file: UploadFile = File(...)):
 async def _run_screening_background(
     calibration_paper_ids: Optional[set[str]] = None,
     target: str = "ALL",
+    svm_service: Optional[SVMService] = None,
 ) -> None:
-    global _screening_active
+    global _screening_active, _cancel_requested
     _screening_active = True
+    _cancel_requested = False
     try:
         paper_repo = _get_paper_repo()
         if calibration_paper_ids:
@@ -186,9 +212,12 @@ async def _run_screening_background(
         await pipeline.execute(
             calibration_paper_ids=calibration_paper_ids,
             target=target,
+            cancel_check=is_cancel_requested,
+            svm_service=svm_service,
         )
     finally:
         _screening_active = False
+        _cancel_requested = False
 
 
 @router.post("/api/screening/start")
@@ -204,6 +233,7 @@ async def start_screening(
         raise HTTPException(status_code=409, detail="Screening is already running.")
 
     cal_paper_ids: Optional[set[str]] = None
+    svm_service: Optional[SVMService] = None
 
     if mode == "calibration":
         paper_repo = _get_paper_repo()
@@ -214,10 +244,34 @@ async def start_screening(
         cal_paper_ids = set(cal_ids)
         _calibration_mode = True
     else:
+        decision_repo = _get_decision_repo()
+        decision_repo.clear_calibration_flags()
         _calibration_mode = False
 
-    asyncio.create_task(_run_screening_background(cal_paper_ids, target))
+        # Train SVM cascade classifier on human-audited data for full screening
+        paper_repo = _get_paper_repo()
+        all_papers = paper_repo.get_all_papers()
+        human_decisions = decision_repo.get_human_decision_map()
+        if human_decisions:
+            svc = SVMService()
+            svc.train(all_papers, human_decisions)
+            if svc.is_trained:
+                svm_service = svc
+
+    asyncio.create_task(_run_screening_background(cal_paper_ids, target, svm_service=svm_service))
     return {"status": "started", "task_id": "screening_current"}
+
+
+# ── POST /api/screening/stop ────────────────────────────────────────────────
+
+
+@router.post("/api/screening/stop")
+async def stop_screening():
+    global _cancel_requested
+    if not _screening_active:
+        raise HTTPException(status_code=409, detail="No screening is currently running.")
+    _cancel_requested = True
+    return {"status": "stopping"}
 
 
 # ── GET /api/screening/progress ─────────────────────────────────────────────
@@ -244,6 +298,13 @@ async def screening_progress():
 
     paper_repo = _get_paper_repo()
     decision_repo = _get_decision_repo()
+
+    cal_ids = decision_repo.get_calibration_papers()
+    if len(cal_ids) > 0:
+        existing_decisions = decision_repo.get_all_decisions()
+        non_cal_decisions = [d for d in existing_decisions if d.paper_id not in cal_ids]
+        if len(non_cal_decisions) == 0:
+            _calibration_mode = True
 
     papers = paper_repo.get_all_papers()
     decisions = decision_repo.get_all_decisions()
@@ -724,3 +785,78 @@ async def update_criterion(criterion_id: str, body: UpdateCriterionBody):
     decision_repo = _get_decision_repo()
     decision_repo.update_criterion(criterion_id, body.title, body.description)
     return {"status": "updated", "id": criterion_id}
+
+
+# ── POST /api/chat ────────────────────────────────────────────────────────────
+
+
+_CHAT_SYSTEM_TEMPLATE = (
+    "You are the APOLLO Systematic Literature Review Assistant. Your objective is to help "
+    "the researcher perform synthesis and data extraction from their included papers.\n"
+    "Below is the complete database of included papers for this study. Use this context to "
+    "answer the user's question accurately.\n"
+    "Always cite the Paper IDs (e.g., [WL-3], [GL-5]) when making claims based on the text. "
+    "If the answer cannot be found in the provided context, state that clearly and do not "
+    "hallucinate.\n\n"
+    "[INCLUDED PAPERS CONTEXT]\n{context_block}"
+)
+
+
+@router.post("/api/chat")
+async def chat_with_corpus(payload: ChatPayload):
+    try:
+        paper_repo = _get_paper_repo()
+    except HTTPException:
+        raise HTTPException(status_code=400, detail="No dataset imported yet.")
+
+    decision_repo = _get_decision_repo()
+    included = decision_repo.get_included_papers_data()
+    if not included:
+        raise HTTPException(status_code=400, detail="No included papers found. Screen and include papers first.")
+
+    included_ids = {r["paper_id"] for r in included}
+    full_text_map = {r["paper_id"]: r["full_text"] for r in included}
+
+    all_papers = paper_repo.get_all_papers()
+    context_blocks: list[str] = []
+    for p in all_papers:
+        if p.id not in included_ids:
+            continue
+        ft = full_text_map.get(p.id)
+        content = ft if ft else p.abstract
+        library = p.metadata.get("Detected_Source") or p.metadata.get("Library") or "Unknown"
+        block = (
+            f"---\n"
+            f"PAPER ID: {p.id}\n"
+            f"TITLE: {p.title}\n"
+            f"SOURCE/LIBRARY: {library}\n"
+            f"ABSTRACT/CONTENT: {content or '(no content available)'}\n"
+            f"---"
+        )
+        context_blocks.append(block)
+
+    context_block = "\n\n".join(context_blocks)
+    system_content = _CHAT_SYSTEM_TEMPLATE.format(context_block=context_block)
+
+    messages: list[dict] = [{"role": "system", "content": system_content}]
+    for msg in payload.history:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": payload.message})
+
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+
+    async with httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(300.0)) as client:
+        resp = await client.post(
+            "/chat/completions",
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": 0.0,
+            },
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        assistant_text: str = body["choices"][0]["message"]["content"]
+
+    return {"response": assistant_text}

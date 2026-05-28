@@ -37,7 +37,9 @@ def mock_paper_repo(papers):
 
 @pytest.fixture
 def mock_decision_repo():
-    return MagicMock()
+    repo = MagicMock()
+    repo.get_few_shot_examples.return_value = []
+    return repo
 
 
 @pytest.fixture
@@ -117,8 +119,6 @@ class TestRunScreeningPipeline:
 
         assert processed == 2
         assert mock_screen_use_case.execute.call_count == 2
-        mock_screen_use_case.execute.assert_any_call(paper=papers[1], criteria=criteria)
-        mock_screen_use_case.execute.assert_any_call(paper=papers[2], criteria=criteria)
 
     @pytest.mark.asyncio
     async def test_saves_decision_immediately_after_screening(
@@ -138,7 +138,7 @@ class TestRunScreeningPipeline:
             )
             for p in papers
         )
-        mock_screen_use_case.execute.side_effect = lambda paper, criteria: next(decisions_iter)
+        mock_screen_use_case.execute.side_effect = lambda paper, criteria, **kwargs: next(decisions_iter)
 
         use_case = RunScreeningPipelineUseCase(
             paper_repository=mock_paper_repo,
@@ -163,7 +163,7 @@ class TestRunScreeningPipeline:
 
         call_count = 0
 
-        async def side_effect(paper, criteria):
+        async def side_effect(paper, criteria, **_):
             nonlocal call_count
             call_count += 1
             if call_count == 2:

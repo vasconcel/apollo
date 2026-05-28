@@ -17,6 +17,7 @@ class LLMService(ABC):
         self,
         paper: Paper,
         criteria: list[Criterion],
+        few_shot_examples: Optional[list[dict]] = None,
     ) -> ScreeningDecision:
         """Evaluate a paper against criteria using an LLM and return a decision."""
 
@@ -29,7 +30,7 @@ class LLMService(ABC):
 
 class ScreeningDecisionRepository(ABC):
     @abstractmethod
-    def save_decision(self, decision: ScreeningDecision) -> None:
+    def save_decision(self, decision: ScreeningDecision, title: str = "", abstract: str = "") -> None:
         """Persist a screening decision (insert or update)."""
 
     @abstractmethod
@@ -47,3 +48,7 @@ class ScreeningDecisionRepository(ABC):
     @abstractmethod
     def save_bulk_audit(self, paper_ids: list[str], human_decision: str) -> None:
         """Save the same human audit verdict for multiple papers in a single transaction."""
+
+    @abstractmethod
+    def get_few_shot_examples(self, limit: int = 3) -> list[dict]:
+        """Return up to `limit` audited examples with title, abstract, and human_decision."""

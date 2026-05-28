@@ -138,9 +138,10 @@ class OllamaLLMService(LLMService):
         self,
         paper: Paper,
         criteria: list[Criterion],
+        few_shot_examples: list[dict] | None = None,
     ) -> ScreeningDecision:
         try:
-            messages = self._build_messages(paper, criteria)
+            messages = self._build_messages(paper, criteria, few_shot_examples)
             response = await self._client.post(
                 "/chat/completions",
                 json={
@@ -164,7 +165,7 @@ class OllamaLLMService(LLMService):
             logger.error("Unexpected Ollama response structure for paper %s: %s", paper.id, exc)
             return _fallback_decision(paper.id, "unexpected response structure")
 
-    def _build_messages(self, paper: Paper, criteria: list[Criterion]) -> list[dict[str, str]]:
+    def _build_messages(self, paper: Paper, criteria: list[Criterion], few_shot_examples: list[dict] | None = None) -> list[dict[str, str]]:
         criteria_text = _format_criteria(criteria)
         ec_section = _compile_ec_section(criteria)
         ic_section = _compile_ic_section(criteria)
@@ -194,8 +195,24 @@ class OllamaLLMService(LLMService):
             )
             user_content = gl_warning + user_content
 
+        system_content = _SYSTEM_PROMPT
+
+        if few_shot_examples:
+            blocks = [
+                "\n### CALIBRATION MEMORY (LEARN FROM THESE EXAMPLES):",
+                "Below are examples of how the human researcher explicitly classified papers for this study. Mimic this reasoning:\n",
+            ]
+            for ex in few_shot_examples:
+                abstract_preview = (ex.get("abstract") or "")[:500]
+                blocks.append(
+                    f"EXAMPLE TITLE: {ex.get('title') or ''}\n"
+                    f"EXAMPLE ABSTRACT: {abstract_preview}...\n"
+                    f"HUMAN GROUND TRUTH DECISION: {ex.get('human_decision') or ''}"
+                )
+            system_content += "\n\n" + "\n\n".join(blocks)
+
         return [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": user_content},
         ]
 

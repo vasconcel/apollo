@@ -70,7 +70,8 @@ def _parse_wl_row(sheet_name: str, row: dict, index: int) -> Paper:
 
     pub_year = _coerce_int(year)
 
-    paper_id = str(_pick(row, "Global_ID", "global_id", "ID", "id")) or f"WL-{index + 1}"
+    _pid = _pick(row, "Global_ID", "global_id", "ID", "id")
+    paper_id = str(_pid) if _pid is not None else f"WL-{index + 1}"
 
     metadata = {
         "Library": _coerce_str(_pick(row, "Library", "library", "Source", "source", "Base de Dados")),
@@ -107,7 +108,8 @@ def _parse_gl_row(sheet_name: str, row: dict, index: int) -> Paper:
 
     pub_year = _coerce_int(year)
 
-    paper_id = str(_pick(row, "Global_ID", "global_id", "ID", "id")) or f"GL-{index + 1}"
+    _pid = _pick(row, "Global_ID", "global_id", "ID", "id")
+    paper_id = str(_pid) if _pid is not None else f"GL-{index + 1}"
 
     metadata = {
         "Detected_Source": _coerce_str(
@@ -214,10 +216,10 @@ class DatasetPaperRepository(PaperRepository):
         if ext not in (".xls", ".xlsx"):
             raise ValueError(f"Unsupported file format: {ext}")
 
-        xls = pd.ExcelFile(file_path)
-        papers: list[Paper] = []
-        for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
-            papers.extend(_parse_sheet(df, sheet_name))
+        with pd.ExcelFile(file_path) as xls:
+            papers: list[Paper] = []
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet_name)
+                papers.extend(_parse_sheet(df, sheet_name))
 
         return papers

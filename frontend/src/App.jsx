@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Terminal, Download, Trash2, ShieldAlert, Settings } from 'lucide-react'
+import { Terminal, Download, Trash2, ShieldAlert, Settings, MessageSquare } from 'lucide-react'
 import UploadZone from './components/UploadZone'
 import ProgressCard from './components/ProgressCard'
 import PaperTable from './components/PaperTable'
 import PrismaFlowchart from './components/PrismaFlowchart'
 import AccuracyAudit from './components/AccuracyAudit'
 import ProtocolSettings from './components/ProtocolSettings'
+import CorpusChat from './components/CorpusChat'
 
 const API = '/api'
 
@@ -53,7 +54,7 @@ export default function App() {
         setScreeningActive(true)
         setScreenStarted(true)
       }
-      if (p.in_calibration && !p.is_active) {
+      if (p.in_calibration && !p.is_active && p.screened_count === p.total_papers && p.total_papers > 0) {
         setCalibrationBanner(true)
       }
       return p
@@ -103,6 +104,7 @@ export default function App() {
   const handleImportSuccess = (data) => {
     setImportMsg(`Imported ${data.imported_count} paper(s).`)
     setImportError(null)
+    setCalibrationBanner(false)
     setPage(1)
     fetchPapers()
     fetchProgress()
@@ -113,9 +115,9 @@ export default function App() {
     setImportMsg(null)
   }
 
-  const handleStartScreening = async (mode = 'full') => {
+  const handleStartScreening = async (mode = 'full', target = 'ALL') => {
     try {
-      await apiFetch(`/screening/start?mode=${mode}`, { method: 'POST' })
+      await apiFetch(`/screening/start?mode=${mode}&target=${target}`, { method: 'POST' })
       setScreeningActive(true)
       setScreenStarted(true)
       fetchProgress()
@@ -124,9 +126,17 @@ export default function App() {
     }
   }
 
+  const handleStopScreening = async () => {
+    try {
+      await apiFetch('/screening/stop', { method: 'POST' })
+    } catch (err) {
+      setImportError(err.message)
+    }
+  }
+
   const handleProgressUpdate = (p) => {
     setProgress(p)
-    if (p.in_calibration && !p.is_active) {
+    if (p.in_calibration && !p.is_active && p.screened_count === p.total_papers && p.total_papers > 0) {
       setCalibrationBanner(true)
     }
     if (!p.is_active && p.pending_count === 0) {
@@ -148,6 +158,7 @@ export default function App() {
       setProgress(null)
       setScreeningActive(false)
       setScreenStarted(false)
+      setCalibrationBanner(false)
       setPage(1)
       setImportMsg(null)
       setImportError(null)
@@ -229,9 +240,10 @@ export default function App() {
               progress={progress}
               active={screeningActive}
               started={screenStarted}
-              onStart={() => handleStartScreening('full')}
-              onStartCalibration={() => handleStartScreening('calibration')}
+              onStart={(target) => handleStartScreening('full', target)}
+              onStartCalibration={(target) => handleStartScreening('calibration', target)}
               onProgressUpdate={handleProgressUpdate}
+              onStop={handleStopScreening}
             />
             {/* Export card */}
             <div className="border border-zinc-800 bg-zinc-900/50 rounded-sm p-4 flex flex-col justify-center items-center gap-3">
@@ -240,7 +252,8 @@ export default function App() {
               </p>
               <button
                 onClick={handleExport}
-                className="inline-flex items-center gap-2 px-4 py-2 border-2 border-cyan-800/60 text-cyan-400 hover:bg-cyan-950/30 hover:shadow-neon-cyan text-xs font-bold tracking-wider transition-all duration-200"
+                disabled={screeningActive}
+                className="inline-flex items-center gap-2 px-4 py-2 border-2 border-cyan-800/60 text-cyan-400 hover:bg-cyan-950/30 hover:shadow-neon-cyan text-xs font-bold tracking-wider transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download className="w-3.5 h-3.5" />
                 EXPORT XLSX
@@ -328,6 +341,17 @@ export default function App() {
               <Settings className="w-3.5 h-3.5" />
               Protocol Settings
             </button>
+            <button
+              onClick={() => setViewTab('chat')}
+              className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors duration-150 ${
+                viewTab === 'chat'
+                  ? 'text-cyan-400 border-b-2 border-cyan-500 pb-2 -mb-2.5'
+                  : 'text-zinc-600 hover:text-zinc-400'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Corpus Chat
+            </button>
           </div>
 
           {/* Content */}
@@ -350,6 +374,8 @@ export default function App() {
             <PrismaFlowchart progress={progress} />
           ) : viewTab === 'audit' ? (
             <AccuracyAudit />
+          ) : viewTab === 'chat' ? (
+            <CorpusChat progressData={progress} />
           ) : (
             <ProtocolSettings />
           )}

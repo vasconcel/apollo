@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, Cpu, BarChart3, FlaskConical } from 'lucide-react'
+import { Play, Square, RefreshCw, Cpu, BarChart3, FlaskConical, Loader2 } from 'lucide-react'
 
 const TARGET_OPTIONS = [
   { key: 'ALL', label: 'ALL' },
@@ -7,8 +7,9 @@ const TARGET_OPTIONS = [
   { key: 'GL', label: '[ GL ]' },
 ]
 
-export default function ProgressCard({ progress, active, started, onStart, onStartCalibration, onProgressUpdate }) {
+export default function ProgressCard({ progress, active, started, onStart, onStartCalibration, onProgressUpdate, onStop }) {
   const [targetScope, setTargetScope] = useState('ALL')
+  const [isStopping, setIsStopping] = useState(false)
   const intervalRef = useRef(null)
 
   useEffect(() => {
@@ -27,6 +28,12 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
       }
     }
   }, [active, onProgressUpdate])
+
+  useEffect(() => {
+    if (!progress?.is_active && !active) {
+      setIsStopping(false)
+    }
+  }, [progress?.is_active, active])
 
   if ((!progress || !progress.total_papers) && !active && !started) {
     return (
@@ -50,9 +57,40 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
   const screened = progress?.screened_count ?? 0
   const pending = progress?.pending_count ?? 0
   const inCalibration = progress?.in_calibration ?? false
+  const isActive = progress?.is_active ?? active ?? false
   const pct = total > 0 ? Math.round((screened / total) * 100) : 0
-  const isCompleted = !active && pending === 0 && started
+  const isCompleted = !isActive && pending === 0 && started
   const canCalibrate = !started && total > 0
+  const calibrationPaused = inCalibration && !isActive && screened > 0 && screened < total
+  const calibrationComplete = inCalibration && screened === total && total > 0
+
+  let statusLabel, statusColor
+  if (isStopping) {
+    statusLabel = 'STOPPING...'
+    statusColor = 'text-rose-500 border-rose-500/50 animate-pulse'
+  } else if (isCompleted) {
+    statusLabel = 'COMPLETE'
+    statusColor = 'text-emerald-400 border-emerald-700/50'
+  } else if (isActive) {
+    if (inCalibration) {
+      statusLabel = 'CALIBRATING'
+      statusColor = 'text-cyan-400 border-cyan-700/50 animate-neon-pulse'
+    } else {
+      statusLabel = 'RUNNING'
+      statusColor = 'text-cyan-400 border-cyan-700/50 animate-neon-pulse'
+    }
+  } else if (inCalibration) {
+    if (screened < total) {
+      statusLabel = 'CALIBRATION PAUSED'
+      statusColor = 'text-amber-400 border-amber-700/50'
+    } else {
+      statusLabel = 'CALIBRATION COMPLETE'
+      statusColor = 'text-emerald-400 border-emerald-700/50'
+    }
+  } else {
+    statusLabel = 'IDLE'
+    statusColor = 'text-zinc-500 border-zinc-700'
+  }
 
   return (
     <div className="border border-zinc-800 bg-zinc-900/50 rounded-sm p-5 space-y-4">
@@ -62,23 +100,9 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
           <Cpu className="w-3.5 h-3.5 text-cyan-400 drop-shadow-[0_0_4px_#22d3ee]" />
           SCREENING ENGINE
         </h3>
-        {isCompleted ? (
-          <span className="inline-flex items-center gap-1 border border-emerald-700/50 px-2 py-0.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
-            COMPLETE
-          </span>
-        ) : active ? (
-          <span className="inline-flex items-center gap-1 border border-cyan-700/50 px-2 py-0.5 text-[10px] font-bold text-cyan-400 uppercase tracking-wider animate-neon-pulse">
-            {inCalibration ? 'CALIBRATING' : 'RUNNING'}
-          </span>
-        ) : inCalibration ? (
-          <span className="inline-flex items-center gap-1 border border-emerald-700/50 px-2 py-0.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
-            CALIBRATED
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 border border-zinc-700 px-2 py-0.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-            IDLE
-          </span>
-        )}
+        <span className={`inline-flex items-center gap-1 border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusColor}`}>
+          {statusLabel}
+        </span>
       </div>
 
       {/* Progress bar — neon gradient */}
@@ -90,7 +114,7 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
         <div className="w-full h-2 bg-zinc-800 rounded-sm overflow-hidden">
           <div
             className={`h-full rounded-sm transition-all duration-500 ease-out ${
-              isCompleted
+              isCompleted || calibrationComplete
                 ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
                 : 'bg-gradient-to-r from-cyan-500 to-fuchsia-500 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
             }`}
@@ -101,8 +125,8 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
 
       {/* Telemetry stats */}
       <div className="grid grid-cols-3 gap-3">
-        <StatBox label="HEURISTICS" value={progress?.heuristic_exclusions ?? 0} color="text-rose-400" />
-        <StatBox label="AI EXCLUDED" value={progress?.ai_exclusions ?? 0} color="text-rose-400" />
+        <StatBox label="INCLUDED" value={progress?.included_count ?? 0} color="text-emerald-400 drop-shadow-[0_0_4px_rgba(52,211,153,0.3)]" />
+        <StatBox label="EXCLUDED" value={(progress?.duplicates_count ?? 0) + (progress?.heuristic_exclusions ?? 0) + (progress?.ai_exclusions ?? 0)} color="text-rose-400 drop-shadow-[0_0_4px_rgba(251,113,133,0.3)]" />
         <StatBox label="PENDING" value={pending} color="text-amber-400" />
       </div>
 
@@ -114,14 +138,14 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
             <button
               key={opt.key}
               onClick={() => setTargetScope(opt.key)}
-              disabled={active || started}
+              disabled={isActive || started}
               className={`px-2.5 py-1 text-[11px] font-bold tracking-wider transition-all duration-150 ${
                 targetScope === opt.key
                   ? opt.key === 'WL' ? 'text-cyan-400 bg-cyan-950/30 border border-cyan-700'
                     : opt.key === 'GL' ? 'text-fuchsia-400 bg-fuchsia-950/30 border border-fuchsia-700'
                     : 'text-zinc-200 bg-zinc-800 border border-zinc-600'
                   : 'text-zinc-600 hover:text-zinc-400 border border-transparent'
-              } ${(active || started) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${(isActive || started) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {opt.label}
             </button>
@@ -131,25 +155,33 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
 
       {/* Action buttons */}
       <div className="space-y-2">
-        {!active && !isCompleted && onStartCalibration && canCalibrate && (
+        {(isActive || isStopping) && (
           <button
-            onClick={() => {
-              fetch(`/api/screening/start?mode=calibration&target=${targetScope}`, { method: 'POST' })
-              if (onStartCalibration) onStartCalibration()
-            }}
-            disabled={inCalibration || screened > 0}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 border-fuchsia-800/60 text-fuchsia-400 hover:bg-fuchsia-950/30 hover:shadow-[0_0_12px_rgba(217,70,239,0.2)] disabled:border-zinc-700 disabled:text-zinc-600 disabled:cursor-not-allowed text-xs font-bold tracking-wider transition-all duration-200"
+            onClick={() => { if (!isStopping) { setIsStopping(true); if (onStop) onStop() } }}
+            disabled={isStopping}
+            className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 text-xs font-bold tracking-wider transition-all duration-200 ${
+              isStopping
+                ? 'border-zinc-700 text-zinc-500 bg-zinc-900/40 cursor-not-allowed'
+                : 'border-rose-800 text-rose-400 hover:bg-rose-950/30 hover:shadow-[0_0_12px_rgba(251,113,133,0.2)]'
+            }`}
           >
-            <FlaskConical className="w-3.5 h-3.5" />
-            START CALIBRATION (100 PAPER SAMPLE)
+            {isStopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
+            {isStopping ? 'STOPPING SCREENING...' : 'STOP SCREENING'}
           </button>
         )}
-        {!active && !isCompleted && (
+        {!isActive && !isCompleted && onStartCalibration && (canCalibrate || calibrationPaused) && (
           <button
-            onClick={() => {
-              fetch(`/api/screening/start?mode=full&target=${targetScope}`, { method: 'POST' })
-              if (onStart) onStart()
-            }}
+            onClick={() => { if (onStartCalibration) onStartCalibration(targetScope) }}
+            disabled={calibrationComplete}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 border-fuchsia-800/60 text-fuchsia-400 hover:bg-fuchsia-950/30 hover:shadow-[0_0_12px_rgba(217,70,239,0.2)] disabled:border-zinc-700 disabled:text-zinc-600 disabled:cursor-not-allowed text-xs font-bold tracking-wider transition-all duration-200"
+          >
+            {calibrationPaused ? <RefreshCw className="w-3.5 h-3.5" /> : <FlaskConical className="w-3.5 h-3.5" />}
+            {calibrationPaused ? 'RESUME CALIBRATION' : 'START CALIBRATION (100 PAPER SAMPLE)'}
+          </button>
+        )}
+        {!isActive && !isCompleted && (
+          <button
+            onClick={() => { if (onStart) onStart(targetScope) }}
             disabled={total === 0}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 border-cyan-800/60 text-cyan-400 hover:bg-cyan-950/30 hover:shadow-neon-cyan disabled:border-zinc-700 disabled:text-zinc-600 disabled:cursor-not-allowed text-xs font-bold tracking-wider transition-all duration-200"
           >

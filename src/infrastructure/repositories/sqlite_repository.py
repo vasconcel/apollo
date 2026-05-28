@@ -204,6 +204,15 @@ def _migrate_pdf_columns(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_title_abstract_columns(conn: sqlite3.Connection) -> None:
+    for col in ("title", "abstract"):
+        try:
+            conn.execute(f"ALTER TABLE screening_decisions ADD COLUMN {col} TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+
+
 class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def __init__(self, db_path: str = "screening.db") -> None:
         self._db_path = str(db_path)
@@ -217,8 +226,9 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
         _migrate_qa_columns(self._conn)
         _migrate_wl_qa_columns(self._conn)
         _migrate_pdf_columns(self._conn)
+        _migrate_title_abstract_columns(self._conn)
 
-    def save_decision(self, decision: ScreeningDecision) -> None:
+    def save_decision(self, decision: ScreeningDecision, title: str = "", abstract: str = "") -> None:
         codes_json = json.dumps(decision.applied_criteria_codes, ensure_ascii=False)
         self._conn.execute(
             _INSERT_OR_REPLACE,
@@ -243,6 +253,11 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
                 decision.paper_id,  # pdf_url COALESCE
             ),
         )
+        if title or abstract:
+            self._conn.execute(
+                "UPDATE screening_decisions SET title = ?, abstract = ? WHERE paper_id = ?",
+                (title, abstract, decision.paper_id),
+            )
         self._conn.commit()
 
     def get_decision(self, paper_id: str) -> Optional[ScreeningDecision]:
@@ -302,16 +317,22 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
         if len(selected) > size:
             selected = random.sample(selected, size)
 
+        paper_map = {p.id: p for p in papers}
         for pid in selected:
+            p = paper_map.get(pid)
             self._conn.execute(
                 "INSERT OR REPLACE INTO screening_decisions "
                 "(paper_id, status, confidence_score, rationale, "
-                "applied_criteria_codes, is_calibration) "
-                "VALUES (?, 'NEEDS_REVIEW', 0.0, '[calibration sample]', '[]', 1)",
-                (pid,),
+                "applied_criteria_codes, is_calibration, title, abstract) "
+                "VALUES (?, 'NEEDS_REVIEW', 0.0, '[calibration sample]', '[]', 1, ?, ?)",
+                (pid, p.title if p else "", (p.abstract or "") if p else ""),
             )
         self._conn.commit()
         return selected
+
+    def clear_calibration_flags(self) -> None:
+        self._conn.execute("UPDATE screening_decisions SET is_calibration = 0")
+        self._conn.commit()
 
     def get_calibration_papers(self) -> list[str]:
         cursor = self._conn.execute(
@@ -332,6 +353,22 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
             "WHERE human_decision IS NOT NULL"
         )
         return {row["paper_id"]: row["human_decision"] for row in cursor.fetchall()}
+
+    def get_few_shot_examples(self, limit: int = 3) -> list[dict]:
+        cursor = self._conn.execute(
+            "SELECT title, abstract, human_decision FROM screening_decisions "
+            "WHERE is_audited = 1 AND human_decision IS NOT NULL "
+            "ORDER BY RANDOM() LIMIT ?",
+            (limit,),
+        )
+        return [
+            {
+                "title": row["title"] or "",
+                "abstract": row["abstract"] or "",
+                "human_decision": row["human_decision"],
+            }
+            for row in cursor.fetchall()
+        ]
 
     # ── Criteria ─────────────────────────────────────────────────────────────
 
@@ -423,6 +460,16 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
             (full_text, pdf_url, paper_id),
         )
         self._conn.commit()
+
+    def get_included_papers_data(self) -> list[dict]:
+        cursor = self._conn.execute(
+            "SELECT paper_id, full_text FROM screening_decisions WHERE status = ?",
+            (ScreeningStatus.INCLUDED.value,),
+        )
+        return [
+            {"paper_id": row["paper_id"], "full_text": row["full_text"]}
+            for row in cursor.fetchall()
+        ]
 
     def get_pdf_metadata(self, paper_id: str) -> Optional[dict]:
         cursor = self._conn.execute(

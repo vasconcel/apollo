@@ -45,6 +45,7 @@ class TestDuplicateDetectionEC6:
         mock_paper_repo.get_all_papers.return_value = papers
         mock_decision_repo = MagicMock()
         mock_decision_repo.get_decision.return_value = None
+        mock_decision_repo.get_few_shot_examples.return_value = []
 
         mock_screen = MagicMock()
         mock_screen.execute = AsyncMock(return_value=ScreeningDecision(
@@ -64,7 +65,7 @@ class TestDuplicateDetectionEC6:
         processed = await use_case.execute()
 
         assert processed == 2
-        mock_screen.execute.assert_called_once_with(paper=paper1, criteria=criteria)
+        mock_screen.execute.assert_called_once_with(paper=paper1, criteria=criteria, few_shot_examples=[])
 
         # EC6 saved in sequential pass (call 0); LLM result saved in parallel pass (call 1)
         ec6_call = mock_decision_repo.save_decision.call_args_list[0][0][0]
@@ -86,6 +87,7 @@ class TestDuplicateDetectionEC6:
         mock_paper_repo.get_all_papers.return_value = papers
         mock_decision_repo = MagicMock()
         mock_decision_repo.get_decision.return_value = None
+        mock_decision_repo.get_few_shot_examples.return_value = []
         mock_screen = MagicMock()
         mock_screen.execute = AsyncMock(return_value=ScreeningDecision(
             paper_id="x", status=ScreeningStatus.INCLUDED,
@@ -118,6 +120,7 @@ class TestDuplicateDetectionEC6:
         mock_paper_repo.get_all_papers.return_value = papers
         mock_decision_repo = MagicMock()
         mock_decision_repo.get_decision.return_value = None
+        mock_decision_repo.get_few_shot_examples.return_value = []
         mock_screen = MagicMock()
         mock_screen.execute = AsyncMock(return_value=ScreeningDecision(
             paper_id="x", status=ScreeningStatus.INCLUDED,
@@ -147,6 +150,7 @@ class TestDuplicateDetectionEC6:
         mock_paper_repo.get_all_papers.return_value = papers
         mock_decision_repo = MagicMock()
         mock_decision_repo.get_decision.return_value = None
+        mock_decision_repo.get_few_shot_examples.return_value = []
         mock_screen = MagicMock()
         mock_screen.execute = AsyncMock(return_value=ScreeningDecision(
             paper_id="x", status=ScreeningStatus.INCLUDED,

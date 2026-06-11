@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import sqlite3
 from typing import Any, Optional
@@ -105,6 +106,13 @@ CREATE TABLE IF NOT EXISTS criteria (
 )
 """
 
+_CREATE_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS system_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+"""
+
 _SELECT_ALL_CRITERIA = """
 SELECT id, title, description, type, is_heuristic
 FROM criteria
@@ -141,6 +149,25 @@ def _seed_criteria_if_empty(conn: sqlite3.Connection) -> None:
             "VALUES (?, ?, ?, ?, ?)",
             (c["id"], c["title"], c["description"], c["type"], c["is_heuristic"]),
         )
+    conn.commit()
+
+
+def _seed_settings_if_empty(conn: sqlite3.Connection) -> None:
+    cursor = conn.execute("SELECT COUNT(*) AS cnt FROM system_settings")
+    row = cursor.fetchone()
+    if row["cnt"] > 0:
+        return
+    defaults: list[tuple[str, str]] = [
+        ("llm_provider", "ollama"),
+        ("llm_base_url", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")),
+        ("llm_model", os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")),
+        ("llm_api_key", ""),
+        ("llm_delay", "0.0"),
+    ]
+    conn.executemany(
+        "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
+        defaults,
+    )
     conn.commit()
 
 
@@ -217,10 +244,15 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def __init__(self, db_path: str = "screening.db") -> None:
         self._db_path = str(db_path)
         self._conn = sqlite3.connect(self._db_path)
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA busy_timeout=5000;")
+        self._in_batch = False
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(_CREATE_TABLE)
         self._conn.execute(_CREATE_CRITERIA_TABLE)
+        self._conn.execute(_CREATE_SETTINGS_TABLE)
         _seed_criteria_if_empty(self._conn)
+        _seed_settings_if_empty(self._conn)
         _migrate_audit_columns(self._conn)
         _migrate_calibration_column(self._conn)
         _migrate_qa_columns(self._conn)
@@ -258,7 +290,45 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
                 "UPDATE screening_decisions SET title = ?, abstract = ? WHERE paper_id = ?",
                 (title, abstract, decision.paper_id),
             )
+        if not self._in_batch:
+            self._conn.commit()
+
+    def flush_pending_commits(self) -> None:
         self._conn.commit()
+
+    def begin_batch(self) -> None:
+        """
+        Start a batch transaction. Idempotent: no-op if a transaction is
+        already active (prevents 'cannot start a transaction within a
+        transaction' errors on rapid start/stop cycles).
+        """
+        self._in_batch = True
+        self._conn.isolation_level = None
+        if not self._conn.in_transaction:
+            self._conn.execute("BEGIN;")
+
+    def end_batch(self) -> None:
+        """
+        Commit the current batch. Safe to call even when no transaction is
+        active (e.g. after a CancelledError interrupts mid-batch, or when
+        save_decision's own commit() already closed the transaction).
+        """
+        if self._in_batch:
+            self._in_batch = False
+            try:
+                in_transaction = self._conn.in_transaction
+            except AttributeError:
+                in_transaction = True
+
+            if in_transaction:
+                try:
+                    self._conn.execute("COMMIT;")
+                except Exception as exc:
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "end_batch(): COMMIT suppressed (%s)", exc
+                    )
 
     def get_decision(self, paper_id: str) -> Optional[ScreeningDecision]:
         cursor = self._conn.execute(_SELECT_BY_ID, (paper_id,))
@@ -270,6 +340,24 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def get_all_decisions(self) -> list[ScreeningDecision]:
         cursor = self._conn.execute(_SELECT_ALL)
         return [_row_to_decision(row) for row in cursor.fetchall()]
+
+    # ── System Settings ──────────────────────────────────────────────────────
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        cursor = self._conn.execute(
+            "SELECT value FROM system_settings WHERE key = ?", (key,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return default
+        return row["value"]
+
+    def save_setting(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        self._conn.commit()
 
     # ── Calibration ──────────────────────────────────────────────────────────
 
@@ -334,11 +422,35 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
         self._conn.execute("UPDATE screening_decisions SET is_calibration = 0")
         self._conn.commit()
 
+    def seed_calibration_from_audits(self) -> int:
+        self._conn.execute("UPDATE screening_decisions SET is_calibration = 0")
+        self._conn.commit()
+        self._conn.execute("UPDATE screening_decisions SET is_calibration = 1 WHERE is_audited = 1")
+        self._conn.commit()
+        cursor = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM screening_decisions WHERE is_calibration = 1"
+        )
+        return cursor.fetchone()["cnt"]
+
     def get_calibration_papers(self) -> list[str]:
         cursor = self._conn.execute(
             "SELECT paper_id FROM screening_decisions WHERE is_calibration = 1"
         )
         return [row["paper_id"] for row in cursor.fetchall()]
+
+    def seed_human_decision(self, paper_id: str, human_decision: str) -> None:
+        self._conn.execute(
+            "INSERT INTO screening_decisions "
+            "(paper_id, status, confidence_score, rationale, "
+            "applied_criteria_codes, is_calibration, is_audited, human_decision) "
+            "VALUES (?, 'NEEDS_REVIEW', 0.0, '[calibration sample]', '[]', 1, 1, ?) "
+            "ON CONFLICT(paper_id) DO UPDATE SET "
+            "human_decision = excluded.human_decision, "
+            "is_audited = 1, "
+            "is_calibration = 1",
+            (paper_id, human_decision),
+        )
+        self._conn.commit()
 
     def get_screened_calibration_count(self) -> int:
         cursor = self._conn.execute(
@@ -484,9 +596,9 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def get_quality_map(self) -> dict[str, dict]:
         cursor = self._conn.execute(
             "SELECT paper_id, gl_q1, gl_q2, gl_q3, gl_q4, quality_score, "
-            "wl_q1, wl_q2, wl_q3, wl_q4, wl_quality_score, pdf_url "
+            "wl_q1, wl_q2, wl_q3, wl_q4, wl_quality_score, pdf_url, full_text "
             "FROM screening_decisions WHERE gl_q1 IS NOT NULL OR wl_q1 IS NOT NULL "
-            "OR pdf_url IS NOT NULL"
+            "OR pdf_url IS NOT NULL OR full_text IS NOT NULL"
         )
         result: dict[str, dict] = {}
         for row in cursor.fetchall():
@@ -502,6 +614,7 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
                 "wl_q4": row["wl_q4"],
                 "wl_quality_score": row["wl_quality_score"],
                 "pdf_url": row["pdf_url"],
+                "full_text": row["full_text"],
             }
         return result
 

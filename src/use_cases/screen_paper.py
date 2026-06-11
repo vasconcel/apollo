@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Optional
 
 from src.domain.interfaces import LLMService
@@ -10,9 +11,11 @@ class ScreenPaperUseCase:
         self,
         heuristic_use_case: HeuristicScreeningUseCase,
         llm_service: LLMService,
+        cooldown_callback: Callable[[float], None] | None = None,
     ) -> None:
         self._heuristic = heuristic_use_case
         self._llm = llm_service
+        self._cooldown_callback = cooldown_callback
 
     async def execute(
         self,
@@ -27,4 +30,5 @@ class ScreenPaperUseCase:
             paper=paper,
             criteria=criteria,
             few_shot_examples=few_shot_examples,
+            cooldown_callback=self._cooldown_callback,
         )

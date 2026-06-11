@@ -1,0 +1,683 @@
+Library,,#,Title,Abstract,Palavra-Chaves,CIs1,CEs1,Revisor 1,CIs2,CEs2,Revisor 2,Decision
+iiitsurat.ac.in,GL-140,1,Indian Institute of Information Technology Surat,(No web content scraped),,,EC1; EC2,NO,,,,
+news.mit.edu,GL-234,2,Can AI really code? Study maps the roadblocks ...,(No web content scraped),,IC1,,NO,,,,
+www.ctm-it.com,GL-273,3,Security Screening,"Security Screening | ctm Information Technology
+Save even more!
+Reduce your Microsoft 365 bill by
+up to 100%
+when you introduce other businesses to ctm
+Referral Programme
+Our site uses cookies
+This site uses optional cookies for performance and quality purposes in line with out
+Cookie Policy
+.
+Accept cookies
+Cookie settings
+Working at ctm
+Security Screening
+As we provide our customers with security-related services, all of our staff are required to pass a BS7858 security screening, both before starting employment and on an annual basis thereafter.
+For new applicants, please be aware that we only run these checks once you have accepted a job offer and with your consent, not before.
+What do we check for?
+Check
+First Check
+for new employees
+Annual Checks
+or upon change of job role
+Why do we check this?
+ID Verification
+We need to ensure you are who you say you are
+DBS Basic
+Criminal record check to ensure you have not been convicted of any crimes which would compromise the reputation of the company
+UK Credit Check
+Financial troubles may make you more susceptible to manipulation by a bad actor
+UK Directorship Check
+Running your own business whilst working for us may cause a conflict of interest
+UK Driving Licence Check
+Only for employees that need to drive our vehicles, to ensure you're legally allowed to under the terms of our insurance
+Right to Work
+We need to ensure you are legally allowed to work for us in the UK
+Employment History
+We need to verify that your employment history is correct
+Employer References
+We ask for two references from previous employers to further verify your employment history
+What should I do if I'm worried about this?
+Speak to us in confidence before we undertake the checks. The results of the above checks are not a pass/fail, and we consider all circumstances and individuals on a per-case basis.",,IC1; IC2,,YES,,,,
+www.researchgate.net,GL-329,4,Towards data-driven software engineering skills assessment,(No web content scraped),,IC1,,YES,,,,
+www.thisdot.co,GL-363,5,The Importance of a Scientific Mindset in Software ...,"The Importance of a Scientific Mindset in Software Engineering: Part 1 (Source Evaluation & Literature Review) - This Dot Labs
+Skip to content
+The Importance of a Scientific Mindset in Software Engineering: Part 1 (Source Evaluation & Literature Review)
+Today, I will write about something very dear to me - science. But not about science as a field of study but rather as a way of thinking.
+It's easy nowadays to get lost in the sea of information, fall for marketing hype, or even be trolled by a hallucinating LLM. A scientific mindset can be a powerful tool for navigating the complex modern world and the world of software engineering in particular.
+Not only is it a powerful tool, but I'll argue that it's a must nowadays if you want to make informed decisions, solve problems effectively, and become a better engineer.
+As software engineers, we are constantly confronted with an overwhelming array of frameworks, technologies, and infrastructure choices. Sometimes, it feels like there's a new tool or platform every day, each accompanied by its own wave of hype and marketing. It's easy to feel lost in the myriad of information or even suffer from FOMO and insecurity about not jumping on the latest bandwagon.
+But it's not only about the abundance of information and making technological decisions. As engineers, we often write documentation, blog posts, talks, or even books. We need to be able to communicate our ideas clearly and effectively. Furthermore, we have to master the art of debugging code, which is essentially a scientific process where we form hypotheses, test them, and iterate until we find the root cause of the problem.
+Therefore, here's my hot take: engineering is a science; hence, to deserve an engineer title, one needs to think like a scientist.
+So, let's
+review
+(pun intended) what it means to think like a scientist in the context of software engineering.
+Systematic Review
+In science, systematic review is not only an essential means to understand a topic and map the current state of knowledge in the field, but it also has a well-defined methodology. You can't just google whatever supports your hypothesis and call it a day. You must define your research question, choose the databases you will search, set your inclusion and exclusion criteria, systematically search for relevant studies, evaluate their quality, and synthesize the results. Most importantly, you must be transparent about and describe your methodology in detail.
+The general process of systematic review can be summarized in the following steps:
+Define your research question(s)
+Choose databases and other sources to search
+Define keywords and search terms
+Define inclusion and exclusion criteria
+a. Define practical criteria such as publication date, language, etc.
+b. Define methodological criteria such as study design, sample size, etc.
+Search for relevant studies
+Evaluate the quality of the studies
+Synthesize the results
+Source:
+Conducting Research Literature Reviews: From the Internet to Paper by Dr. Fink
+I'm pretty sure you can see where I'm going with this. There are many use cases in software engineering where a process similar to systematic review can be applied. Whether you're evaluating a new technology, choosing a tech stack for a new project, or researching for a blog post or a conference talk, it's important to be systematic in your approach, transparent about your methodology, and honest about the limitations of your research.
+Of course, when choosing a tech stack to learn or researching for a blog post, you don't have to be as rigorous as in a scientific study. But a few of these steps will always be worth following. Let's focus on those and see how we can apply them in the context of software engineering.
+Defining Your Research Question(s)
+Before you start researching, it's important to define your research questions. What are you trying to find out? What problem are you trying to solve? What are the goals of your research? These questions will help you stay focused and avoid focusing on irrelevant information.
+A practical example:
+If you're evaluating, say, whether to use bundler
+A
+or bundler
+B
+without a clear research question, you might end up focusing on marketing claims about how bundler
+A
+is faster than bundler
+B
+or how bundler
+B
+is more popular than bundler
+A
+, even though such aspects may have minimal impact on your project. With a clear research question, you can focus on what really matters for your project, like how well each bundler integrates with your existing tools, how well they handle your specific use case, or how well they are maintained.
+A research question is not a hypothesis - you don't have to have a clear idea of the answer. It's more about defining the scope of your research and setting clear goals. It can be as simple and general as ""What are the pros and cons of using React vs. Angular for a particular project?"" but also more specific and focused, like ""What are the legal implications of using open-source library
+X
+for purpose
+Y
+in project
+Z
+?"". You can have multiple research questions, but keeping them focused and relevant to your goals is essential.
+In my personal opinion, part of the scientific mindset is automatically having at least a vague idea of a research question in your head whenever you're facing a problem or a decision, and that alone can make you a more confident and effective engineer.
+Choosing Databases and Other Sources to Search
+In engineering, some information (especially when researching rare bugs) can be scarce, and you have to search wherever and take what you can get. Hence, this step is arguably much easier in science, where you can include well-established databases and publications in your search. Information in science is simply more standardized and easier to find.
+There are, however, still some decisions to be made about where to search. Do you want to include community websites like
+StackOverflow
+or
+Reddit
+? Do you want to include marketing materials from the companies behind the technologies you're evaluating? These can all be valid sources of information, but they have their limitations and biases, and it's important to be aware of them.
+Or do you want to ask a LLM? I hadn't included LLMs in the list of valid sources of information on purpose as they are not literature databases in the traditional sense, and I wouldn't consider them a search source for literature research. And for a very good reason - they are essentially a black box, and therefore, you cannot reliably describe a reproducible methodology of your search.
+That doesn't mean you shouldn't ask an LLM for inspiration or a TL;DR, but you should always verify the information you get from them and be aware of their limitations.
+Defining Keywords and Search Terms
+This section will be short, as most of you are familiar with the concept of keywords and search terms and how to use search engines. However, I still wanted to highlight the importance of knowing how to search effectively for a software engineer. It's not just about typing in a few keywords and hoping for the best. It's about learning how to use advanced search operators, filter out irrelevant results, and find the information you need quickly and efficiently.
+If you're not familiar with advanced search operators, I highly recommend you take some time to learn them, for example, at
+FreeCodeCamp
+. Please note, however, that the article is specific to Google and different search engines may have different operators and syntax. This is especially true for scientific databases, which often have their own search syntax and operators. So, if you're doing more formal research, familiarize yourself with the database's search syntax. The underlying principles, however, are pretty much the same everywhere; just the syntax and UI might differ.
+With a solid search strategy in place, the next critical step is to assess the quality of the information we find.
+Methodological Criteria and Evaluation of Sources
+This is where things get interesting. In science, evaluating the quality of the studies is a crucial step in the systematic review process. You can't just take the results of a study at face value - you need to critically evaluate its design, the sample size, the methodology, and the conclusions - and you need to be aware of the limitations of the study and the potential biases that may have influenced the results.
+In science, there is a pretty straightforward yet helpful categorization of sources that my students surprisingly needed help understanding because no one ever explained it to them. So let me lay out and explain the three categories to you now:
+1. Primary sources
+Primary sources represent original research. You can find them in studies, conference papers, etc. In science, this is what you generally want to cite in your own research.
+However, remember that only some of what you find in an original research paper is a primary source. Only the parts that present the original research are primary sources. For example, the introduction can contain citations to other studies, which are not primary, but secondary sources.
+While primary sources can sometimes be perceived as hard to read and understand, in many cases, they can actually be easier to reach and understand as the methods and results are usually presented in a condensed form in the abstract, and often you can only skim the introduction and discussion to get a good idea of the study.
+In software engineering, primary sources can sometimes be papers, but more often, they are original documentation, case studies, or even blog posts that present original research or data. For example, if you're evaluating a new technology, the official documentation, case studies, and blog posts from its developers can be considered primary sources.
+2. Secondary sources
+Secondary sources are typically reviews, meta-analyses, and other sources that summarize, analyze, or reference the primary sources. A good way to identify a source as secondary is to look for citations to other studies. If a claim has a citation, it's likely a secondary source. On the other hand, something is likely wrong if it doesn't have a citation and doesn't seem to present original research.
+Secondary sources can be very useful for getting an overview of a topic, understanding the current state of knowledge, and finding relevant primary sources. Meta-analyses, in particular, can provide a beneficial point of view on a subject by combining the results of multiple studies and looking for patterns and trends.
+The downside of secondary sources is that they can introduce information noise, as they are basically introducing another layer of interpretation and analysis. So, it's always a good idea to go back to the primary sources and verify the information you get from secondary sources.
+Secondary sources in software engineering include blog posts, talks, or articles that summarize, analyze, or reference primary sources. For example, if you're researching a new technology, a blog post that compares different technologies based on their documentation and/or studies made by their authors can be considered a secondary source.
+3. Tertiary sources
+Tertiary sources represent a further level of abstraction. They are typically textbooks, encyclopedias, and other sources that summarize, analyze, or reference secondary sources. They are useful for getting a broad overview of a topic, understanding the basic concepts, and finding relevant secondary sources.
+One example I see as a tertiary source is
+Wikipedia
+, and while you shouldn't ever cite Wikipedia in academic research, it can be a good starting point for getting an overview of a topic and finding relevant primary and secondary sources as you can easily click through the references.
+Note: It's fine to reference Wikipedia in a blog post or a talk to give your audience a convenient explanation of a term or concept. I'm even doing it in this post. However, you should always verify that the article is up to date and that the information is correct.
+The distinction between primary, secondary, and tertiary sources in software engineering is not as clear-cut as in science, but the general idea still applies. When researching a topic, knowing the different types of sources and their limitations is essential. Primary sources are generally the most reliable and should be your go-to when seeking evidence to support your claims. Secondary sources can help get an overview of a topic, but they should be used cautiously, as they can introduce bias and noise. Tertiary sources are good for getting a broad overview of a topic but should not be used as evidence in academic research.
+Evaluating Sources
+Now that we have the categories laid out let's talk about evaluating the quality of the sources because, realistically, not all sources are created equal.
+In science, we have some well-established criteria for evaluating the quality of a source. Some focus on the general credibility of the source, like the reputation of the journal or the author. In contrast, others focus on the quality of the study itself, like the study design, the sample size, and the methodology.
+First, we usually look at the
+number of citations
+and the
+impact factor
+of the journal in which the study was published. These numbers can give us an idea of how well the scientific community received the study and how much other researchers have cited it.
+In software engineering, we don't have the concept of impact factor when it comes to researching a concept or a technology, but we can still look at how many people are sharing the particular piece of information and how well the professional community receives it and how reputable the person sharing the information is.
+Second, we look at the
+study design
+and the
+methodology
+. Does the study have a clear research question? Is the study design appropriate for the research question? Are the methods well-described and reproducible? Are the results presented clearly and honestly? Do the data support the conclusions?
+Arguably, in software engineering, the honest and clear presentation of the method and results can be even more important than in science, given the amounts of money circulating in the industry and the potential for conflicts of interest. Therefore, it's important to understand where the data is coming from, how it was collected, and how it was analyzed.
+If a company (or their DevRel person) is presenting data that show their product is the best (fastest, most secure...), it's important to be aware of the potential biases and conflicts of interest that may have influenced the results.
+The ways in which the results can be skewed may include:
+Missing, incomplete, or inappropriate methodology
+. Often, the methodology is not described in enough detail to be reproducible, or the whole experiment is designed in a way that doesn't actually answer the research question properly. For example, the methodology can omit important details, such as the environment in which the experiment was conducted or even the way the data was collected (e.g., to hide selection bias).
+Selection bias
+can be a common issue in software engineering experiments. For example, if someone is comparing two technologies, they might choose a dataset that they expect to perform better with one of the technologies or a metric that they expect to show a difference. Selection bias can lead to skewed results that don't reflect the technologies' real-world performance.
+Publication bias
+is a common issue in science, where studies that show a positive result are more likely to be published than studies that show a negative outcome. In software engineering, this can manifest as a bias towards publishing success stories and case studies, while ignoring failures and negative results.
+Confirmation bias
+is a problem in science and software engineering alike. It's the tendency to look for evidence that confirms your hypothesis and ignore evidence that contradicts it. Confirmation bias can lead to cherry-picking data, misinterpreting results, and drawing incorrect conclusions.
+Conflict of interest
+. While less common in academic research, conflicts of interest can be a big issue in industry research. If a company is funding a study that shows its product in a positive light, it's important to be aware of the potential biases that may have influenced the results.
+Another thing we look at is the
+conclusions
+. Do the data support the conclusions? Are they reasonable and justified? Are they overstated or exaggerated? Are the limitations of the study acknowledged? Are the implications of the study discussed? It all goes back to honesty and transparency, which is crucial for evaluating the quality of the source.
+Last but not least, we should look at the
+citations and references
+included in the source. In the same way we apply the systematic review process to our research, we should also apply it to the sources we use. I would argue that this is even more important in software engineering, where the information is often less standardized, and you come across many unsupported claims. If a source doesn't provide citations or references to back up their claims, it's a red flag that the information may not be reliable.
+This brings us to something called
+anecdotal evidence
+. Anecdotal evidence is a personal story or experience used to support a claim. While anecdotal evidence can be compelling and persuasive, it is generally considered a weak form of evidence, as it is based on personal experience rather than empirical data. So when someone tells you that X is better than Y because they tried it and it worked for them, or that Z is true because they heard it from someone, take it with a massive grain of salt and look for more reliable sources of information.
+That, of course, doesn't mean you should ask for a source under every post on social media, but it's important to recognize what's a personal opinion and what's a claim based on evidence.
+Synthesizing the Results
+Once you have gathered all the relevant information, it's time to synthesize the results. This is where you combine all the evidence you have collected, analyze it, and draw conclusions.
+In science, this is often done as part of a
+meta-analysis
+, where the results of multiple studies are combined and analyzed to look for patterns and trends using statistical methods. A meta-analysis is a powerful tool for synthesizing the results of multiple studies and drawing more robust conclusions than can be drawn from any single study.
+You might not be doing a formal meta-analysis in software engineering, but you can still apply the same principles to your research. Look for common themes and trends in the information you have gathered, compare and contrast different sources, and draw conclusions based on the evidence.
+Conclusion
+Adopting a scientific way of thinking isn't just a nice-to-have in software engineering - it's essential to make informed decisions, solve problems effectively, and navigate the vast amount of information around you with confidence. Applying systematic review principles to your research allows you to gather reliable information, evaluate it critically, and draw sound conclusions based on evidence.
+Let's summarize what such a systematic research approach can look like:
+Define Clear Research Questions:
+Start every project or decision-making process by clearly stating what you aim to achieve or understand.
+Example: ""What factors should influence our choice between Cloud Service A and Cloud Service B for our application's specific needs?""
+Critically Evaluate Sources:
+Identify the type of sources (primary, secondary, tertiary) and assess their credibility.
+Be wary of biases and seek out multiple perspectives for a well-rounded understanding.
+Be Aware of Biases:
+Recognize common biases that can cloud judgment, such as confirmation or selection bias.
+Actively counteract these biases by seeking disconfirming evidence and questioning assumptions.
+Systematically Synthesize Information:
+Organize your findings and analyze them methodically.
+Use tools and frameworks to compare options based on defined criteria relevant to your project's goals.
+I encourage you to embrace this scientific approach in your daily work. The next time you're facing a critical decision - be it selecting a technology stack, debugging complex code, or planning a project - apply these principles:
+Start with a Question:
+Clearly define what you need to find out.
+Gather and Evaluate Information:
+Seek out reliable sources and scrutinize them.
+Analyze Systematically:
+Organize your findings and look for patterns or insights.
+Make Informed Decisions:
+Choose the path supported by evidence and sound reasoning.
+By doing so, you will enhance your problem-solving skills and contribute to a culture of thoughtful, evidence-based practice in the software engineering community.
+The best part is that once you start applying a critical and systematic approach to your sources of information, it becomes second nature. You'll automatically start asking questions like, ""Where did this information come from?"" ""Is it reliable?"" and ""Can I reproduce the results?"" Doing so will make you much less susceptible to hype, marketing, and new shiny things, ultimately making you happier and more confident.
+In the next part of this series, we'll look at applying the scientific mindset to debugging and using hypothesis testing and experimentation principles to solve problems more effectively.
+Hire us
+About the author(s)
+Jan Kaiser
+Software engineer passionate about everything web-related. Particularly loves Angular, SCSS, TypeScript, soccer and dachshunds
+@
+honzikec
+@
+honzikec
+Let's innovate together!
+We're ready to be your trusted technical partners in your digital innovation journey.
+Whether it's modernization or custom software solutions, our team of experts can guide you through best practices and how to build scalable, performant software that lasts.
+Name
+Email address
+Name
+Email address
+Let's innovate together!
+How did you hear about us?
+Send message
+Prefer email?
+hi@thisdot.co
+This Dot is a consultancy dedicated to guiding companies through their modernization and digital transformation journeys. Specializing in replatforming, modernizing, and launching new initiatives, we stand out by taking true ownership of your engineering projects.
+We love helping teams with projects that have missed their deadlines or helping keep your strategic digital initiatives on course. Check out
+our case studies
+and
+our clients
+that trust us with their engineering.
+Tech Turnarounds and Unveiling Health Tech's Potential: Insights from Fractional C-Suite Executive Denise Smith
+Tracy Lee sits down with Denise Smith, an accomplished fractional C-suite executive specializing in technology turnarounds, mergers, and acquisitions. In this conversation, they explore the world of health tech, and discuss the critical role engineering leaders play in understanding and navigating the financial aspects of their businesses.
+Denise’s journey into the tech world began with a degree in chemistry from Spelman College. She found her niche in technology by coding SQL databases and working on Y2K projects. This pivot marked her entry into technology consulting and set the stage for her career in the industry. Her current role involves being a fractional C-suite executive, such as a CTO, CEO, or COO, for companies in need of turnaround expertise or support during mergers and acquisitions.
+The Exciting Landscape of Health Tech:
+Denise's specialization in health tech offers her unique insights into the convergence of technology and healthcare. She highlights the opportunities to leverage technology to help people thrive in the digital age, focusing on digital equity and how solutions can empower populations to access vital information quickly. In the context of health tech, technology can play a crucial role in aiding first responders during emergencies and improving overall response times.
+Pivoting and Adaptation in the Face of Challenges:
+The interview explores the impact of the COVID-19 pandemic on tech companies, particularly those focusing on COVID-related solutions. Denise acknowledges that many companies faced challenges when the immediate need for their products diminished as the pandemic situation improved. She emphasizes the importance of pivoting business strategies to discover new opportunities and income streams. Denise's role often involves analyzing customer segments and generating product roadmaps to drive revenue growth.
+Guiding Principles for Successful Leadership:
+Denise's expertise extends beyond technology to financial literacy and leadership strategy. She emphasizes the significance of engineering leaders understanding their company's financials, such as customer acquisition costs and customer long-term value. This knowledge empowers leaders to make informed decisions and contribute to the overall growth and success of the business. Additionally, she stresses the importance of empathetic leadership and fostering a positive company culture during times of change and adaptation.
+Unexpected Paths to Leadership Success:
+One of the standout aspects of the interview is Denise's recommendation to explore unconventional routes for leadership development. She shares her experience with the BLCK VC program (Black Venture Capital), which exposed her to venture funding and financial insights that significantly impacted her leadership journey. Denise's story underscores the value of embracing unique learning opportunities that broaden leadership skillsets.
+Denise Smith's insightful interview provides valuable takeaways for engineering leaders seeking to navigate business challenges and drive growth. From understanding financial metrics to fostering empathy and embracing non-traditional learning experiences, her journey and expertise offer a refreshing perspective on the intersection of technology, leadership, and business success....
+Aug 16, 2023
+2
+mins
+Software Engineering
+Engineering Leadership",,IC1; IC5,,NO,,,,
+www.crossover.com,GL-397,6,5 Highest Paying Software Engineering Jobs (Ranked for ...,Crossover,,,EC5,NO,,,,
+addyosmani.com,GL-406,7,The Next Two Years of Software Engineering,"AddyOsmani.com - The Next Two Years of Software Engineering
+The software industry sits at a strange inflection point. AI coding has evolved from autocomplete on steroids to agents that can autonomously execute development tasks. The economic boom that fueled tech’s hiring spree has given way to an efficiency mandate: companies now often favor profitability over growth, experienced hires over fresh graduates, and smaller teams armed with better tools.
+Meanwhile, a new generation of developers is entering the workforce with a different calculus: pragmatic about career stability, skeptical of hustle culture, and raised on AI assistance from day one.
+What happens next is genuinely uncertain. Below are five critical questions that may shape software engineering through 2026, with two contrasting scenarios for each. These aren’t really predictions, but lenses for preparation. The goal is a clear roadmap for handling what comes next, grounded in current data and tempered by the healthy skepticism this community is known for.
+1. The Junior developer question
+The bottom line: Junior developer hiring could collapse as AI automates entry-level tasks, or rebound as software spreads into every industry. Both futures require different survival strategies.
+The traditional pathway of “learn to code, get junior job, grow into senior” is wobbling. A
+Harvard study of 62 million workers
+found that when companies adopt generative AI, junior developer employment drops by about 9-10% within six quarters, while senior employment barely budges.
+Big tech hired 50% fewer fresh graduates
+over the past three years. As
+one engineer cynically put it
+: ~”Why hire a junior for $90K when an AI coding agent costs less?”
+This isn’t just AI.
+Macro factors like rising interest rates and post-pandemic corrections
+hit around 2022, before AI tools became widespread. But AI has accelerated the trend. A single senior engineer with AI assistance can now produce what used to require a small team. Companies are quietly not hiring juniors more than they’re firing anyone.
+The flip scenario: AI unlocks massive demand for developers across every industry, not just tech. Healthcare, agriculture, manufacturing, and finance all start embedding software and automation. Rather than replacing developers, AI becomes a force multiplier that spreads development work into domains that never employed coders. We’d see more entry-level roles, just different ones: “AI-native” developers who quickly build automations and integrations for specific niches.
+The
+Bureau of Labor Statistics still projects ~15% growth
+in software jobs from 2024 to 2034. If businesses use AI to expand output rather than strictly cut headcount,
+they’ll need humans to seize the opportunities AI creates
+.
+The long-term risk of the pessimistic scenario is often overlooked: today’s juniors are tomorrow’s senior engineers and tech leaders. Cut off the talent pipeline entirely and you create a leadership vacuum in 5-10 years.
+Industry veterans call this the “slow decay”
+: an ecosystem that stops training its replacements.
+What to do about it:
+Junior developers:
+Make yourself AI-proficient and versatile. Demonstrate that one junior plus AI can match a small team’s output. Use AI coding agents (Cursor/Antigravity/Claude Code/Gemini CLI) to build bigger features, but understand and explain every line if not most. Focus on skills AI can’t easily replace: communication, problem decomposition, domain knowledge. Look at adjacent roles (QA, DevRel, data analytics) as entry points. Build a portfolio, especially projects integrating AI APIs. Consider apprenticeships, internships, contracting, or open source. Don’t be “just another new grad who needs training”; be an immediately useful engineer who learns quickly.
+Senior developers:
+Fewer juniors means more grunt work landing on your plate. Lean on automation for routine tasks, but don’t do everything yourself. Set up CI/CD, linters, and AI-assisted testing to catch basic issues. Mentor unofficially through open source or coaching colleagues in other departments.
+Be frank with management about the risks of all-senior teams
+. If junior demand rebounds, be ready to onboard effectively and delegate in ways that use AI. Your value is in multiplying the whole team’s output, not just your own code.
+2. The Skills question
+The bottom line: Core programming skills could atrophy as AI writes most code, or become more critical than ever as human developers focus on oversight. The coming years determine whether we trade understanding for speed.
+84% of developers now use AI assistance regularly
+. For many, the first instinct when facing a bug or new feature isn’t to write code from scratch, but to compose a prompt and stitch together AI-generated pieces. Entry-level coders are skipping the “hard way”: they might never build a binary search tree from scratch or debug a memory leak on their own.
+The skillset is shifting from implementing algorithms to knowing how to ask the AI the right questions and verify its output.
+The first rung of the ladder now demands prompting and validating AI
+rather than demonstrating raw coding ability. Some senior engineers worry this produces a generation who can’t code well independently, a kind of deskilling. AI-generated code introduces subtle bugs and security vulnerabilities that less-experienced developers might miss.
+The counter-scenario: as AI handles the routine 80%, humans focus on the hardest 20%. Architecture, tricky integrations, creative design, edge cases: the problems machines alone can’t solve. Rather than making deep knowledge obsolete, AI’s ubiquity makes human expertise more important than ever. This is the “high-leverage engineer” who uses AI as a force multiplier but must deeply understand the system to wield it effectively.
+If everyone has
+AI coding agent
+access, what distinguishes great developers is knowing when the AI is wrong or suboptimal.
+As one senior engineer put it
+: “The best software engineers won’t be the fastest coders, but those who know when to distrust AI.”
+Programming shifts: less typing boilerplate, more reviewing AI output for logical errors, security flaws, and mismatches with requirements. Critical skills become software architecture, system design, performance tuning, and security analysis.
+AI can produce a web app quickly, but an expert engineer ensures the AI followed security best practices
+and didn’t introduce race conditions.
+Developer discourse in 2025 was split. Some admitted they hardly ever write code “by hand” and think coding interviews should evolve. Others argued that skipping fundamentals leads to more firefighting when AI’s output breaks.
+The industry is starting to expect engineers to bring both
+: AI speed and foundational wisdom for quality.
+What to do about it:
+Junior developers:
+Use AI as a learning tool, not a crutch. When AI coding agents (Cursor/Antigravity/Claude Code/Gemini CLI) suggest code review why it works, identify weaknesses. Occasionally disable your AI helper and write key algorithms from scratch. Prioritize CS fundamentals: data structures, algorithms, complexity, memory management. Implement projects twice, once with AI, once without, and compare. Learn
+prompt engineering
+and tool mastery. Train yourself in rigorous testing: write unit tests, read stack traces without immediately asking AI, get comfortable with debuggers. Deepen complementary skills AI can’t replicate: system design, user experience intuition, concurrency reasoning. Show you can both crank out solutions with AI and tackle thorny issues when it fails.
+Senior developers:
+Position yourself as the guardian of quality and complexity. Sharpen your core expertise: architecture, security, scaling, domain knowledge. Practice modeling systems with AI components and think through failure modes. Stay current on vulnerabilities in AI-generated code. Embrace your role as mentor and reviewer: define where AI use is acceptable and where manual review is mandatory (payment or safety code). Lean into creative and strategic work; let the junior+AI combo handle routine API hookups while you decide which APIs to build. Invest in soft skills and cross-domain knowledge. Stay current on new tools and best practices. Double down on what makes a human developer indispensable: sound judgment, system-level thinking, and mentorship.
+3. The Role question
+The bottom line: The developer role could shrink into limited auditing (overseeing AI-generated code) or expand into a pivotal orchestrator position designing and governing AI-driven systems. Either way, adding value means more than just coding.
+The extremes here are stark. In one vision, developers see their creative responsibilities diminished. Rather than building software, they mostly audit and babysit AI outputs. AI systems (or “citizen developers” using no-code platforms) handle production; human developers review auto-generated code, check for errors, bias, or security issues, and approve deployments. Maker becomes checker. The joy of code creation replaced by the anxiety of risk management.
+There are reports of engineers spending more time evaluating AI-generated pull requests and managing automated pipelines, less time crafting code from scratch. Programming feels less like creative problem-solving and more like compliance. As one engineer lamented: “I don’t want to end up as a code janitor, cleaning up what the AI throws over the wall.”
+The alternative future is far more interesting: developers evolve into high-level orchestrators, combining technical, strategic, and ethical responsibilities. AI “workers” mean human developers take on an architect or general contractor role, designing the overall system, deciding which tasks go to which AI or software component, weaving solutions from many moving parts.
+A CEO of a low-code platform articulated this vision
+: in an “agentic” development environment, engineers become “composers,” orchestrating ensembles of AI agents and software services. They won’t write every note themselves, but they define the melody: architecture, interfaces, how agents interact. This role is interdisciplinary and creative: part software engineer, part system architect, part product strategist.
+The optimistic take: as AI handles rote work, developer roles shift toward higher-value activities by necessity. Jobs may become more interesting. Someone has to decide what the AI should build, verify the product makes sense, and continuously improve it.
+Which way it goes may depend on how organizations choose to integrate AI. Companies that see AI as labor replacement might trim dev teams and ask remaining engineers to keep automations running. Companies that see AI as a way to amplify their teams might keep headcounts similar but have each engineer deliver more ambitious projects.
+What to do about it:
+Junior developers:
+Seek opportunities beyond just writing code. Volunteer for test case writing, CI pipeline setup, or application monitoring: skills aligned with an auditor/custodian role. Keep your creative coding alive through personal projects so you don’t lose the joy of building. Develop a systems mindset: learn how components communicate, what makes APIs well-designed. Read engineering blogs and case studies of system designs. Familiarize yourself with AI and automation tools beyond code generation: orchestration frameworks, AI APIs. Improve communication skills, written and verbal. Write documentation as if explaining to someone else. Ask senior colleagues not just “Does my code work?” but “Did I consider the right things?” Prepare to be verifier, designer, and communicator, not just coder.
+Senior developers:
+Lean into leadership and architectural responsibilities. Shape the standards and frameworks that AI and junior team members follow. Define code quality checklists and ethical AI usage policies. Stay current on compliance and security topics for AI-produced software. Focus on system design and integration expertise; volunteer to map data flows across services and identify failure points. Get comfortable with orchestration platforms (Kubernetes, Airflow, serverless frameworks, agent orchestration tools). Double down on your role as technical mentor: more code reviews, design discussions, technical guidelines. Hone your ability to quickly assess someone else’s (or something’s) code and give high-level feedback. Develop product and business sense; understand why features get built and what customers care about. Shadow a product manager or join customer feedback sessions. Protect your creative passion through prototypes, hackathons, or emerging tech research. Evolve from coder to conductor.
+4. The Specialist vs. Generalist question
+The bottom line: Narrow specialists risk finding their niche automated or obsolete. The fast-changing, AI-infused landscape rewards T-shaped engineers: broad adaptability with one or two deep skills.
+Given how quickly models, tools and frameworks rise and fall, betting your career on a single technology stack is risky. A guru in a legacy framework might suddenly find themselves in less demand when a new AI tool handles that tech with minimal human intervention. Developers who specialize narrowly in “a single stack, framework or product area” might wake up to find that area declining or redundant.
+Think of COBOL developers, Flash developers, or mobile game engine specialists who didn’t pivot when the industry moved. What’s different now is the pace of change. AI automation can make certain programming tasks trivial, undercutting roles that revolved around those tasks. A specialist who only knows one thing (fine-tuning SQL queries, slicing Photoshop designs into HTML) could find AI handling 90% of that work.
+Hiring managers chase the newest niche. A few years ago everyone wanted cloud infrastructure specialists; now there’s a surge in AI/ML engineers. Those who specialized narrowly in yesterday’s technology feel stalled as that niche loses luster.
+The opposite outcome is specialization in a new form: the “versatile specialist” or
+T-shaped developer
+. Deep expertise in one or two areas (the vertical stroke), broad familiarity with many others (the horizontal stroke).
+These engineers become the “glue” in multidisciplinary teams
+; they communicate with specialists of other stripes and fill gaps when needed.
+Companies no longer want developers who are either too shallow or too narrowly focused
+; they want a strong core competency plus ability to work across the stack. Part of the reason is efficiency: a T-shaped engineer can often solve problems end-to-end without waiting on handoffs. Part is innovation: cross-pollination of knowledge leads to better solutions.
+AI tools actually augment generalists more, making it easier for one person to handle multiple components. A back-end engineer can rely on AI help to create a reasonable UI; a front-end specialist can have AI generate server boilerplate. An AI-rich environment lets people operate more broadly. Meanwhile, deep specialists might find their niche partly automated with no easy way to branch out.
+Nearly 45% of engineering roles now expect proficiency in multiple domains
+: programming plus cloud infrastructure knowledge, or front-end plus some ML familiarity.
+What to do about it:
+Junior developers:
+Establish a broad foundation early. Even if hired for a specific role, peek outside that silo. If you’re doing mobile, learn backend basics; if you’re doing front-end, try writing a simple server. Learn the deployment process and tools like Docker or GitHub Actions. Identify one or two areas that genuinely excite you and go deeper: this becomes your vertical expertise. Brand yourself as a hybrid: “full-stack developer with cloud security focus” or “frontend developer with UX expertise.” Use AI tools to learn new domains quickly; when you’re a novice in backend, have ChatGPT generate starter API code and study it. Build the habit of continuous re-skilling. Participate in hackathons or cross-functional projects to force yourself into generalist mode. Tell your manager you want exposure to different parts of the project. Adaptability is a superpower early in your career.
+Senior developers:
+Map your skill graph: what are you expert in, what related domains have you only touched superficially? Pick one or two adjacent domains and commit to becoming conversant. If you’re a back-end database specialist, get comfortable with a modern front-end framework or learn ML pipeline basics. Do a small project in your weak area with AI assistance. Integrate your deep expertise with new contexts; if you specialize in web app performance, explore how those skills apply to ML inference optimization. Advocate for or design your role to be more cross-functional. Volunteer to be the “integration champion” for projects touching multiple areas. Mentor others to spread skills around while picking up something from them in return. Update your resume to reflect versatility. Use your experience to identify patterns and transferable knowledge. Become the T-shaped role model: deep in your specialty (giving authority and confidence) but actively stretching horizontally.
+5. The Education question
+The bottom line: Will a CS degree remain the gold standard, or will faster learning paths (bootcamps, online platforms, employer training) overtake it? Universities may struggle to keep up with an industry that changes every few months.
+A four-year computer science degree has long been the primary ticket into software roles. But that tradition is being questioned.
+One future: universities remain important but struggle to stay relevant. Degrees stay the default credential, but programs lag behind rapidly evolving needs, hampered by slow curriculum update cycles and bureaucratic approval processes. Students and employers feel academia is disconnected from industry, teaching theory or outdated practice that doesn’t translate to job skills.
+Recent grads report never learning about cloud computing, modern DevOps, or AI tooling during their degree. If universities demand high time and financial investment while delivering low-relevance education, they risk being seen as expensive gatekeepers. But many companies still require a bachelor’s degree out of inertia, so the burden shifts to students to fill the gap with bootcamps, online courses, and self-taught projects.
+Student loan debt is enormous, and companies spend billions training new grads
+because those grads lack skills needed in the workplace. Universities might add an AI ethics class here, a cloud computing elective there, but by the time they implement something, industry tools have moved on.
+The disruptive scenario: traditional education gets increasingly replaced by new systems. Coding bootcamps, online certifications, self-taught portfolios, employer-created training academies. Many high-profile employers (Google, IBM) have dropped degree requirements for certain technical roles.
+In 2024, nearly 45% of companies planned to eliminate bachelor’s degree requirements
+for at least some positions.
+Bootcamps have matured. They produce grads who get hired at top companies alongside CS grads. These programs are shorter (12-week intensive) and focus on practical skills: current frameworks, cloud services, teamwork. The hiring currency is shifting toward live portfolios, micro-credentials, and verified skills. A strong GitHub portfolio or recognized certification can bypass degree requirements.
+Employer-driven education is emerging: companies creating their own training pipelines or partnering with bootcamps. Some big tech companies have started internal “universities” for non-traditional candidates. AI itself offers new ways to learn: AI tutors, interactive coding sandboxes, personalized instruction outside university settings.
+A modular ecosystem of learning is far more accessible than an expensive four-year degree. A kid in a country without strong CS universities can take the same Coursera courses and build the same portfolio as someone in Silicon Valley.
+What to do about it:
+Aspiring/junior developers:
+If in a traditional CS program, don’t rely on it exclusively. Augment coursework with real-world projects: build a web app, contribute to open source. Seek internships or co-ops. If your curriculum misses hot topics, learn them through online platforms. Earn industry-recognized certifications (GCP, AWS, Azure) to signal practical knowledge. If self-teaching or in a bootcamp, focus on a compelling portfolio: at least one substantial project with good documentation. Be active in the developer community: contribute to open source, write technical posts. Network through LinkedIn, meetups, dev events. Get an experienced developer to vouch for you. Keep learning continuously; the half-life of technical skills is short. Use AI as your personal tutor. Prove your skills in concrete ways: portfolio, certification, and ability to talk intelligently about your work will open doors.
+Senior developers and leaders:
+Your credential alone won’t carry you forever. Invest in continuous education: online courses, workshops, conferences, certifications. Validate your skills in new ways; be prepared for interviews that assess current competency through real problems. Maintain side projects with new tech. Reassess job requirements: do you really need a new hire to have a CS degree, or do you need certain skills and learning ability? Push for skills-first hiring to widen your talent pool. Support internal training programs or apprenticeship-style roles. Champion mentorship circles for junior devs without formal backgrounds. Engage with academia and alternatives: advisory boards, guest lectures, feedback on curriculum gaps. Reflect this in your own career growth: real-world achievements and continuous learning matter more than additional degrees.
+The Through-Line
+These scenarios aren’t mutually exclusive. Reality will draw elements from all of them. Some companies will reduce junior hiring while others expand it in new domains. AI will automate routine coding while raising standards for the code humans touch. Developers might spend mornings reviewing AI outputs and afternoons crafting high-level architecture.
+The consistent thread: change is the only constant. By keeping a finger on technology trends (and skepticism around them), you avoid being caught off-guard by hype or doom. By updating skills, diversifying abilities, and focusing on uniquely human aspects (creativity, critical thinking, collaboration) you remain in the loop.
+Whether the future brings a coding renaissance or a world where code writes itself, there will always be demand for engineers who think holistically, learn continuously, and drive technology toward solving real problems.
+The best way to predict the future is to actively engineer it.",,IC1; IC3; IC5,,NO,,,,
+careers.chevron.com,GL-412,8,Information Technology at Chevron,"Information Technology at Chevron
+Skip to main content
+Alena's
+machine learning innovations will help deliver cleaner energy.
+that’s how we do IT
+As the global energy system evolves to meet the demands of a growing world, we are focused on delivering affordable, reliable and ever-cleaner energy. What’s our secret? A cutting-edge team of technology pros with the resources to make it happen. Every day, as part of this team, your software and cloud engineering, data science and cybersecurity expertise will help us lead the way in energy. You’ll learn, grow and build a career that can take you anywhere.
+IT career areas
+agile
+Servant leaders and coaches responsible for removing impediments and fostering an environment for high-performing team dynamics, continuous flow, and relentless improvement. Help educate Agile teams in Scrum and SAFe®.
+Scrum Master
+Release Train Engineer
+cloud engineering & infrastructure
+Develop, implement, optimize and maintain cloud-based solutions. Responsible for deploying and debugging cloud stacks and ensuring the reliability and security of the cloud infrastructure.
+Cloud Engineer
+Network Engineer
+Reliability Engineer
+cybersecurity
+Responsible for consulting, designing, and deploying cybersecurity technologies and solutions for business partners and the entire enterprise.
+Cyber Engineer – Information Technology (IT)
+Cyber Engineer – Operational Technology (OT)
+data engineering
+Delivers data products to accelerate the delivery of analytics and workflow solutions.  Covers end-to-end data lifecycle activities—analyzing and mapping data sources, creating common information models, designing integration that enables data movement, and developing the pipelines.
+Data Engineer
+Data Architect
+Data Analyst
+data science & analytics
+Identify business opportunities, analyze and process data, build models, and interpret results to create actionable insights for our business to improve decision making, business workflows and automation.
+Data Scientist
+Machine Learning Engineer
+Business Intelligence Analyst
+software engineering
+Delivers innovative solutions at scale, driving them through the complete life cycle to improve business processes and drive undeniable value.
+Software Engineering
+Application Engineering
+where we hire
+Chevron is the second-largest integrated energy company in the United States
+see jobs in United States
+Chevron has a major presence in the Philippines as one of the country’s biggest investors
+see jobs in Manila, PH
+Chevron has business and opportunities at various levels of expertise in Argentina
+see jobs in Buenos Aires, AR
+the technologies we deploy help us manage and develop our global assets efficiently and effectively.
+of
+Insights
+from a
+software
+engineer
+Insights from a software engineer
+Get a glimpse into the projects and positive impacts you can make as a software engineer at Chevron. Caitlin Rubia shares a bit on her experiences.
+watch video
+Chevron uses
+Microsoft HoloLens
+to Make Virtual
+Teleportation a
+Reality
+Chevron uses Microsoft HoloLens to Make Virtual Teleportation a Reality
+Chevron has partnered with Microsoft to fuel digital transformation. A technology called Microsoft HoloLens is showing us that the future is now, as it makes sci-fi virtual teleporting a business reality for safer operations and to address issues more quickly on the Chevron front lines.
+learn more
+chevron’s future
+of human energy
+chevron’s future of human energy
+Chevron has an exciting future as it continues to lead the way and empower human progress. With several big projects underway, Chevron is better positioned and knowledgeable and have access to new parts of the energy landscape.
+learn more
+Endless
+opportunities for
+a bright
+career
+Endless opportunities for a bright career
+Whether you’re just starting your career or looking for new ways to make an impact as an experienced professional, Chevron brings a broad range of opportunities. Todd MacGregor, cybersecurity chapter head, shares his insights.
+watch video
+Following Chevron’s
+Azure Migration
+Journey
+Following Chevron's Azure Migration Journey
+See how Chevron is using Microsoft Azure in its digital transformation. Through automation and the ability to manage data across multiple platforms, Azure offers ease of migration for large enterprise environments like Chevron's.
+watch video
+we’re proudly recognized as a preferred employer
+Newsweek America's Greatest Workplaces 2023
+Newsweek and data firm Plant-A Insights group named Chevron as one of America’s Greatest Workplaces in 2023.
+Forbes
+Forbes and Statista named Chevron to the 2024 list of America’s Best Employers for Diversity.
+search available jobs",,IC1; IC5,,NO,,,,
+www.amazon.com.br,GL-421,9,Top Jobs: Computer and Information Technology,"Amazon.com.br
+Clique no botão abaixo para continuar comprando
+Continuar comprando
+Condições de Uso
+Políticas de Privacidade
+© 1996
+, Amazon.com, Inc. ou suas afiliadas",,,EC5,NO,,,,
+society-rse.org,GL-435,10,Vacancies,"Vacancies - Society of Research Software Engineering
+Vacancies
+You can post a vacancy here for any role that involves a significant element of writing software for research, or supports the role of RSEs. Vacancies anywhere in the world are welcome. We have also collated
+resources to help improve EDIA for recruitment, as well as other job boards
+.
+It is not a requirement that your job title is listed as “Research Software Engineer” however you should consider the advantages of doing so.  I.e.:
+You will support the advocacy of the RSE role
+The job will have a clear intent that the position is about developing research software not necessarily undertaking novel research (more appropriate for a research associate).
+The job will be naturally signposted to our welcoming and growing RSE community
+If your job involves supporting RSEs in their role or is otherwise related to RSE without directly involving writing software for research, it will be published under ‘Related non-RSE’.
+You can
+submit a job advert using this form
+and it will go to a member of our web team for approval.
+Please also consider adding the role description to our
+RSE Career Ladder database
+.
+Other RSE organisations may have
+their own job boards
+so have a look at theirs too.
+RSE Job Vacancies
+Keywords
+Location
+Remote positions only
+Your browser does not support JavaScript, or it is disabled. JavaScript must be enabled in order to view listings.
+Load more listings
+Related non-RSE / RSE-like Vacancies
+These vacancies are not necessarily for RSE positions, but we believe they may still be of interest to our community.
+Keywords
+Location
+Remote positions only
+Your browser does not support JavaScript, or it is disabled. JavaScript must be enabled in order to view listings.
+Load more listings",,IC1; IC5,,YES,,,,
+www.higheredjobs.com,GL-436,11,Computer and Information Technology Jobs - HigherEdJobs,Request unsuccessful. Incapsula incident ID: 684000590401240463-28442987170893532,,,EC2; EC5,NO,,,,
+distantjob.com,GL-49,12,Software Engineering Best Practices in 2026,"Software Engineering Best Practices in 2026 | DistantJob - Remote Recruitment Agency
+Hire Now
+Find a Job
+Resources
+Explore
+Blog
+The Podcast
+Remote Work Readiness Tool
+Interview Questions
+Salary Calculator
+Remote Hiring Course
+Compare DistantJob
+vs Local Recruitment Agencies
+vs Freelance Sites
+vs Outsourcing Firms
+How We Work
+Vetting Process Page
+Onboarding Protocol
+About Us
++1-888-886-7343
+Contact Us
+Tech Insights
+Software Engineering Best Practices in 2026
+Cesar Fazio
+Published on February 16, 2026
+-
+Updated on February 27, 2026
+-
+3 min. to read
+The problem with poor software is that it doesn’t just taint your image; you also lose revenue. Software engineering best practices have undergone many changes in recent years. Capers Jones said in 2009 that software engineering needed to discuss many technical issues “to become a legitimate term for an occupation that has been
+a craft or art
+form rather than a true engineering field”. Since then, software engineering has evolved to more iterative development processes, flexible and automated.
+The best practices in software engineering in 2026 focus on collaboration, continuous delivery, and adaptation to emerging technologies, especially artificial intelligence and machine learning.
+We have curated a list of best practices in software development in 2026, along with examples. Whether you’re leading a team of experienced engineers or newbies, these practices can help ensure your project’s success.
+Why are Software Engineering Best Practices so Important?
+Software engineering best practices are crucial for producing high-quality, reliable, and maintainable software.
+Agile
+Project Management is not enough to ensure that software is robust, secure, or can adapt to changing needs over time.
+In fact, many software engineers resent Agile.
+Robert Martin
+, also known as “Uncle Bob”, author of Clean Code and Clean Architecture, attacks what he and
+Martin Fowler
+(co-author of the Agile Manifesto) call “Flaccid Scrum”, which means “Scrum without Software Engineering Best Practices”. According to him, Flaccid Scrum leads to lower productivity overall.
+In contrast, these software engineering giants always recommend Extreme Programming, which was an Agile Framework before the Agile Manifesto was even written. Extreme Programming shares many elements with Scrum, while keeping software engineering best practices.
+In short, software engineering best practices are unavoidable if you want to develop and deploy the best software.
+Ten Essential Practices for Software Engineers to Implement
+There are many software development practices that we can’t possibly cover in this piece. But here are ten practical tips to guide your team in 2026.
+1. Requirements Gathering & Analysis
+In software engineering, requirements gathering is the process of defining exactly what the software should do and how it should perform. It’s the most critical step in the
+SDLC
+.
+Fixing a misunderstanding during the design phase costs almost nothing. On the other hand, fixing the same misunderstanding after the code is written requires rewriting, re-testing, and re-deploying.
+It also avoids “scope creep”, the slow, uncontrolled growth of a project’s goals. Without a defined list of requirements, it is impossible to say “no” to new feature requests. Gathering requirements creates a baseline that keeps the project on schedule and within budget.
+Key Requirements Elicitation Techniques
+Gathering requirements isn’t just about asking, “What do you want?” It’s a systematic process of discovery, negotiation, and documentation.
+Interviews
+: One-on-one or group discussions with stakeholders to gain detailed, qualitative insights.
+Workshops
+: Collaborative, structured meetings involving users and stakeholders to define requirements, resolve conflicts, and foster agreement.
+Brainstorming
+: An informal, creative group session used to identify new, innovative, or undocumented ideas.
+Prototyping
+: Creating preliminary versions or wireframes of software to test functionality, reduce ambiguity, and gather feedback early.
+Observation (Job Shadowing)
+: Watching users perform their daily tasks to understand operational workflows, pain points, and implicit needs.
+Surveys
+: Efficient tools for gathering high-level, quantitative information from a large, dispersed group of stakeholders.
+Document Analysis
+: Reviewing existing system documentation, business plans, and competitors’ products to identify requirements.
+Scenarios
+: Modeling interactions to define how users will interact with the system to achieve specific goals.
+Focus Groups
+: Small, guided groups that provide feedback on specific aspects of the project, useful when individual stakeholders are unavailable.
+Key Techniques from the Product Discovery
+Product Discovery is an ongoing process of discovering what needs to be done without asking the customer what they want.
+User Journey Mapping
+: A visual timeline of a customer’s interactions with your brand. It tracks their actions, emotions, and pain points from initial discovery to final goal.
+Jobs To Be Done
+: It focuses on the “job” a customer hires a product to do. JBTD identifies the functional, emotional, and social progress a user seeks in a specific circumstance.
+Persona
+: A persona is a representation of a relevant group of a company’s ideal target audience. Personas are built based on research and real data about potential customers, considering aspects such as demographics, behaviors, and specific needs.
+2. Coding Standards
+Maintaining a consistent coding style throughout the project is a best practice for software engineering. It includes meaningful names for variables, functions, and other entities. It also includes proper indentation and dividing complex logic into manageable chunks.
+Don’t forget to keep your code clean. A clean code is a robust code that is easy to read and maintain. A robust code handles errors and unexpected situations gracefully. A readable code is a code with proper indentation, clear structure, meaningful names, and consistent formatting. Finally, maintainable code should prioritize ease of understanding for unfamiliar developers.
+3. Improve Code Quality
+To improve
+code quality
+, you must understand its three basic principles. DRY, KISS, and YAGNI. DRY means “Don’t Repeat Yourself”; avoid redundant code. Every piece of knowledge or logic within a system should have a single, unambiguous, authoritative representation. In other words, if your bank system already has a deposit function or class, don’t create other deposit functions or classes. It will make a mess.
+KISS means “Keep It Simple, Stupid”. Most systems work best if they are kept simple rather than made complex. Avoid unnecessary complexity in your code; only add complexity when really needed.
+YAGNI, “You Aren’t Gonna Need It”, advises against adding functionality until it is absolutely necessary. So, if you are planning to create an API that will connect your application to its many microservices while your software is still a modular monolith is not the best idea. Let your grandiose plans have a time to shine later.
+4. Version Control Management
+When submitting code for review, it is best to make smaller pull requests (PR) or change lists, not larger ones. One of the main reasons for this is that it makes the job of the code reviewer easier.
+Nothing is worse as a code reviewer than reviewing 1,000 or 2,000 lines of code. And because reviewing that many lines of code is difficult, it is easier for a bug to introduce itself in the pull request and eventually into the central repository.
+Ideally, make your pull request under 200-400 lines for thorough and faster reviews.
+Also, it makes it more challenging if the requester eventually has to fix the pull request because a bug made its way into the main code repository. The more code you have in a PR, the more likely you are to run into a merge conflict.
+This is especially useful if you work at a large company like Google or Facebook, where many engineers share the same
+code repository
+. So, try to err on the side of smaller pull requests.
+That might mean the requester has to put in more effort because they’ll have to break up their code into pieces that can be submitted as separate pull requests. But it will go a long way in improving the entire software development process.
+Git is the industry-standard distributed version control system, while platforms like GitHub, GitLab, and Bitbucket provide collaborative interfaces for code hosting and DevOps. Other top tools include SVN (centralized), Mercurial (distributed), and Perforce (high-performance for large files).
+5. Shifting-Left Testing
+Shift-Left Testing is the practice of moving testing and security checks earlier in the development lifecycle to reduce rework costs. From the beginning of a project, integrate various testing types such as integration testing (ensuring parts work together), end-to-end testing (simulating user scenarios), and Test-Driven Development (TDD) (writing tests before code).
+For example, writing unit tests is one of the easiest ways to improve code quality. Unit tests focus on small, modular pieces of code to test one functionality at a time. Consider different scenarios, including deliberately making test cases fail to observe behavior, and aim for 100% test coverage.
+Run all tests before requesting a review to catch bugs early, as fixing defects in early stages can be significantly cheaper than after release. Also, consider training the whole team in basic testing, even juniors. If the engineers can perform basic testing before sending their tasks to the test phase, the QAs can focus on deeper level testing. This is the essence of Shifting-Left Testing.
+Also, don’t forget to automate aspects of testing and review using linters, vulnerability scanners, and tools for checking best practices and coverage. AI tools can significantly streamline code reviews by detecting issues and providing suggestions.
+6. Effective Code Reviews
+Engage in code reviews where another software engineer examines your code or pull request to improve overall code quality, identify bugs, and reduce future optimization work.
+Stack related pull requests to separate logically distinct changes, enabling parallel work and more granular feedback. For example, while coding an API, you might feel inclined to split your pull requests into three parts: “Front-End”, “API endpoints and business logic”, and “database and schemas”. In that way, your reviewer might be able to review each snippet with clear intent.
+Google
+researchers found that limiting review sessions to under 60 minutes helps reviewers to maintain focus and accuracy.
+Use a
+code review checklist
+to standardize the process and ensure checks for functionality, readability, maintainability, security, performance, and coding standards. Maybe the company already has one. Use it.
+Document and explain code decisions, including the motivation, alternatives explored, and trade-offs, to provide context for reviewers and future maintenance.
+7. Design Patterns
+Instead of designing things from scratch, it’s an advisable best practice for software engineers to look for design patterns. A design pattern is a solution template used often to create software.
+Refactoring Guru
+compares them to “pre-made blueprints that you can customize to solve a recurring design problem in your code”.
+They are not code snippets; they are more like design choices for architectural decisions. While design patterns are more under the scope of software architects, in some companies, there is no architect, so a software engineer must decide for the project. Even if there is an architect, a software engineer must know how to build them.
+Design patterns come in three flavors: creational patterns, structural patterns, and behavioral patterns. Creational patterns create reusable objects, structural patterns connect different objects, and behavioral patterns assign objects with roles and responsibilities.
+8. Optimization and Performance Practices
+There are many best practices to optimize and add performance to your software. Among them, it’s worth noting:
+Asynchronous Jobs
+Cache-Aside Patterns
+Parallelism and Concurrence
+SQL Performance and Optimization
+Content Distribution Network (CDN)
+Asynchronous Jobs
+Asynchronous jobs
+are tasks that run independently and concurrently, without blocking other processes. They aim for more efficient use of system resources and a more responsive user experience. Instead of waiting for one operation to complete before starting another, asynchronous programming enables multiple tasks to proceed simultaneously.
+Cache-Aside Patterns
+Applications use a cache to deliver information and data held in databases. That being said, cached data won’t always match the real data stored in the database. A cache-aside pattern is a strategy to update the cache, to keep it relevant and reduce database overhead.
+Parallelism and Concurrence
+Concurrency is when multiple threads can be paused and resumed. In other words, it’s when a CPU pauses one task to prioritize another. Parallelism is when tasks are running on multiple cores (a quad-core CPU means four tasks running at the same time). In short, concurrency is about dealing with many things at once; parallelism is about doing many things at once. Pausing parts of the application while allowing the meaningful ones to run optimizes performance.
+SQL Performance and Optimization
+Optimizing SQL performance is key to guaranteeing SQL queries are as fast and smooth as possible, improving performance on any database that uses a relational database. This is especially concerning when dealing with Big Data, where many tables might have millions of rows.
+Content Distribution Network (CDN)
+A Content Distribution Network (CDN) is a server cluster distributed worldwide. They store cache content near the end user, making access to the services easier and faster. Important websites use this performance practice, such as Amazon, Facebook, Google, and Netflix.
+Don’t Overly Optimize or Modularize Upfront
+You complicate the code and risk improving runtime inconsequentially when you optimize early. Instead, get a clean, clear algorithm and prioritize it later. Similarly, trying to make the system modular and extensible should be done moderately. Wait until a need arises, or you risk making the wrong interfaces and wasting time and resources.
+9. AI-Assisted Development
+AI-Assisted Development consists of using LLMs for code generation and automated refactoring, and deploying AI tools for static analysis and vulnerability scanning.
+For code generation, have in mind that AIs don’t make architectural decisions alone, nor code considering your business needs, no matter how much context you give them in a prompt.
+According to a
+METR study
+published in July 2025, senior developers using AI tools were, on average, 19% slower at completing tasks compared to working without AI assistance. The reason for the slowness is both prompt and code refactoring. Despite decreased speed, these developers perceived themselves as being 20% faster when using AI. The phenomenon was described as a “productivity placebo”.
+To maintain high standards while leveraging these tools, divide the AI workflow into two categories: high-velocity delegation and high-stakes manual oversight.
+Leveraging AI
+Avoiding AI
+Boilerplate & Scaffolding:
+Generating repetitive structures, standard API endpoints, and setup files.
+Architectural Decisions:
+Deciding how systems scale, how data flows, and how the overall design remains coherent.
+Unit Testing:
+Rapidly generating test cases for various edge scenarios.
+Ambiguous Requirements:
+Navigating the “gray areas” where business needs are poorly defined or contradictory.
+Documentation:
+Drafting initial versions of README files or inline comments based on existing logic.
+Root-Cause Debugging:
+Solving deep, systemic bugs that AI-generated “quick fixes” often overlook or exacerbate.
+Refactoring Logic:
+Using LLMs to suggest more idiomatic ways to write a specific, isolated function.
+Long-term Sustainability:
+Ensuring the code remains maintainable five years from now, not just “runnable” today.
+10. Automated And Secure CI/CD Pipelines
+Continuous Integration and Continuous Deployment
+(CI/CD) pipelines are the backbone of high-performing engineering teams. A robust pipeline ensures that every code change is automatically built, tested, and prepared for release, reducing human error and increasing deployment frequency.
+Continuous Integration (CI):
+Every time a developer pushes code, the system should automatically run unit tests and linters. This catches “breaking changes” immediately, preventing technical debt from accumulating.
+Continuous Deployment (CD):
+Once code passes all checks, it should be deployed to a staging or production environment automatically. This eliminates the “it works on my machine” syndrome and allows for faster feedback loops with users.
+Automation without
+security
+is a recipe for disaster. Integrating security into your pipeline (
+shifting left
+) is a critical best practice:
+Secrets Management:
+Never hardcode API keys or passwords. Use specialized tools (like HashiCorp Vault or AWS Secrets Manager) that your pipeline can call securely.
+SCA and SAST:
+Implement Software Composition Analysis (SCA) to check for vulnerabilities in third-party libraries (like Log4j) and Static Application Security Testing (SAST) to scan your own code for security flaws before it even hits production.
+Container Scanning:
+If you are using Docker or Kubernetes, ensure your pipeline scans images for vulnerabilities during the build process.
+Conclusion
+Software engineering best practices can help you build maintainable, scalable, and secure software products.
+We have shared ten software engineering practices that can enhance the outcome of your software projects. However, this is not an exhaustive list. The technology industry constantly evolves, so it can be tricky to keep up with the latest trends, especially when you’re looking for talent.
+That’s where we can help at DistantJob. We can help you find and vet potential hires to ensure they stay up-to-date with industry trends. Our culture-centric approach ensures that the candidates not only have the technical skills but also fit well into your company’s culture.
+In addition, we take care of all the
+HR processes
+, from finding suitable candidates to onboarding them. This enables you to focus on building your software products and growing your business. Ready to get started?
+Contact us!
+Cesar Fazio
+César is a digital marketing strategist and business growth consultant with experience in copywriting. Self-taught and passionate about continuous learning, César works at the intersection of technology, business, and strategic communication.
+In recent years, he has expanded his expertise to product management and Python, incorporating software development and Scrum best practices into his repertoire. This combination of business acumen and technical prowess allows structured scalable digital products aligned with real market needs.
+Currently, he collaborates with DistantJob, providing insights on marketing, branding, and digital transformation, always with a pragmatic, ethical, and results-oriented approach—far from vanity metrics and focused on measurable performance.
+Learn how to hire offshore people who outperform local hires
+What if you could approach companies similar to yours, interview their top performers, and hire them for 50% of a North American salary?
+Find Out How
+Subscribe to our newsletter and get exclusive content and bloopers
+or Share this post",,IC1; IC3; IC5,,NO,,,,

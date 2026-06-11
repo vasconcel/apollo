@@ -1,4 +1,7 @@
+import csv
 import os
+import tempfile
+import zipfile
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -70,8 +73,21 @@ WL_HEADERS = [
     "Decision",
 ]
 
-GL_HEADERS_ROW1 = ["#", "Title", "", "", "Decision"]
-GL_HEADERS_ROW2 = ["", "", "Revisor 1", "Revisor 2", ""]
+GL_HEADERS = [
+    "Library",
+    "",
+    "#",
+    "Title",
+    "Abstract",
+    "Palavra-Chaves",
+    "CIs1",
+    "CEs1",
+    "Revisor 1",
+    "CIs2",
+    "CEs2",
+    "Revisor 2",
+    "Decision",
+]
 
 
 def _get_inclusion_criteria_text() -> str:
@@ -149,8 +165,10 @@ class ExportScreenedPapersUseCase:
         wb = Workbook()
         wb.remove(wb.active)
 
+        quality_map = self._decision_repo.get_quality_map()
+
         self._create_wl_sheet(wb, wl_papers, human_map)
-        self._create_gl_sheet(wb, gl_papers, human_map)
+        self._create_gl_sheet(wb, gl_papers, human_map, quality_map)
 
         wb.save(str(out))
 
@@ -217,63 +235,149 @@ class ExportScreenedPapersUseCase:
         for col, width in wl_col_widths.items():
             ws.column_dimensions[get_column_letter(col)].width = width
 
-    def _create_gl_sheet(self, wb, gl_papers: list, human_map: dict[str, str]) -> None:
+    def _create_gl_sheet(self, wb, gl_papers: list, human_map: dict[str, str], quality_map: dict[str, dict]) -> None:
         ws = wb.create_sheet("Grey Literature")
         ws.views.sheetView[0].showGridLines = True
         ws.row_dimensions[1].height = 28
-        ws.row_dimensions[2].height = 28
 
-        for col_idx, header in enumerate(GL_HEADERS_ROW1, start=1):
+        for col_idx, header in enumerate(GL_HEADERS, start=1):
             cell = ws.cell(row=1, column=col_idx, value=header)
             cell.fill = _HEADER_FILL
             cell.font = _HEADER_FONT
             cell.alignment = _HEADER_ALIGN
             cell.border = _THIN_BORDER
 
-        for col_idx, header in enumerate(GL_HEADERS_ROW2, start=1):
-            cell = ws.cell(row=2, column=col_idx, value=header)
-            cell.fill = _HEADER_FILL
-            cell.font = _HEADER_FONT
-            cell.alignment = _HEADER_ALIGN
-            cell.border = _THIN_BORDER
+        ic_comment_text = _get_inclusion_criteria_text()
+        ec_comment_text = _get_exclusion_criteria_text()
 
-        ws.merge_cells("A1:A2")
-        ws.merge_cells("B1:B2")
-        ws.merge_cells("E1:E2")
-        for merged_range in ("A1:A2", "B1:B2", "E1:E2"):
-            style_range(ws, merged_range, border=_THIN_BORDER, fill=_HEADER_FILL, alignment=_HEADER_ALIGN)
-
-        protocol_comment_text = _get_full_protocol_text()
-        for cell_ref in ("C2", "D2"):
-            c = Comment(protocol_comment_text, "APOLLO")
+        for cell_ref in ("G1", "J1"):
+            c = Comment(ic_comment_text, "APOLLO")
+            c.width = 350
+            c.height = 220
+            ws[cell_ref].comment = c
+        for cell_ref in ("H1", "K1"):
+            c = Comment(ec_comment_text, "APOLLO")
             c.width = 350
             c.height = 220
             ws[cell_ref].comment = c
 
-        for row_idx, (paper, decision) in enumerate(gl_papers, start=3):
+        for row_idx, (paper, decision) in enumerate(gl_papers, start=2):
             ws.row_dimensions[row_idx].height = 20
-            ws.cell(row=row_idx, column=1, value=row_idx - 2)
-            ws.cell(row=row_idx, column=2, value=paper.title)
+            ws.cell(row=row_idx, column=1, value=_get_library(paper))
+            ws.cell(row=row_idx, column=2, value=paper.id)
+            ws.cell(row=row_idx, column=3, value=row_idx - 1)
+            ws.cell(row=row_idx, column=4, value=paper.title)
+
+            crawled = quality_map.get(paper.id, {}).get("full_text")
+            ws.cell(row=row_idx, column=5, value=crawled or "(No web content scraped)")
+
+            ws.cell(row=row_idx, column=6, value=_get_keywords(paper))
+
+            inclusion_codes = [c for c in decision.applied_criteria_codes if c.startswith("IC")]
+            exclusion_codes = [c for c in decision.applied_criteria_codes if c.startswith("EC")]
+
+            ws.cell(row=row_idx, column=7, value="; ".join(inclusion_codes) if inclusion_codes else "")
+            ws.cell(row=row_idx, column=8, value="; ".join(exclusion_codes) if exclusion_codes else "")
 
             human_val = human_map.get(paper.id)
             if human_val:
-                revisor_val = 1 if human_val == "YES" else 0
-                _apply_status_style(ws.cell(row=row_idx, column=3), revisor_val)
+                revisor_val = human_val
+                _apply_status_style(ws.cell(row=row_idx, column=9), human_val)
             else:
                 revisor_val = ""
-            ws.cell(row=row_idx, column=3, value=revisor_val)
+            ws.cell(row=row_idx, column=9, value=revisor_val)
 
-            for col_idx in range(1, 6):
+            for col_idx in range(1, 14):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.font = _DATA_FONT
                 cell.border = _THIN_BORDER
-                if col_idx == 1:
+                if col_idx in (1, 2, 3, 7, 8, 9, 10, 11, 12, 13):
                     cell.alignment = _CENTER_ALIGN
-                elif col_idx == 2:
-                    cell.alignment = _WRAP_ALIGN
                 else:
-                    cell.alignment = _CENTER_ALIGN
+                    cell.alignment = _WRAP_ALIGN
 
-        gl_col_widths = {1: 6, 2: 60, 3: 15, 4: 15, 5: 15}
+        gl_col_widths = {1: 18, 2: 12, 3: 6, 4: 50, 5: 75, 6: 25,
+                         7: 10, 8: 10, 9: 15, 10: 10, 11: 10, 12: 15, 13: 15}
         for col, width in gl_col_widths.items():
             ws.column_dimensions[get_column_letter(col)].width = width
+
+    def export_as_csv_zip(self) -> Path:
+        papers = self._paper_repo.get_all_papers()
+        decisions = self._decision_repo.get_all_decisions()
+        decisions = [d for d in decisions if d.status in (ScreeningStatus.INCLUDED, ScreeningStatus.EXCLUDED)]
+        paper_map = {p.id: p for p in papers}
+        human_map = self._decision_repo.get_human_decision_map()
+        quality_map = self._decision_repo.get_quality_map()
+
+        wl_rows = []
+        gl_rows = []
+        for decision in decisions:
+            paper = paper_map.get(decision.paper_id)
+            if paper:
+                row = self._build_csv_row(paper, decision, human_map, quality_map)
+                if paper.source_type.value == "WL":
+                    wl_rows.append(row)
+                else:
+                    gl_rows.append(row)
+
+        tmp_dir = Path(tempfile.mkdtemp())
+        wl_path = tmp_dir / "White_Literature_Results.csv"
+        gl_path = tmp_dir / "Grey_Literature_Results.csv"
+        zip_path = tmp_dir / "APOLLO_Screening_Results.zip"
+
+        HEADERS = [
+            "Library", "", "#", "Title", "Abstract", "Palavra-Chaves",
+            "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision",
+        ]
+
+        with open(wl_path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(HEADERS)
+            for idx, row in enumerate(wl_rows, start=1):
+                row[2] = str(idx)
+                writer.writerow(row)
+
+        with open(gl_path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(HEADERS)
+            for idx, row in enumerate(gl_rows, start=1):
+                row[2] = str(idx)
+                writer.writerow(row)
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(wl_path, "White_Literature_Results.csv")
+            zf.write(gl_path, "Grey_Literature_Results.csv")
+
+        wl_path.unlink()
+        gl_path.unlink()
+        return zip_path
+
+    def _build_csv_row(self, paper, decision, human_map, quality_map) -> list[str]:
+        inclusion_codes = [c for c in decision.applied_criteria_codes if c.startswith("IC")]
+        exclusion_codes = [c for c in decision.applied_criteria_codes if c.startswith("EC")]
+
+        if paper.source_type.value == "GL":
+            crawled = quality_map.get(paper.id, {}).get("full_text")
+            abstract = crawled or "(No web content scraped)"
+        else:
+            abstract = paper.abstract or ""
+
+        human_val = human_map.get(paper.id, "")
+
+        final_decision = _map_status_to_revisor(decision.status)
+
+        return [
+            _get_library(paper),
+            paper.id,
+            str(0),
+            paper.title,
+            abstract,
+            _get_keywords(paper),
+            "; ".join(inclusion_codes) if inclusion_codes else "",
+            "; ".join(exclusion_codes) if exclusion_codes else "",
+            human_val,
+            "",
+            "",
+            "",
+            final_decision,
+        ]

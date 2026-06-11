@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Terminal, Download, Trash2, ShieldAlert, Settings, MessageSquare } from 'lucide-react'
+import { Terminal, Download, Trash2, ShieldAlert, Settings, MessageSquare, Brain } from 'lucide-react'
 import UploadZone from './components/UploadZone'
 import ProgressCard from './components/ProgressCard'
 import PaperTable from './components/PaperTable'
 import PrismaFlowchart from './components/PrismaFlowchart'
 import AccuracyAudit from './components/AccuracyAudit'
 import ProtocolSettings from './components/ProtocolSettings'
+import LLMSettings from './components/LLMSettings'
 import CorpusChat from './components/CorpusChat'
 
 const API = '/api'
@@ -43,7 +44,7 @@ export default function App() {
   const [screenStarted, setScreenStarted] = useState(false)
   const [calibrationBanner, setCalibrationBanner] = useState(false)
 
-  const pollRef = useRef(null)
+  const pollingIntervalRef = useRef(null)
   const fetchPapersRef = useRef(null)
 
   const fetchProgress = useCallback(async () => {
@@ -84,6 +85,17 @@ export default function App() {
 
   fetchPapersRef.current = fetchPapers
 
+  const handleProgressUpdate = useCallback((p) => {
+    setProgress(p)
+    if (p.in_calibration && !p.is_active && p.screened_count === p.total_papers && p.total_papers > 0) {
+      setCalibrationBanner(true)
+    }
+    if (!p.is_active) {
+      setScreeningActive(false)
+      fetchPapersRef.current?.(true)
+    }
+  }, [])
+
   useEffect(() => {
     fetchPapers()
   }, [fetchPapers])
@@ -92,14 +104,40 @@ export default function App() {
     fetchProgress()
   }, [fetchProgress])
 
+  const startPolling = useCallback(() => {
+    if (pollingIntervalRef.current) return
+
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/screening/progress')
+        if (!res.ok) return
+        const data = await res.json()
+        handleProgressUpdate(data)
+        fetchPapersRef.current?.(true)
+
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+        const nextDelay = data.is_active ? 2000 : 8000
+        pollingIntervalRef.current = setInterval(tick, nextDelay)
+      } catch {
+        // Network error — keep current interval
+      }
+    }
+
+    pollingIntervalRef.current = setInterval(tick, 2000)
+  }, [handleProgressUpdate])
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
-    if (!screeningActive) return
-    const interval = setInterval(() => {
-      fetchPapersRef.current(true)
-      fetchProgress()
-    }, 4000)
-    return () => clearInterval(interval)
-  }, [screeningActive])
+    startPolling()
+    return () => stopPolling()
+  }, [startPolling, stopPolling])
 
   const handleImportSuccess = (data) => {
     setImportMsg(`Imported ${data.imported_count} paper(s).`)
@@ -134,21 +172,6 @@ export default function App() {
     }
   }
 
-  const handleProgressUpdate = (p) => {
-    setProgress(p)
-    if (p.in_calibration && !p.is_active && p.screened_count === p.total_papers && p.total_papers > 0) {
-      setCalibrationBanner(true)
-    }
-    if (!p.is_active && p.pending_count === 0) {
-      setScreeningActive(false)
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-      fetchPapers()
-    }
-  }
-
   const handleReset = async () => {
     if (!window.confirm("Are you sure you want to delete all papers and decisions? This action cannot be undone.")) return
     try {
@@ -169,7 +192,7 @@ export default function App() {
 
   const handleExport = async () => {
     try {
-      const res = await apiFetch('/export', { blob: true })
+      const res = await apiFetch('/export?format=xlsx', { blob: true })
       const blob = await res.blob()
       if (blob.type !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
         throw new Error('Failed to export results. Ensure that some papers have been screened before exporting.')
@@ -178,6 +201,23 @@ export default function App() {
       const a = document.createElement('a')
       a.href = url
       a.download = 'APOLLO_Screening_Results.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setImportError(err.message)
+    }
+  }
+
+  const handleExportCsv = async () => {
+    try {
+      const res = await apiFetch('/export?format=csv', { blob: true })
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'APOLLO_Screening_Results_CSV.zip'
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -257,6 +297,14 @@ export default function App() {
               >
                 <Download className="w-3.5 h-3.5" />
                 EXPORT XLSX
+              </button>
+              <button
+                onClick={handleExportCsv}
+                disabled={screeningActive}
+                className="inline-flex items-center gap-2 px-4 py-2 border-2 border-teal-800/60 text-teal-400 hover:bg-teal-950/30 hover:shadow-neon-teal text-xs font-bold tracking-wider transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download className="w-3.5 h-3.5" />
+                EXPORT CSV
               </button>
               <button
                 onClick={handleReset}
@@ -342,6 +390,17 @@ export default function App() {
               Protocol Settings
             </button>
             <button
+              onClick={() => setViewTab('llm')}
+              className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors duration-150 ${
+                viewTab === 'llm'
+                  ? 'text-cyan-400 border-b-2 border-cyan-500 pb-2 -mb-2.5'
+                  : 'text-zinc-600 hover:text-zinc-400'
+              }`}
+            >
+              <Brain className="w-3.5 h-3.5" />
+              LLM Config
+            </button>
+            <button
               onClick={() => setViewTab('chat')}
               className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest transition-colors duration-150 ${
                 viewTab === 'chat'
@@ -374,6 +433,8 @@ export default function App() {
             <PrismaFlowchart progress={progress} />
           ) : viewTab === 'audit' ? (
             <AccuracyAudit />
+          ) : viewTab === 'llm' ? (
+            <LLMSettings />
           ) : viewTab === 'chat' ? (
             <CorpusChat progressData={progress} />
           ) : (

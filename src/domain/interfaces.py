@@ -50,5 +50,9 @@ class ScreeningDecisionRepository(ABC):
         """Save the same human audit verdict for multiple papers in a single transaction."""
 
     @abstractmethod
+    def get_quality_map(self) -> dict[str, dict]:
+        """Return a dict mapping paper_id to quality assessment data (incl. full_text)."""
+
+    @abstractmethod
     def get_few_shot_examples(self, limit: int = 3) -> list[dict]:
         """Return up to `limit` audited examples with title, abstract, and human_decision."""

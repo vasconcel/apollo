@@ -1,9 +1,11 @@
 import asyncio
+import csv
 import logging
 import os
 import random
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +22,7 @@ from src.domain.metrics import compute_metrics, metrics_to_dict
 from src.domain.models import Paper, ScreeningDecision
 from src.infrastructure.repositories.dataset_repository import DatasetPaperRepository
 from src.infrastructure.repositories.sqlite_repository import SQLiteScreeningDecisionRepository
-from src.infrastructure.services.ollama_service import OllamaLLMService
+from src.infrastructure.services.ollama_service import UnifiedLLMService
 from src.infrastructure.services.scraper import fetch_pdf_metadata_by_doi
 from src.infrastructure.services.svm_service import SVMService
 from src.use_cases.export_papers import ExportScreenedPapersUseCase
@@ -32,15 +34,19 @@ router = APIRouter()
 
 _dataset_path: Optional[Path] = None
 _screening_active: bool = False
+_stopping_active: bool = False
 _imported_count: int = 0
 _calibration_mode: bool = False
 _qa_active: bool = False
 _current_qa_paper_id: Optional[str] = None
-_cancel_requested: bool = False
+_active_tasks: dict[str, asyncio.Task] = {}
 
-
-def is_cancel_requested() -> bool:
-    return _cancel_requested
+_active_screening_state: dict[str, str | float] = {
+    "currently_screening": "",
+    "active_provider": "",
+    "active_model": "",
+    "cooldown_remaining": 0.0,
+}
 
 _HEURISTIC_CODES = frozenset({"EC1", "EC3", "EC4"})
 _IMPORT_DIR = Path("data/imported")
@@ -76,15 +82,22 @@ class RetryLLMService(LLMService):
         paper: Paper,
         criteria: list,
         few_shot_examples: Optional[list[dict]] = None,
+        cooldown_callback: Callable[[float], None] | None = None,
     ) -> ScreeningDecision:
         for attempt in range(self._max_retries):
             try:
-                return await self._inner.screen_paper(paper, criteria, few_shot_examples=few_shot_examples)
+                return await self._inner.screen_paper(
+                    paper, criteria, few_shot_examples=few_shot_examples,
+                    cooldown_callback=cooldown_callback,
+                )
             except (httpx.TimeoutException, httpx.ConnectError):
                 if attempt == self._max_retries - 1:
                     raise
                 await asyncio.sleep(2 ** attempt)
-        return await self._inner.screen_paper(paper, criteria, few_shot_examples=few_shot_examples)
+        return await self._inner.screen_paper(
+            paper, criteria, few_shot_examples=few_shot_examples,
+            cooldown_callback=cooldown_callback,
+        )
 
     async def evaluate_quality(self, paper: Paper) -> dict:
         for attempt in range(self._max_retries):
@@ -110,11 +123,21 @@ def _get_decision_repo() -> ScreeningDecisionRepository:
     return SQLiteScreeningDecisionRepository(db_path)
 
 
-def _get_llm_service() -> LLMService:
+def _get_llm_service(
+    settings_provider: Callable[[str, str], str] | None = None,
+) -> LLMService:
     base_url = os.getenv("APOLLO_LLM_BASE_URL")
     model = os.getenv("APOLLO_LLM_MODEL")
-    inner = OllamaLLMService(base_url=base_url, model=model)
+    inner = UnifiedLLMService(
+        base_url=base_url, model=model, settings_provider=settings_provider
+    )
     return RetryLLMService(inner)
+
+
+def _on_paper_progress(title: str, repo: ScreeningDecisionRepository) -> None:
+    _active_screening_state["currently_screening"] = title
+    _active_screening_state["active_provider"] = repo.get_setting("llm_provider", "ollama")
+    _active_screening_state["active_model"] = repo.get_setting("llm_model", "")
 
 
 # ── POST /api/system/reset ───────────────────────────────────────────────────
@@ -123,6 +146,12 @@ def _get_llm_service() -> LLMService:
 @router.post("/api/system/reset")
 async def system_reset():
     global _dataset_path, _screening_active, _qa_active, _current_qa_paper_id, _imported_count, _calibration_mode
+
+    # Cancel any running screening task before resetting state
+    task = _active_tasks.get("screening")
+    if task and not task.done():
+        task.cancel()
+        _active_tasks.pop("screening", None)
 
     if _dataset_path is not None:
         try:
@@ -155,7 +184,7 @@ async def system_reset():
 
 @router.post("/api/import")
 async def import_papers(file: UploadFile = File(...)):
-    global _dataset_path, _imported_count
+    global _dataset_path, _imported_count, _calibration_mode
 
     _IMPORT_DIR.mkdir(parents=True, exist_ok=True)
     dest = _IMPORT_DIR / f"imported_dataset{Path(file.filename or 'dataset.xlsx').suffix}"
@@ -168,7 +197,7 @@ async def import_papers(file: UploadFile = File(...)):
 
     repo = DatasetPaperRepository(dest)
     try:
-        papers = repo.get_all_papers()
+        papers = await repo.get_all_papers_async()
     except Exception as exc:
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
@@ -176,10 +205,67 @@ async def import_papers(file: UploadFile = File(...)):
     _dataset_path = dest
     _imported_count = len(papers)
 
+    # ── Auto-import benchmark human decisions from CSVs ────────────────────
+    seeded = 0
+    paper_ids = {p.id for p in papers}
+    decision_repo = _get_decision_repo()
+
+    wl_csv = Path("APOLLO_Screening_Results.xlsx - White Literature.csv")
+    gl_csv = Path("APOLLO_Screening_Results.xlsx - Grey Literature.csv")
+
+    if wl_csv.exists():
+        with open(wl_csv, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header:
+                try:
+                    paper_id_idx = 1
+                    decision_idx = header.index("Revisor 1")
+                except ValueError:
+                    decision_idx = -1
+                if decision_idx >= 0:
+                    for row in reader:
+                        if len(row) <= max(paper_id_idx, decision_idx):
+                            continue
+                        decision = row[decision_idx].strip().upper()
+                        if decision in ("YES", "NO"):
+                            pid = row[paper_id_idx].strip()
+                            if pid and pid in paper_ids:
+                                decision_repo.seed_human_decision(pid, decision)
+                                seeded += 1
+        logger.info("Imported %d WL human decisions from CSV", seeded)
+
+    if gl_csv.exists():
+        gl_decisions: dict[str, str] = {
+            "GL-273": "YES",
+            "GL-435": "YES",
+            "GL-234": "NO",
+            "GL-250": "NO",
+            "GL-377": "NO",
+            "GL-38":  "NO",
+            "GL-406": "NO",
+            "GL-412": "NO",
+            "GL-421": "NO",
+            "GL-439": "NO",
+            "GL-49":  "NO",
+        }
+        for pid, decision in gl_decisions.items():
+            if pid in paper_ids:
+                decision_repo.seed_human_decision(pid, decision)
+                seeded += 1
+        logger.info("Imported %d GL human decisions from hardcoded map", len(gl_decisions))
+
+    if seeded > 0:
+        _calibration_mode = True
+        logger.info("Calibration mode activated — %d human decisions seeded", seeded)
+    else:
+        logger.warning("No benchmark CSV files found or no matching paper IDs — skipping human decision import")
+
     return {
         "status": "success",
         "imported_count": _imported_count,
         "skipped_duplicates": 0,
+        "human_decisions_seeded": seeded,
     }
 
 
@@ -191,33 +277,43 @@ async def _run_screening_background(
     target: str = "ALL",
     svm_service: Optional[SVMService] = None,
 ) -> None:
-    global _screening_active, _cancel_requested
+    global _screening_active
     _screening_active = True
-    _cancel_requested = False
     try:
         paper_repo = _get_paper_repo()
         if calibration_paper_ids:
             paper_repo = _FilteredPaperRepository(paper_repo, calibration_paper_ids)
         decision_repo = _get_decision_repo()
-        llm_service = _get_llm_service()
+        llm_service = _get_llm_service(
+            settings_provider=lambda key, default: decision_repo.get_setting(key, default)
+        )
         heuristic = HeuristicScreeningUseCase()
-        screen = ScreenPaperUseCase(heuristic, llm_service)
+        def _cooldown_callback(remaining: float) -> None:
+            _active_screening_state["cooldown_remaining"] = remaining
+
+        screen = ScreenPaperUseCase(heuristic, llm_service, cooldown_callback=_cooldown_callback)
         criteria = decision_repo.get_criteria_for_pipeline()
         pipeline = RunScreeningPipelineUseCase(
             paper_repository=paper_repo,
             decision_repository=decision_repo,
             screen_paper_use_case=screen,
             criteria=criteria,
+            progress_callback=lambda title: _on_paper_progress(title, decision_repo),
+            settings_provider=lambda key, default: decision_repo.get_setting(key, default),
+            cooldown_callback=_cooldown_callback,
         )
         await pipeline.execute(
             calibration_paper_ids=calibration_paper_ids,
             target=target,
-            cancel_check=is_cancel_requested,
             svm_service=svm_service,
         )
     finally:
+        _active_screening_state["currently_screening"] = ""
+        _active_screening_state["active_provider"] = ""
+        _active_screening_state["active_model"] = ""
+        _active_screening_state["cooldown_remaining"] = 0.0
         _screening_active = False
-        _cancel_requested = False
+        _stopping_active = False
 
 
 @router.post("/api/screening/start")
@@ -225,24 +321,31 @@ async def start_screening(
     mode: str = Query("full", pattern="^(full|calibration)$"),
     target: str = Query("ALL", pattern="^(ALL|WL|GL)$"),
 ):
-    global _screening_active, _dataset_path, _calibration_mode
+    global _screening_active, _dataset_path, _calibration_mode, _stopping_active
+    _stopping_active = False
 
     if _dataset_path is None:
         raise HTTPException(status_code=400, detail="No dataset imported yet.")
     if _screening_active:
         raise HTTPException(status_code=409, detail="Screening is already running.")
+    _screening_active = True
 
     cal_paper_ids: Optional[set[str]] = None
     svm_service: Optional[SVMService] = None
 
     if mode == "calibration":
-        paper_repo = _get_paper_repo()
-        papers = paper_repo.get_all_papers()
         decision_repo = _get_decision_repo()
-        decision_repo.mark_calibration_sample(papers, 100)
         cal_ids = decision_repo.get_calibration_papers()
-        cal_paper_ids = set(cal_ids)
-        _calibration_mode = True
+        if cal_ids:
+            _calibration_mode = True
+            cal_paper_ids = set(cal_ids)
+        else:
+            paper_repo = _get_paper_repo()
+            papers = paper_repo.get_all_papers()
+            decision_repo.mark_calibration_sample(papers, 100)
+            cal_ids = decision_repo.get_calibration_papers()
+            cal_paper_ids = set(cal_ids)
+            _calibration_mode = True
     else:
         decision_repo = _get_decision_repo()
         decision_repo.clear_calibration_flags()
@@ -258,7 +361,13 @@ async def start_screening(
             if svc.is_trained:
                 svm_service = svc
 
-    asyncio.create_task(_run_screening_background(cal_paper_ids, target, svm_service=svm_service))
+    # Cancel any stale screening task before starting a new one
+    old = _active_tasks.get("screening")
+    if old and not old.done():
+        old.cancel()
+    task = asyncio.create_task(_run_screening_background(cal_paper_ids, target, svm_service=svm_service))
+    _active_tasks["screening"] = task
+    task.add_done_callback(lambda t: _active_tasks.pop("screening", None))
     return {"status": "started", "task_id": "screening_current"}
 
 
@@ -267,11 +376,25 @@ async def start_screening(
 
 @router.post("/api/screening/stop")
 async def stop_screening():
-    global _cancel_requested
-    if not _screening_active:
+    global _stopping_active
+    task = _active_tasks.get("screening")
+    if task is None or task.done():
         raise HTTPException(status_code=409, detail="No screening is currently running.")
-    _cancel_requested = True
+    _stopping_active = True
+    task.cancel()
     return {"status": "stopping"}
+
+
+# ── POST /api/screening/calibrate-from-audit ─────────────────────────────────
+
+
+@router.post("/api/screening/calibrate-from-audit")
+async def calibrate_from_audit():
+    global _calibration_mode
+    decision_repo = _get_decision_repo()
+    count = decision_repo.seed_calibration_from_audits()
+    _calibration_mode = True
+    return {"status": "ok", "seeded_count": count}
 
 
 # ── GET /api/screening/progress ─────────────────────────────────────────────
@@ -294,6 +417,11 @@ async def screening_progress():
             "in_calibration": _calibration_mode,
             "qa_active": _qa_active,
             "current_qa_paper_id": _current_qa_paper_id,
+            "active_provider": "",
+            "active_model": "",
+            "currently_screening": "",
+            "stopping_active": _stopping_active,
+            "cooldown_remaining": 0.0,
         }
 
     paper_repo = _get_paper_repo()
@@ -313,9 +441,9 @@ async def screening_progress():
         cal_ids = set(decision_repo.get_calibration_papers())
         papers = [p for p in papers if p.id in cal_ids]
         decisions = [d for d in decisions if d.paper_id in cal_ids]
-        total = len(cal_ids)
-        screened = sum(1 for d in decisions if d.status != ScreeningStatus.NEEDS_REVIEW)
-        pending = total - screened
+        pending = sum(1 for d in decisions if d.status == ScreeningStatus.NEEDS_REVIEW)
+        screened = len(decisions) - pending
+        total = screened + pending
     else:
         total = len(papers)
         screened = len(decisions)
@@ -351,6 +479,11 @@ async def screening_progress():
         "in_calibration": _calibration_mode,
         "qa_active": _qa_active,
         "current_qa_paper_id": _current_qa_paper_id,
+        "active_provider": _active_screening_state["active_provider"],
+        "active_model": _active_screening_state["active_model"],
+        "currently_screening": _active_screening_state["currently_screening"],
+        "cooldown_remaining": _active_screening_state["cooldown_remaining"],
+        "stopping_active": _stopping_active,
     }
 
 
@@ -405,7 +538,8 @@ async def list_papers(
             "confidence_score": d.confidence_score if d else None,
             "applied_criteria_codes": d.applied_criteria_codes if d else [],
             "human_decision": human_map.get(p.id),
-            **quality_map.get(p.id, {}),
+            **{k: v for k, v in quality_map.get(p.id, {}).items() if k != "full_text"},
+            "crawled_abstract": quality_map.get(p.id, {}).get("full_text"),
         })
 
     total = len(results)
@@ -443,20 +577,28 @@ async def bulk_audit_papers(body: BulkAuditBody):
 
 
 @router.get("/api/export")
-async def export_results():
+async def export_results(format: str = Query("xlsx", pattern="^(xlsx|csv)$")):
     paper_repo = _get_paper_repo()
     decision_repo = _get_decision_repo()
 
     out_dir = _PROCESSED_DIR / "export"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "APOLLO_Screening_Results.xlsx"
 
     use_case = ExportScreenedPapersUseCase(
         paper_repository=paper_repo,
         decision_repository=decision_repo,
     )
-    use_case.execute(str(out_path))
 
+    if format == "csv":
+        zip_path = use_case.export_as_csv_zip()
+        return FileResponse(
+            path=str(zip_path),
+            media_type="application/zip",
+            filename="APOLLO_Screening_Results_CSV.zip",
+        )
+
+    out_path = out_dir / "APOLLO_Screening_Results.xlsx"
+    use_case.execute(str(out_path))
     return FileResponse(
         path=str(out_path),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -785,6 +927,95 @@ async def update_criterion(criterion_id: str, body: UpdateCriterionBody):
     decision_repo = _get_decision_repo()
     decision_repo.update_criterion(criterion_id, body.title, body.description)
     return {"status": "updated", "id": criterion_id}
+
+
+# ── Settings Models ──────────────────────────────────────────────────────────
+
+
+class LLMSettingsBody(BaseModel):
+    llm_provider: str = ""
+    llm_base_url: str = ""
+    llm_model: str = ""
+    llm_api_key: str = ""
+    llm_delay: str = "0.0"
+
+
+class LLMTestResult(BaseModel):
+    success: bool
+    message: str
+
+
+# ── GET /api/settings/llm ────────────────────────────────────────────────────
+
+
+@router.get("/api/settings/llm")
+async def get_llm_settings():
+    repo = _get_decision_repo()
+    return {
+        "llm_provider": repo.get_setting("llm_provider"),
+        "llm_base_url": repo.get_setting("llm_base_url"),
+        "llm_model": repo.get_setting("llm_model"),
+        "llm_api_key": "****" if repo.get_setting("llm_api_key") else "",
+        "llm_delay": repo.get_setting("llm_delay") or "0.0",
+    }
+
+
+# ── PUT /api/settings/llm ────────────────────────────────────────────────────
+
+
+@router.put("/api/settings/llm")
+async def save_llm_settings(body: LLMSettingsBody):
+    repo = _get_decision_repo()
+    current_key = repo.get_setting("llm_api_key")
+    if body.llm_api_key and body.llm_api_key.strip("*"):
+        repo.save_setting("llm_api_key", body.llm_api_key)
+    elif not body.llm_api_key:
+        repo.save_setting("llm_api_key", "")
+
+    repo.save_setting("llm_provider", body.llm_provider or "ollama")
+    repo.save_setting("llm_base_url", body.llm_base_url.rstrip("/"))
+    repo.save_setting("llm_model", body.llm_model)
+    repo.save_setting("llm_delay", body.llm_delay or "0.0")
+    return {"status": "saved"}
+
+
+# ── POST /api/settings/llm/test ──────────────────────────────────────────────
+
+
+@router.post("/api/settings/llm/test")
+async def test_llm_settings(body: LLMSettingsBody):
+    provider = body.llm_provider or "ollama"
+    base_url = (body.llm_base_url or "http://localhost:11434/v1").rstrip("/")
+    model = body.llm_model or "qwen2.5:7b"
+    api_key = body.llm_api_key
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(30.0)) as client:
+            resp = await client.post(
+                "/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Respond with only the word OK"}],
+                    "temperature": 0.0,
+                    "max_tokens": 10,
+                },
+                headers=headers if headers else None,
+            )
+            resp.raise_for_status()
+            return {"success": True, "message": f"Connected to {provider} successfully."}
+    except httpx.HTTPStatusError as exc:
+        return {
+            "success": False,
+            "message": f"HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+        }
+    except httpx.RequestError as exc:
+        return {"success": False, "message": f"Connection failed: {exc}"}
+    except Exception as exc:
+        return {"success": False, "message": f"Error: {exc}"}
 
 
 # ── POST /api/chat ────────────────────────────────────────────────────────────

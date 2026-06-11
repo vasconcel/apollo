@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -6,9 +7,23 @@ from fastapi.staticfiles import StaticFiles
 
 from src.api.routes import router
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ──────────────────────────────────────────────────────────
+    yield
+    # ── Shutdown ──────────────────────────────────────────────────────────
+    # Close any persistent shared httpx.AsyncClient if the application
+    # stores a UnifiedLLMService instance with a shared client.
+    # For example:
+    #   from src.api.routes import llm_service
+    #   await llm_service.aclose()
+
+
 app = FastAPI(
     title="APOLLO - Systematic Literature Review Screening Tool",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

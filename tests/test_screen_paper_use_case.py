@@ -90,4 +90,5 @@ class TestScreenPaperUseCase:
             paper=paper,
             criteria=criteria,
             few_shot_examples=None,
+            cooldown_callback=None,
         )

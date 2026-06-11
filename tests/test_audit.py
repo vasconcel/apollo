@@ -24,7 +24,7 @@ CSV_ROWS = 10
 CSV_CONTENT = "\n".join(
     [
         "Global_ID,Title,Abstract,Provenance_Trace",
-        *[f"{i},Paper {i},Abstract {i},wl:acm" for i in range(1, CSV_ROWS + 1)],
+        *[f"T{i},Paper {i},Abstract {i},wl:acm" for i in range(1, CSV_ROWS + 1)],
     ]
 )
 
@@ -78,7 +78,7 @@ def imported_env(test_env):
             else ScreeningStatus.NEEDS_REVIEW
         )
         repo.save_decision(ScreeningDecision(
-            paper_id=str(i),
+            paper_id=f"T{i}",
             status=status,
             confidence_score=0.9,
             rationale=f"Rationale for paper {i}",
@@ -282,21 +282,21 @@ class TestAuditSampleEndpoint:
 
 class TestAuditVerdictEndpoint:
     def test_post_verdict_success(self, imported_env):
-        resp = client.post("/api/papers/1/audit", json={"verdict": "YES"})
+        resp = client.post("/api/papers/T1/audit", json={"verdict": "YES"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "saved"
-        assert resp.json()["paper_id"] == "1"
+        assert resp.json()["paper_id"] == "T1"
 
     def test_post_verdict_no(self, imported_env):
-        resp = client.post("/api/papers/2/audit", json={"verdict": "NO"})
+        resp = client.post("/api/papers/T2/audit", json={"verdict": "NO"})
         assert resp.status_code == 200
 
     def test_post_verdict_invalid_verdict_returns_422(self, imported_env):
-        resp = client.post("/api/papers/1/audit", json={"verdict": "MAYBE"})
+        resp = client.post("/api/papers/T1/audit", json={"verdict": "MAYBE"})
         assert resp.status_code == 422
 
     def test_post_verdict_nonexistent_paper_returns_404(self, imported_env):
-        resp = client.post("/api/papers/999/audit", json={"verdict": "YES"})
+        resp = client.post("/api/papers/T999/audit", json={"verdict": "YES"})
         assert resp.status_code == 404
 
 
@@ -317,16 +317,16 @@ class TestAuditMetricsEndpoint:
         repo = _get_decision_repo()
 
         # Audit some papers with known outcomes
-        # paper 1: AI=INCLUDED(YES), human says YES -> TP
-        repo.save_audit("1", "YES")
-        # paper 2: AI=INCLUDED(YES), human says NO -> FP
-        repo.save_audit("2", "NO")
-        # paper 3: AI=INCLUDED(YES), human says YES -> TP
-        repo.save_audit("3", "YES")
-        # paper 4: AI=EXCLUDED(NO), human says NO -> TN
-        repo.save_audit("4", "NO")
-        # paper 5: AI=EXCLUDED(NO), human says YES -> FN
-        repo.save_audit("5", "YES")
+        # paper T1: AI=INCLUDED(YES), human says YES -> TP
+        repo.save_audit("T1", "YES")
+        # paper T2: AI=INCLUDED(YES), human says NO -> FP
+        repo.save_audit("T2", "NO")
+        # paper T3: AI=INCLUDED(YES), human says YES -> TP
+        repo.save_audit("T3", "YES")
+        # paper T4: AI=EXCLUDED(NO), human says NO -> TN
+        repo.save_audit("T4", "NO")
+        # paper T5: AI=EXCLUDED(NO), human says YES -> FN
+        repo.save_audit("T5", "YES")
 
         resp = client.get("/api/audit/metrics")
         assert resp.status_code == 200
@@ -355,8 +355,8 @@ class TestAuditMetricsEndpoint:
         from src.api.routes import _get_decision_repo
         repo = _get_decision_repo()
 
-        repo.save_audit("9", "YES")
-        repo.save_audit("10", "YES")
+        repo.save_audit("T9", "YES")
+        repo.save_audit("T10", "YES")
 
         resp = client.get("/api/audit/metrics")
         data = resp.json()

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Play, Square, RefreshCw, Cpu, BarChart3, FlaskConical, Loader2 } from 'lucide-react'
 
 const TARGET_OPTIONS = [
@@ -9,31 +9,6 @@ const TARGET_OPTIONS = [
 
 export default function ProgressCard({ progress, active, started, onStart, onStartCalibration, onProgressUpdate, onStop }) {
   const [targetScope, setTargetScope] = useState('ALL')
-  const [isStopping, setIsStopping] = useState(false)
-  const intervalRef = useRef(null)
-
-  useEffect(() => {
-    if (active) {
-      intervalRef.current = setInterval(async () => {
-        try {
-          const res = await fetch('/api/screening/progress')
-          if (res.ok) onProgressUpdate(await res.json())
-        } catch { /* ignore */ }
-      }, 2000)
-    }
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
-  }, [active, onProgressUpdate])
-
-  useEffect(() => {
-    if (!progress?.is_active && !active) {
-      setIsStopping(false)
-    }
-  }, [progress?.is_active, active])
 
   if ((!progress || !progress.total_papers) && !active && !started) {
     return (
@@ -64,8 +39,10 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
   const calibrationPaused = inCalibration && !isActive && screened > 0 && screened < total
   const calibrationComplete = inCalibration && screened === total && total > 0
 
+  const stopping = progress?.stopping_active ?? false
+
   let statusLabel, statusColor
-  if (isStopping) {
+  if (stopping) {
     statusLabel = 'STOPPING...'
     statusColor = 'text-rose-500 border-rose-500/50 animate-pulse'
   } else if (isCompleted) {
@@ -104,6 +81,37 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
           {statusLabel}
         </span>
       </div>
+
+      {/* Active Engine Badge */}
+      {isActive && progress?.active_provider && (
+        <div className="flex items-center gap-1.5 border border-cyan-500/20 bg-cyan-950/10 rounded-sm px-2.5 py-1">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-cyan-400/70">Active Engine:</span>
+          <span className="text-[10px] font-mono text-cyan-300 font-semibold">
+            {progress.active_provider.charAt(0).toUpperCase() + progress.active_provider.slice(1)}
+            {progress.active_model ? ` (${progress.active_model})` : ''}
+          </span>
+        </div>
+      )}
+
+      {/* Live Status Ticker */}
+      {isActive && progress?.currently_screening && (
+        <div className="flex items-center gap-1.5 min-h-[20px]">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="text-[10px] text-zinc-400 truncate" title={progress.currently_screening}>
+            Processing: &ldquo;{progress.currently_screening}&rdquo;
+          </span>
+        </div>
+      )}
+
+      {/* Cooldown countdown */}
+      {isActive && (progress?.cooldown_remaining ?? 0) > 0 && (
+        <div className="flex items-center gap-1.5 min-h-[16px]">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+          <span className="text-[10px] text-amber-400 animate-pulse">
+            Cooldown — {progress.cooldown_remaining.toFixed(1)}s
+          </span>
+        </div>
+      )}
 
       {/* Progress bar — neon gradient */}
       <div className="space-y-1.5">
@@ -155,18 +163,18 @@ export default function ProgressCard({ progress, active, started, onStart, onSta
 
       {/* Action buttons */}
       <div className="space-y-2">
-        {(isActive || isStopping) && (
+        {(isActive || stopping) && (
           <button
-            onClick={() => { if (!isStopping) { setIsStopping(true); if (onStop) onStop() } }}
-            disabled={isStopping}
+            onClick={() => { if (!stopping && onStop) onStop() }}
+            disabled={stopping}
             className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2 border-2 text-xs font-bold tracking-wider transition-all duration-200 ${
-              isStopping
+              stopping
                 ? 'border-zinc-700 text-zinc-500 bg-zinc-900/40 cursor-not-allowed'
                 : 'border-rose-800 text-rose-400 hover:bg-rose-950/30 hover:shadow-[0_0_12px_rgba(251,113,133,0.2)]'
             }`}
           >
-            {isStopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
-            {isStopping ? 'STOPPING SCREENING...' : 'STOP SCREENING'}
+            {stopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
+            {stopping ? 'STOPPING SCREENING...' : 'STOP SCREENING'}
           </button>
         )}
         {!isActive && !isCompleted && onStartCalibration && (canCalibrate || calibrationPaused) && (

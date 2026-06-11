@@ -155,6 +155,10 @@ class DatasetPaperRepository(PaperRepository):
     def __init__(self, file_path: str | Path) -> None:
         self._file_path = Path(file_path)
 
+    async def get_all_papers_async(self) -> list:
+        import asyncio
+        return await asyncio.to_thread(self.get_all_papers)
+
     def get_filtered_papers(
         self,
         search: Optional[str] = None,

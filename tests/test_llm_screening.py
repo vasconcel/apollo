@@ -68,8 +68,9 @@ class TestOllamaLLMServiceValidResponses:
         from src.infrastructure.services.ollama_service import OllamaLLMService
 
         llm_json = (
-            '{"status": "INCLUDED", "confidence_score": 0.92, '
-            '"rationale": "Meets IC1.", "applied_criteria_codes": ["IC1"]}'
+            '{"reasoning": "Meets IC1.", '
+            '"criteria_evaluation": {"EC2": false, "IC1": true}, '
+            '"decision": "INCLUDED"}'
         )
         _mock_ollama_client(mocker, _mock_ollama_response(llm_json))
 
@@ -78,7 +79,7 @@ class TestOllamaLLMServiceValidResponses:
 
         assert decision.paper_id == "p42"
         assert decision.status is ScreeningStatus.INCLUDED
-        assert decision.confidence_score == 0.92
+        assert decision.confidence_score == 1.0
         assert decision.rationale == "Meets IC1."
         assert decision.applied_criteria_codes == ["IC1"]
 
@@ -87,8 +88,9 @@ class TestOllamaLLMServiceValidResponses:
         from src.infrastructure.services.ollama_service import OllamaLLMService
 
         llm_json = (
-            '{"status": "EXCLUDED", "confidence_score": 0.88, '
-            '"rationale": "Fails EC2.", "applied_criteria_codes": ["EC2"]}'
+            '{"reasoning": "Fails EC2.", '
+            '"criteria_evaluation": {"EC2": true, "IC1": false}, '
+            '"decision": "EXCLUDED"}'
         )
         _mock_ollama_client(mocker, _mock_ollama_response(llm_json))
 
@@ -96,15 +98,16 @@ class TestOllamaLLMServiceValidResponses:
         decision = await service.screen_paper(paper, criteria)
 
         assert decision.status is ScreeningStatus.EXCLUDED
-        assert decision.confidence_score == 0.88
+        assert decision.confidence_score == 1.0
 
     @pytest.mark.asyncio
     async def test_returns_needs_review_decision(self, paper, criteria, mocker: MockerFixture):
         from src.infrastructure.services.ollama_service import OllamaLLMService
 
         llm_json = (
-            '{"status": "NEEDS_REVIEW", "confidence_score": 0.45, '
-            '"rationale": "Uncertain about IC1.", "applied_criteria_codes": ["IC1"]}'
+            '{"reasoning": "Uncertain about IC1.", '
+            '"criteria_evaluation": {"EC2": false, "IC1": false}, '
+            '"decision": "NEEDS_REVIEW"}'
         )
         _mock_ollama_client(mocker, _mock_ollama_response(llm_json))
 
@@ -112,6 +115,7 @@ class TestOllamaLLMServiceValidResponses:
         decision = await service.screen_paper(paper, criteria)
 
         assert decision.status is ScreeningStatus.NEEDS_REVIEW
+        assert decision.confidence_score == 0.5
 
 
 class TestOllamaLLMServiceErrorHandling:
@@ -161,20 +165,41 @@ class TestOllamaLLMServiceErrorHandling:
         assert decision.confidence_score == 0.0
 
     @pytest.mark.asyncio
-    async def test_confidence_out_of_range_falls_back_to_needs_review(self, paper, criteria, mocker: MockerFixture):
+    async def test_criteria_evaluation_produces_applied_codes(self, paper, criteria, mocker: MockerFixture):
         from src.infrastructure.services.ollama_service import OllamaLLMService
 
-        bad_confidence = (
-            '{"status": "INCLUDED", "confidence_score": 99.9, '
-            '"rationale": "x", "applied_criteria_codes": []}'
+        llm_json = (
+            '{"reasoning": "EC2 applies, IC1 does not.", '
+            '"criteria_evaluation": {"EC2": true, "IC1": false}, '
+            '"decision": "EXCLUDED"}'
         )
-        _mock_ollama_client(mocker, _mock_ollama_response(bad_confidence))
+        _mock_ollama_client(mocker, _mock_ollama_response(llm_json))
 
         service = OllamaLLMService()
         decision = await service.screen_paper(paper, criteria)
 
-        assert decision.status is ScreeningStatus.NEEDS_REVIEW
-        assert decision.confidence_score == 0.0
+        assert decision.status is ScreeningStatus.EXCLUDED
+        assert decision.confidence_score == 1.0
+        assert "EC2" in decision.applied_criteria_codes
+        assert "IC1" not in decision.applied_criteria_codes
+
+    @pytest.mark.asyncio
+    async def test_old_status_format_backward_compat(self, paper, criteria, mocker: MockerFixture):
+        from src.infrastructure.services.ollama_service import OllamaLLMService
+
+        old_format = (
+            '{"status": "INCLUDED", '
+            '"rationale": "Meets IC1.", "applied_criteria_codes": ["IC1"]}'
+        )
+        _mock_ollama_client(mocker, _mock_ollama_response(old_format))
+
+        service = OllamaLLMService()
+        decision = await service.screen_paper(paper, criteria)
+
+        assert decision.status is ScreeningStatus.INCLUDED
+        assert decision.confidence_score == 1.0
+        assert decision.rationale == "Meets IC1."
+        assert decision.applied_criteria_codes == ["IC1"]
 
     @pytest.mark.asyncio
     async def test_httpx_http_error_falls_back_to_needs_review(self, paper, criteria, mocker: MockerFixture):
@@ -211,8 +236,9 @@ class TestOllamaLLMServiceErrorHandling:
         from src.infrastructure.services.ollama_service import OllamaLLMService
 
         llm_json = (
-            '{"status": "INCLUDED", "confidence_score": 0.5, '
-            '"rationale": "OK", "applied_criteria_codes": []}'
+            '{"reasoning": "OK", '
+            '"criteria_evaluation": {}, '
+            '"decision": "INCLUDED"}'
         )
         _mock_ollama_client(mocker, _mock_ollama_response(llm_json))
 

@@ -12,6 +12,7 @@ from src.domain.interfaces import (
     ScreeningDecisionRepository,
 )
 from src.domain.models import Criterion, Paper, ScreeningDecision
+from src.infrastructure.services.scraper import fetch_url_content
 from src.use_cases.screen_paper import ScreenPaperUseCase
 
 if TYPE_CHECKING:
@@ -34,23 +35,34 @@ class RunScreeningPipelineUseCase:
         decision_repository: ScreeningDecisionRepository,
         screen_paper_use_case: ScreenPaperUseCase,
         criteria: list[Criterion],
+        progress_callback: Callable[[str], None] | None = None,
+        settings_provider: Callable[[str, str], str] | None = None,
+        cooldown_callback: Callable[[float], None] | None = None,
     ) -> None:
         self._paper_repo = paper_repository
         self._decision_repo = decision_repository
         self._screen = screen_paper_use_case
         self._criteria = criteria
+        self._progress_callback = progress_callback
+        self._settings_provider = settings_provider
+        self._cooldown_callback = cooldown_callback
 
     async def execute(
         self,
         calibration_paper_ids: Optional[set[str]] = None,
         target: str = "ALL",
-        cancel_check: Optional[Callable[[], bool]] = None,
         svm_service: Optional["SVMService"] = None,
     ) -> int:
-        papers = self._paper_repo.get_all_papers()
+        papers = await asyncio.to_thread(self._paper_repo.get_all_papers)
         processed = 0
         seen_titles: dict[str, str] = {}
-        semaphore = asyncio.Semaphore(3)
+        provider = (
+            self._settings_provider("llm_provider", "ollama")
+            if self._settings_provider
+            else "ollama"
+        )
+        needs_throttle = provider != "ollama"
+        semaphore = asyncio.Semaphore(1 if needs_throttle else 3)
 
         # Sequential pass: filter, skip existing decisions, mark duplicates
         to_screen: list[Paper] = []
@@ -98,7 +110,16 @@ class RunScreeningPipelineUseCase:
 
         # Sequential batch pass: screen papers in batches of 3 for instant cancellation
         batch_size = 3
+        BATCH_COMMIT_SIZE = 1
+        last_commit_count = 0
         interrupted = False
+
+        supports_batching = hasattr(self._decision_repo, "begin_batch")
+        if supports_batching:
+            try:
+                self._decision_repo.begin_batch()
+            except Exception as _bb_exc:
+                logger.warning("begin_batch suppressed: %s", _bb_exc)
 
         if to_screen:
             try:
@@ -109,8 +130,11 @@ class RunScreeningPipelineUseCase:
                 ) as pbar:
                     async def screen_one_with_progress(paper: Paper) -> None:
                         nonlocal processed, interrupted
+
                         if interrupted:
                             return
+                        if self._progress_callback is not None:
+                            self._progress_callback(paper.title)
 
                         # SVM cascade: fast-track CPU exclusion, bypass LLM
                         if svm_service is not None:
@@ -133,8 +157,28 @@ class RunScreeningPipelineUseCase:
                                 pbar.update(1)
                                 return
 
+                        if needs_throttle:
+                            delay = float(self._settings_provider("llm_delay", "0.0"))
+                            if delay > 0:
+                                if self._cooldown_callback:
+                                    self._cooldown_callback(delay)
+                                await asyncio.sleep(delay)
+                                if self._cooldown_callback:
+                                    self._cooldown_callback(0.0)
+
                         async with semaphore:
                             try:
+                                # GL web scraping: fetch content for GL papers with no abstract
+                                scraped_text: Optional[str] = None
+                                if not paper.abstract and paper.source_type.value == "GL" and paper.url:
+                                    cached = self._decision_repo.get_pdf_metadata(paper.id)
+                                    if cached and cached.get("full_text"):
+                                        paper = paper.model_copy(update={"abstract": cached["full_text"]})
+                                    else:
+                                        scraped_text = await fetch_url_content(paper.url)
+                                        if scraped_text:
+                                            paper = paper.model_copy(update={"abstract": scraped_text})
+
                                 decision = await self._screen.execute(
                                     paper=paper,
                                     criteria=self._criteria,
@@ -148,6 +192,8 @@ class RunScreeningPipelineUseCase:
                                 title=paper.title,
                                 abstract=paper.abstract or "",
                             )
+                            if scraped_text:
+                                self._decision_repo.save_pdf_metadata(paper.id, scraped_text, None)
                             processed += 1
                             pbar.set_postfix_str(
                                 f"{paper.id} [{decision.status.value}]"
@@ -155,8 +201,7 @@ class RunScreeningPipelineUseCase:
                             pbar.update(1)
 
                     for i in range(0, len(to_screen), batch_size):
-                        if interrupted or (cancel_check and cancel_check()):
-                            interrupted = True
+                        if interrupted:
                             break
 
                         batch = to_screen[i : i + batch_size]
@@ -164,14 +209,46 @@ class RunScreeningPipelineUseCase:
                             *(screen_one_with_progress(p) for p in batch)
                         )
 
+                        if supports_batching and processed - last_commit_count >= BATCH_COMMIT_SIZE:
+                            try:
+                                self._decision_repo.end_batch()
+                            except Exception as _eb_exc:
+                                logger.warning("end_batch suppressed: %s", _eb_exc)
+                            try:
+                                self._decision_repo.begin_batch()
+                            except Exception as _bb_exc:
+                                logger.warning("begin_batch suppressed: %s", _bb_exc)
+                            last_commit_count = processed
+
                     if interrupted:
                         raise KeyboardInterrupt()
+            except asyncio.CancelledError:
+                if supports_batching:
+                    try:
+                        self._decision_repo.end_batch()
+                    except Exception as _eb_exc:
+                        logger.warning("end_batch suppressed: %s", _eb_exc)
+                logger.info(
+                    "Screening pipeline natively cancelled. Progress saved for %d papers.",
+                    processed,
+                )
+                raise
             except KeyboardInterrupt:
+                if supports_batching:
+                    try:
+                        self._decision_repo.end_batch()
+                    except Exception as _eb_exc:
+                        logger.warning("end_batch suppressed: %s", _eb_exc)
                 logger.warning(
                     "Interrupted by user after %d papers. Progress saved.",
                     processed,
                 )
 
+        if supports_batching:
+            try:
+                self._decision_repo.end_batch()
+            except Exception as _eb_exc:
+                logger.warning("end_batch suppressed: %s", _eb_exc)
         return processed
 
     @staticmethod

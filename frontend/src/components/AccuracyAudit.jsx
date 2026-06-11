@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment, useRef } from 'react'
-import { ShieldAlert, AlertTriangle, Info, Loader2, Play, Sparkles, ChevronDown, ChevronUp, ClipboardCheck, RefreshCw, ExternalLink } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, Info, Loader2, Play, Sparkles, ChevronDown, ChevronUp, ClipboardCheck, RefreshCw, ExternalLink, Database } from 'lucide-react'
 
 function KappaBadge({ kappa }) {
   if (kappa < 0.4) {
@@ -52,7 +52,7 @@ const GL_QA = [
   { id: 'GL-Q4', text: 'Does the source provide insights beyond generic employer marketing (e.g., trade-offs)?' },
 ]
 
-export default function AccuracyAudit() {
+export default function AccuracyAudit({ onProgressUpdate } = {}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -64,6 +64,8 @@ export default function AccuracyAudit() {
   const [qaValues, setQaValues] = useState({})
   const [qaSubmitting, setQaSubmitting] = useState({})
   const [qaRefreshKey, setQaRefreshKey] = useState(0)
+  const [isSeeding, setIsSeeding] = useState(false)
+  const [seedAlert, setSeedAlert] = useState(null)
 
   const fetchMetrics = async () => {
     setLoading(true)
@@ -129,6 +131,25 @@ export default function AccuracyAudit() {
     try {
       await fetch('/api/quality/assess-all', { method: 'POST' })
     } catch { /* ignore */ }
+  }
+
+  const handleSeedCalibration = async () => {
+    setIsSeeding(true)
+    setSeedAlert(null)
+    try {
+      const res = await fetch('/api/screening/calibrate-from-audit', { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Request failed (${res.status})`)
+      }
+      setSeedAlert({ type: 'success', message: 'Audited decisions successfully seeded into the active calibration set!' })
+      if (onProgressUpdate) onProgressUpdate()
+      setTimeout(() => setSeedAlert(null), 5000)
+    } catch (err) {
+      setSeedAlert({ type: 'error', message: err.message })
+    } finally {
+      setIsSeeding(false)
+    }
   }
 
   const getQAQuestions = (sourceType) => sourceType === 'WL' ? WL_QA : GL_QA
@@ -300,7 +321,7 @@ export default function AccuracyAudit() {
         </div>
 
         {/* Run Automated QA */}
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
           <button
             onClick={handleRunQA}
             disabled={qaRunning}
@@ -314,6 +335,18 @@ export default function AccuracyAudit() {
             {qaRunning ? 'APOLLO is running automated QA on all included papers...' : 'Run Automated Quality Assessment (QA)'}
           </button>
           <button
+            onClick={handleSeedCalibration}
+            disabled={isSeeding}
+            className="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-bold tracking-wider text-cyan-400 border border-cyan-800/60 hover:bg-cyan-950/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSeeding ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Database className="w-3.5 h-3.5" />
+            )}
+            {isSeeding ? 'Seeding...' : 'Seed Calibration from Audits'}
+          </button>
+          <button
             onClick={() => setQaRefreshKey((k) => k + 1)}
             disabled={qaPapersLoading}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold tracking-wider text-zinc-500 border border-zinc-700 hover:text-zinc-300 hover:border-zinc-500 disabled:opacity-50 transition-colors"
@@ -322,6 +355,16 @@ export default function AccuracyAudit() {
             Refresh
           </button>
         </div>
+
+        {seedAlert && (
+          <div className={`rounded-sm p-3 text-[11px] leading-relaxed mb-4 ${
+            seedAlert.type === 'success'
+              ? 'border border-emerald-500/20 bg-emerald-950/10 text-emerald-400 animate-pulse'
+              : 'border border-rose-500/20 bg-rose-950/10 text-rose-400'
+          }`}>
+            {seedAlert.message}
+          </div>
+        )}
 
         {/* QA Table */}
         {qaPapersLoading && qaPapers.length === 0 ? (

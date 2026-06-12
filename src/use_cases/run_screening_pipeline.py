@@ -98,7 +98,10 @@ class RunScreeningPipelineUseCase:
 
             if norm in seen_titles:
                 decision = self._make_ec6_decision(paper)
-                self._decision_repo.save_decision(decision)
+                self._decision_repo.save_decision(
+                    decision,
+                    publication_year=paper.publication_year or 0,
+                )
                 processed += 1
                 continue
 
@@ -151,6 +154,7 @@ class RunScreeningPipelineUseCase:
                                     decision,
                                     title=paper.title,
                                     abstract=paper.abstract or "",
+                                    publication_year=paper.publication_year or 0,
                                 )
                                 processed += 1
                                 pbar.set_postfix_str(f"{paper.id} [SVM_FAST]")
@@ -191,6 +195,7 @@ class RunScreeningPipelineUseCase:
                                 decision,
                                 title=paper.title,
                                 abstract=paper.abstract or "",
+                                publication_year=paper.publication_year or 0,
                             )
                             if scraped_text:
                                 self._decision_repo.save_pdf_metadata(paper.id, scraped_text, None)

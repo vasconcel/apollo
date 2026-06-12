@@ -11,17 +11,20 @@ _EC3_KEYWORD_PATTERN = re.compile(
 
 
 def _rule_ec4(paper: Paper) -> Optional[ScreeningDecision]:
-    if paper.publication_year is not None and paper.publication_year < 2015:
+    year = getattr(paper, 'publication_year', 0) or 0
+    if 0 < year < 2015:
         return ScreeningDecision(
             paper_id=paper.id,
             status=ScreeningStatus.EXCLUDED,
             confidence_score=1.0,
             rationale=(
-                f"Excluded by EC4: publication year {paper.publication_year} "
+                f"Excluded by EC4: publication year {year} "
                 "is before 2015."
             ),
             applied_criteria_codes=["EC4"],
         )
+    elif year == 0:
+        pass
     return None
 
 

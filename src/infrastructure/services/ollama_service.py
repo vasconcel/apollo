@@ -141,7 +141,31 @@ _SYSTEM_PROMPT_WL = (
     "    candidates, or what hiring managers look for in SE candidates\n"
     "    → INCLUDE under IC1;IC3;IC5 (this IS the R&S evaluation problem)\n"
     "  • Paper about AI-generated or NLP-processed resumes/CVs in the context\n"
-    "    of hiring → INCLUDE under IC1;IC3 (resumes only exist for R&S)"
+    "    of hiring → INCLUDE under IC1;IC3 (resumes only exist for R&S)\n"
+    "  • Competitive coding or developer skill profile platform "
+    "(e.g. LeetCode-style, OSS activity visualizer, coding leaderboard)"
+    " → EC5, even if recruiters are mentioned as secondary users. "
+    "The PRIMARY purpose must be the hiring pipeline, not developer "
+    "self-improvement or portfolio building.\n"
+    "  • Paper about LLM-based agent teaming, multi-agent coordination, "
+    "or team composition as an AI/operations-research problem → EC5. "
+    "Distinguish from IC1: 'selecting team members for a project' in an "
+    "agent simulation is NOT the same as 'selecting candidates for a "
+    "software engineering job'.\n"
+    "  • Paper with 'recruitment' or 'hiring' only as MOTIVATION for a "
+    "tool, not as the PRIMARY CONTRIBUTION. Ask: if you remove the "
+    "recruitment framing, does the paper still make sense? If yes → EC5. "
+    "Also: if publication year is before 2015, apply EC4 regardless of "
+    "R&S relevance.\n"
+    "  • Paper titled 'What distinguishes/makes great/excellent [role]?' "
+    "or 'What skills do [role] need?' WITHOUT an abstract → "
+    "INCLUDE under IC1;IC3;IC5 if the role is a software engineering "
+    "role. These papers study hiring evaluation criteria even without "
+    "explicitly using the word 'recruitment'.\n"
+    "  • Paper with 'recruitment signals', 'job advertisements', or "
+    "'job postings' in the TITLE → INCLUDE under IC1;IC2 regardless "
+    "of whether the abstract focuses on methodology (e.g. competency "
+    "frameworks, agile management). Job ads are primary R&S data sources."
 )
 
 _SYSTEM_PROMPT_GL = (
@@ -209,7 +233,12 @@ _SYSTEM_PROMPT_GL = (
     "  • Article listing highest-paying SE jobs → EC3;EC5\n"
     "  • University course catalogue or student thesis list → EC3;EC5\n"
     "  • Time-tracking or productivity tool for developers → EC5\n"
-    "  • Job board page that failed to load (no content) → EC2\n\n"
+    "  • Job board page that failed to load (no content) → EC2\n"
+    "  • Blog post or opinion article about future trends in software "
+    "engineering, AI in coding, or what it means to be a software "
+    "engineer in the coming years → EC5, even if the author is a "
+    "well-known engineer and even if the article discusses skills or "
+    "roles. Future-of-SE content is NOT R&S research.\n\n"
     "## Positive examples — grey literature that must be INCLUDED\n"
     "  • Company security screening policy describing pre-hire background "
     "checks for IT staff → IC1;IC2;IC4\n"
@@ -218,7 +247,16 @@ _SYSTEM_PROMPT_GL = (
     "  • Industry white paper reporting survey results on how tech companies "
     "conduct technical interviews → IC1;IC3;IC5\n"
     "  • Tool vendor page describing an automated CV screening platform "
-    "for software developers → IC1;IC2;IC4\n\n"
+    "for software developers → IC1;IC2;IC4\n"
+    "  • Vacancies or open positions page from a software engineering "
+    "organisation listing roles with required skills, qualifications, "
+    "or application instructions → IC1, even if the page is short and "
+    "has no methodology. Job postings are grey literature evidence of "
+    "R&S practices. Do NOT apply EC3 to job posting pages.\n"
+    "  • Page with scraped content that is mostly cookies/navigation "
+    "boilerplate but whose TITLE clearly indicates a pre-employment "
+    "screening or security vetting policy for IT/SE roles → IC1;IC2;IC4."
+    " Apply EC2 only if there is truly zero substantive content.\n\n"
     "You MUST respond with ONLY a valid JSON object — no markdown, "
     "no commentary."
 )
@@ -482,7 +520,7 @@ class UnifiedLLMService(LLMService):
 
         abstract = (paper.abstract or "(no abstract)")[:_MAX_ABSTRACT_LENGTH]
         metadata_str = json.dumps(paper.metadata, ensure_ascii=False)
-        year_str = str(paper.publication_year) if paper.publication_year is not None else "N/A"
+        year_str = str(paper.publication_year) if paper.publication_year is not None else "Unknown"
 
         user_content = _PROMPT_HEADER.format(
             title=paper.title,

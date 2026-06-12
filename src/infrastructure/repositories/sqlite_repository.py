@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS screening_decisions (
     quality_score       REAL,
     wl_quality_score    REAL,
     full_text           TEXT,
-    pdf_url             TEXT
+    pdf_url             TEXT,
+    publication_year    INTEGER DEFAULT 0
 )
 """
 
@@ -36,7 +37,7 @@ INSERT OR REPLACE INTO screening_decisions
     (paper_id, status, confidence_score, rationale, applied_criteria_codes, is_calibration,
      gl_q1, gl_q2, gl_q3, gl_q4, quality_score,
      wl_q1, wl_q2, wl_q3, wl_q4, wl_quality_score,
-     full_text, pdf_url)
+     full_text, pdf_url, publication_year)
 VALUES
     (?, ?, ?, ?, ?,
      COALESCE((SELECT is_calibration FROM screening_decisions WHERE paper_id = ?), 0),
@@ -51,7 +52,8 @@ VALUES
      COALESCE((SELECT wl_q4 FROM screening_decisions WHERE paper_id = ?), NULL),
      COALESCE((SELECT wl_quality_score FROM screening_decisions WHERE paper_id = ?), NULL),
      COALESCE((SELECT full_text FROM screening_decisions WHERE paper_id = ?), NULL),
-     COALESCE((SELECT pdf_url FROM screening_decisions WHERE paper_id = ?), NULL))
+     COALESCE((SELECT pdf_url FROM screening_decisions WHERE paper_id = ?), NULL),
+     COALESCE((SELECT publication_year FROM screening_decisions WHERE paper_id = ?), 0))
 """
 
 _SELECT_BY_ID = """
@@ -240,6 +242,16 @@ def _migrate_title_abstract_columns(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_add_publication_year(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute(
+            "ALTER TABLE screening_decisions ADD COLUMN publication_year INTEGER DEFAULT 0"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def __init__(self, db_path: str = "screening.db") -> None:
         self._db_path = str(db_path)
@@ -259,8 +271,9 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
         _migrate_wl_qa_columns(self._conn)
         _migrate_pdf_columns(self._conn)
         _migrate_title_abstract_columns(self._conn)
+        _migrate_add_publication_year(self._conn)
 
-    def save_decision(self, decision: ScreeningDecision, title: str = "", abstract: str = "") -> None:
+    def save_decision(self, decision: ScreeningDecision, title: str = "", abstract: str = "", publication_year: int = 0) -> None:
         codes_json = json.dumps(decision.applied_criteria_codes, ensure_ascii=False)
         self._conn.execute(
             _INSERT_OR_REPLACE,
@@ -283,8 +296,14 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
                 decision.paper_id,  # wl_quality_score COALESCE
                 decision.paper_id,  # full_text COALESCE
                 decision.paper_id,  # pdf_url COALESCE
+                decision.paper_id,  # publication_year COALESCE — reuses existing year by default
             ),
         )
+        if publication_year:
+            self._conn.execute(
+                "UPDATE screening_decisions SET publication_year = ? WHERE paper_id = ?",
+                (publication_year, decision.paper_id),
+            )
         if title or abstract:
             self._conn.execute(
                 "UPDATE screening_decisions SET title = ?, abstract = ? WHERE paper_id = ?",

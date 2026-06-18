@@ -224,7 +224,7 @@ class TestWLSheet:
 
 class TestGLSheet:
     GL_EXPECTED_HEADERS = [
-        "Library", "", "#", "Title", "Abstract",
+        "Library", "", "#", "Title", "Web Content",
         "Palavra-Chaves", "CIs1", "CEs1", "Revisor 1",
         "CIs2", "CEs2", "Revisor 2", "Decision",
     ]

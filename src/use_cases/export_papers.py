@@ -78,7 +78,7 @@ GL_HEADERS = [
     "",
     "#",
     "Title",
-    "Abstract",
+    "Web Content",
     "Palavra-Chaves",
     "CIs1",
     "CEs1",
@@ -199,7 +199,6 @@ class ExportScreenedPapersUseCase:
             ws[cell_ref].comment = c
 
         for row_idx, (paper, decision) in enumerate(wl_papers, start=2):
-            ws.row_dimensions[row_idx].height = 20
             ws.cell(row=row_idx, column=1, value=_get_library(paper))
             ws.cell(row=row_idx, column=2, value=paper.id)
             ws.cell(row=row_idx, column=3, value=row_idx - 1)
@@ -262,7 +261,6 @@ class ExportScreenedPapersUseCase:
             ws[cell_ref].comment = c
 
         for row_idx, (paper, decision) in enumerate(gl_papers, start=2):
-            ws.row_dimensions[row_idx].height = 20
             ws.cell(row=row_idx, column=1, value=_get_library(paper))
             ws.cell(row=row_idx, column=2, value=paper.id)
             ws.cell(row=row_idx, column=3, value=row_idx - 1)
@@ -325,21 +323,25 @@ class ExportScreenedPapersUseCase:
         gl_path = tmp_dir / "Grey_Literature_Results.csv"
         zip_path = tmp_dir / "APOLLO_Screening_Results.zip"
 
-        HEADERS = [
+        wl_headers = [
             "Library", "", "#", "Title", "Abstract", "Palavra-Chaves",
+            "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision",
+        ]
+        gl_headers = [
+            "Library", "", "#", "Title", "Web Content", "Palavra-Chaves",
             "CIs1", "CEs1", "Revisor 1", "CIs2", "CEs2", "Revisor 2", "Decision",
         ]
 
         with open(wl_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
-            writer.writerow(HEADERS)
+            writer.writerow(wl_headers)
             for idx, row in enumerate(wl_rows, start=1):
                 row[2] = str(idx)
                 writer.writerow(row)
 
         with open(gl_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
-            writer.writerow(HEADERS)
+            writer.writerow(gl_headers)
             for idx, row in enumerate(gl_rows, start=1):
                 row[2] = str(idx)
                 writer.writerow(row)

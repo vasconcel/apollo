@@ -12,7 +12,10 @@ from src.domain.interfaces import (
     ScreeningDecisionRepository,
 )
 from src.domain.models import Criterion, Paper, ScreeningDecision
-from src.infrastructure.services.scraper import fetch_url_content
+from src.infrastructure.services.scraper import (
+    fetch_abstract_from_crossref,
+    fetch_url_content,
+)
 from src.use_cases.screen_paper import ScreenPaperUseCase
 
 if TYPE_CHECKING:
@@ -182,6 +185,16 @@ class RunScreeningPipelineUseCase:
                                         scraped_text = await fetch_url_content(paper.url)
                                         if scraped_text:
                                             paper = paper.model_copy(update={"abstract": scraped_text})
+
+                                # WL Crossref fallback: fetch missing abstracts for WL papers
+                                if not paper.abstract and paper.source_type.value == "WL":
+                                    fetched = await fetch_abstract_from_crossref(paper.title)
+                                    if fetched:
+                                        paper = paper.model_copy(update={"abstract": fetched})
+                                        logger.info(
+                                            "Crossref abstract recovered for WL paper: %s",
+                                            paper.title[:30],
+                                        )
 
                                 decision = await self._screen.execute(
                                     paper=paper,

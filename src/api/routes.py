@@ -118,9 +118,17 @@ def _get_paper_repo() -> PaperRepository:
 
 
 def _get_decision_repo() -> ScreeningDecisionRepository:
-    db_path = os.getenv("APOLLO_DB_PATH", str(_PROCESSED_DIR / "screening.db"))
-    os.makedirs(str(Path(db_path).parent), exist_ok=True)
+    db_path = os.getenv("APOLLO_DB_PATH", "data/processed/screening.db")
     return SQLiteScreeningDecisionRepository(db_path)
+
+
+def _reconcile_criteria(current_codes: list[str], new_decision: str) -> list[str]:
+    ic_codes = [c for c in current_codes if c.startswith("IC")]
+    ec_codes = [c for c in current_codes if c.startswith("EC")]
+    if new_decision == "YES":
+        return ic_codes if ic_codes else ["IC1"]
+    else:
+        return ec_codes if ec_codes else ["EC5"]
 
 
 def _get_llm_service(
@@ -569,7 +577,16 @@ async def bulk_audit_papers(body: BulkAuditBody):
     if body.verdict in ("RESET", "CLEAR"):
         decision_repo.delete_decisions(body.paper_ids)
         return {"status": "success", "count": len(body.paper_ids)}
-    decision_repo.save_bulk_audit(body.paper_ids, body.verdict)
+
+    codes_map: dict[str, list[str]] = {}
+    for pid in body.paper_ids:
+        existing = decision_repo.get_decision(pid)
+        if existing:
+            codes_map[pid] = _reconcile_criteria(existing.applied_criteria_codes, body.verdict)
+        else:
+            codes_map[pid] = ["IC1"] if body.verdict == "YES" else ["EC5"]
+
+    decision_repo.save_bulk_audit_with_codes(body.paper_ids, body.verdict, codes_map)
     return {"status": "success", "count": len(body.paper_ids)}
 
 
@@ -754,7 +771,8 @@ async def audit_paper(paper_id: str, body: AuditVerdict):
     if existing is None:
         raise HTTPException(status_code=404, detail="Decision not found for this paper.")
 
-    decision_repo.save_audit(paper_id, body.verdict)
+    reconciled = _reconcile_criteria(existing.applied_criteria_codes, body.verdict)
+    decision_repo.save_audit_with_codes(paper_id, body.verdict, reconciled)
     return {"status": "saved", "paper_id": paper_id}
 
 

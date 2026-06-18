@@ -74,6 +74,14 @@ SET human_decision = ?, is_audited = 1
 WHERE paper_id = ?
 """
 
+_UPDATE_AUDIT_WITH_CODES = """
+UPDATE screening_decisions
+SET human_decision = ?,
+    is_audited = 1,
+    applied_criteria_codes = ?
+WHERE paper_id = ?
+"""
+
 _UPDATE_GL_QA = """
 UPDATE screening_decisions
 SET gl_q1 = ?, gl_q2 = ?, gl_q3 = ?, gl_q4 = ?, quality_score = ?
@@ -554,6 +562,16 @@ class SQLiteScreeningDecisionRepository(ScreeningDecisionRepository):
     def save_bulk_audit(self, paper_ids: list[str], human_decision: str) -> None:
         params = [(human_decision, pid) for pid in paper_ids]
         self._conn.executemany(_UPDATE_AUDIT, params)
+        self._conn.commit()
+
+    def save_audit_with_codes(self, paper_id: str, human_decision: str, reconciled_codes: list[str]) -> None:
+        codes_json = json.dumps(reconciled_codes)
+        self._conn.execute(_UPDATE_AUDIT_WITH_CODES, (human_decision, codes_json, paper_id))
+        self._conn.commit()
+
+    def save_bulk_audit_with_codes(self, paper_ids: list[str], human_decision: str, codes_map: dict[str, list[str]]) -> None:
+        params = [(human_decision, json.dumps(codes_map[pid]), pid) for pid in paper_ids]
+        self._conn.executemany(_UPDATE_AUDIT_WITH_CODES, params)
         self._conn.commit()
 
     def save_quality_assessment(self, paper_id: str, q1: float, q2: float, q3: float, q4: float, source_type: str = "GL") -> float:

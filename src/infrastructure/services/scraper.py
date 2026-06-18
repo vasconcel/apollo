@@ -1,4 +1,6 @@
+import difflib
 import logging
+import urllib.parse
 from io import BytesIO
 from typing import Optional
 
@@ -70,3 +72,41 @@ async def fetch_pdf_metadata_by_doi(doi: str) -> Optional[dict]:
         logger.exception("PDF extraction failed for: %s", pdf_url)
 
     return {"full_text": full_text or "", "pdf_url": pdf_url}
+
+
+async def fetch_abstract_from_crossref(title: str) -> Optional[str]:
+    encoded = urllib.parse.quote(title)
+    url = f"https://api.crossref.org/works?query.bibliographic={encoded}&select=title,abstract&rows=3"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                url,
+                headers={"User-Agent": "APOLLO-SLR-Engine/1.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        logger.exception("Crossref API request failed for title: %s", title[:50])
+        return None
+
+    items = data.get("message", {}).get("items", [])
+    requested = title.lower().strip()
+
+    for item in items:
+        raw_titles = item.get("title", [])
+        if not raw_titles:
+            continue
+        crossref_title = raw_titles[0].lower().strip()
+        similarity = difflib.SequenceMatcher(None, requested, crossref_title).ratio()
+        if similarity < 0.90:
+            continue
+        abstract = item.get("abstract")
+        if not abstract:
+            continue
+        cleaned = BeautifulSoup(abstract, "html.parser").get_text(separator="\n").strip()
+        if cleaned:
+            logger.info("Crossref abstract recovered for title: %s", title[:50])
+            return f"[Abstract automatically retrieved via Crossref API]\n\n{cleaned}"
+
+    logger.debug("No matching Crossref abstract found for title: %s", title[:50])
+    return None

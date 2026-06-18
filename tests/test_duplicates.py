@@ -6,6 +6,15 @@ from pytest_mock import MockerFixture
 from src.domain.enums import CriterionType, ScreeningStatus, SourceType
 from src.domain.models import Criterion, Paper, ScreeningDecision
 
+
+@pytest.fixture(autouse=True)
+def _mock_crossref(mocker: MockerFixture):
+    mocker.patch(
+        "src.use_cases.run_screening_pipeline.fetch_abstract_from_crossref",
+        return_value=None,
+    )
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
